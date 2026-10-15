@@ -37,7 +37,8 @@ import type { ItemDetailView } from '../world/defs.js';import {
 } from './formula.js';
 import type { AttrBreakdown, DerivedCombat, InnateStats } from './formula.js';
 import { applyPropMap, createPropHolder, loadProps, snapshotProps } from './props.js';
-import type { LoadReport, PropHolder, PropSnapshot, RawPropMap } from './props.js';
+import type { LoadReport } from './load-report.js';
+import type { PropHolder, PropSnapshot, RawPropMap } from './props.js';
 import { SkillBook, emptySkillRegistry } from './skill.js';
 import type { SkillRegistry } from './skill.js';
 import { VIEW_OTHER, VIEW_SELF, VIEW_TARGET, renderViewText } from './view-text.js';

@@ -1227,6 +1227,41 @@ const ALL_MUTATIONS = [
         t.replace('    return this.entries().map((s) => ({ ...s }));', '    return this.entries();'),
       ),
   },
+  {
+    kind: 'test',
+    file: 'tests/engine-skill.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.11 读档准入：非武功不得装配（E3）',
+    name: '摘掉 `load()` 的 `isEnablable` 准入 —— 改过的存档又能把基本技能装进武功槽',
+    // ★ 26 册 §40（E3）：`load()` 就是**绕过 `enable()`** 的那条路，所以准入必须在
+    //   **数据入口**上再判一次（`load-report.ts` 的分级契约 ②）。
+    // ★ 锚点必须带上 `rejected.push` 那一行：只写 `if (!tpl.isEnablable) {`
+    //   会先命中 `enable()` 里的**同名**那一行 —— 那是错的落点（改了不报错，
+    //   但测试不会红 ⇒ 元闸门会判这条样本本身失败）。
+    apply: () =>
+      patchFile('server/engine/skill.ts', (t) =>
+        t.replace(
+          '  if (!tpl.isEnablable) {\n    rejected.push({',
+          '  if (false) {\n    rejected.push({',
+        ),
+      ),
+  },
+  {
+    kind: 'test',
+    file: 'tests/engine-skill.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.12 读档准入：槽必须在 can_enables 内（E3）',
+    name: '摘掉 `load()` 的 `can_enables` 准入 —— 改过的存档能把剑法启用到刀法槽',
+    apply: () =>
+      patchFile('server/engine/skill.ts', (t) =>
+        t.replace(
+          '  if (!tpl.canEnables.includes(raw)) {\n    rejected.push({',
+          '  if (false) {\n    rejected.push({',
+        ),
+      ),
+  },
 
   // ---- A 批（26 册 §28）：口径对账六项 —— 每条"我修好了"都必须能被改坏 ----
   // ★ 这六项里 FG-15 / FG-17 是**撤回不实陈述**（注释层面的修法），没有可执行的

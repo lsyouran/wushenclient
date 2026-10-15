@@ -21,6 +21,9 @@
  *      与 `props.ts` 里那次实测是同一类病。这里抛 `TempValueError`。
  */
 
+import { describeValue, isPlainRecord } from './load-report.js';
+import type { LoadReport, RejectedEntry } from './load-report.js';
+
 export const NEVER_EXPIRES = 0;
 
 export class TempValueError extends Error {
@@ -31,14 +34,6 @@ export interface TempRecord {
   readonly v: unknown;
   /** 过期时刻（ms 时间戳）；`NEVER_EXPIRES` = 永不过期 */
   readonly e: number;
-}
-
-function describeValue(v: unknown): string {
-  if (typeof v === 'string') return `字符串 ${JSON.stringify(v)}`;
-  if (typeof v === 'number') return Number.isNaN(v) ? 'NaN' : String(v);
-  if (v === null) return 'null';
-  if (v === undefined) return 'undefined';
-  return typeof v;
 }
 
 function assertTtl(ttlMs: number, op: string, name: string): void {
@@ -173,18 +168,34 @@ export class TempStore {
 
   /**
    * 从**不可信**数据装载（存档）。语义是**合并**，不先清空。
-   * 与 `props.ts` 的 `loadProps` 同一取向：宁可不装一个键，也不让脏数据进来。
+   * 与 `props.ts` 的 `loadProps` **同一契约**（`load-report.ts`）：分级 ——
+   * 容器种类不对（数组 / `null` / 标量）⇒ **抛**；条目级异常 ⇒ **丢该条 + 记账**。
+   *
+   * ★ 本容器**刻意不做键白名单**：`temp` 就是自由键值袋（BUFF / 冷却 / 任务进度），
+   *   不存在"合法的键"这一说。于是这里能判的只有两件事：
+   *     ① 键名不能是**空串**——空串键读的时候谁也取不到，必是脏数据；
+   *     ② 数值必须**有限**——`NaN` / `Infinity` 进表会污染之后的 `addTemp`
+   *        与一切算术（与 `addTemp` 的抛错取向同源）。
+   *   值的类型仍不限制：这正是统一 `{v,e}` 包装换来的 —— 判语义只看 `e`，不看值长什么样。
    */
-  public loadTemp(raw: unknown, nowMs: number = Date.now()): number {
-    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  public loadTemp(raw: unknown, nowMs: number = Date.now()): LoadReport {
+    if (!isPlainRecord(raw)) {
       throw new TempValueError(`loadTemp 需要对象，收到 ${describeValue(raw)}`);
     }
+    const rejected: RejectedEntry[] = [];
     let loaded = 0;
     for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-      if (name === '') continue;
+      if (name === '') {
+        rejected.push({ key: '(空键名)', reason: '键名不能为空串（读了也取不到）' });
+        continue;
+      }
+      if (typeof value === 'number' && !Number.isFinite(value)) {
+        rejected.push({ key: name, reason: `数值必须是有限数，收到 ${describeValue(value)}` });
+        continue;
+      }
       this.setTemp(name, value, NEVER_EXPIRES, nowMs);
       loaded += 1;
     }
-    return loaded;
+    return { loaded, rejected };
   }
 }

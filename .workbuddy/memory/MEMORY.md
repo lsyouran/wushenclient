@@ -83,7 +83,7 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
 
 纪律：发现问题→**更新原册不另起**；索引只放链接；状态写标题行首句；每条结论带"怎么证明"；标记已办**保留原文**再标 ✅。
 项目册 `00/24`–`29`（`25` 暂缓）；wushen 册 `docs/wushen/00`–`23`。册号并集 `00`–`29`。
-`24` 命名与标识符规范·§5 闸门表·§5.3 FG-1…FG-23 全修 ｜ `25` 安全与支付（**暂缓**，G10/G11 同此）｜ `26` **审查与实现批次唯一权威源** ｜ `27` 技能系统设计 ｜ `28` 存档与持久化（T12 未实现）｜ `29` **属性与派生数值设计**（改公式/数值/容量前必读）。
+`24` 命名与标识符规范·§5 闸门表·§5.3 FG-1…FG-23 全修 ｜ `25` 安全与支付（**暂缓**，G10/G11 同此）｜ `26` **审查与实现批次唯一权威源** ｜ `27` 技能系统设计 ｜ `28` 存档与持久化（T12 未实现；**§28.5.5 读档契约·分级**）｜ `29` **属性与派生数值设计**（改公式/数值/容量前必读）。
 
 - ★ 「NN 册」两套并存 ⇒ **引用必须带册号**。G15 守：注释里 `NN 册` 必须 ∈ 磁盘真实册号；只认"只出现在注释里"的引用；不扫 `docs/`、不扫自己。⇒ 通则：**能在结构上让开就别发明行内豁免标记**（G12 的 `// g12-allow` 是反例）。★★ 窄口：G15 只判册号不判 `§节号` ⇒ 8 处 `24 册 §5.3` 写成 `26 册 §5.3` 全绿放行。**闸门全绿 ≠ 引用都对**。
 - ★★ **引用 wushen 一律带目录**（105 个 basename 多副本，`os/` 与 `world/extends/` 双层）。
@@ -97,6 +97,8 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
 - ★ **播报**：房间内 `sendRoom`（三视角、`warn` 帧）；跨房间 `sendChannel`（`CHANNEL_SCOPE`、`msg` 帧）。★★ wushen 的 `msg.ch` **只有 7 种** `chat/tm/fam/pty/es/rumor/sys` ⇒ `CHANNELS` 不该有 `say`/`emote`。★ 输入里 `$X` 会被占位符吃掉。
 - ★ **背压两档各管一段**：① `MAX_OUTBOUND_QUEUE`(256)=hub 队列条数，恒≤1，**非运行时判据**；② `MAX_BUFFERED_BYTES`(1MiB)=`socket.bufferedAmount` ⇒ **运行时够得着的**；超限 ⇒ `close()+forget()+false`，**且不调 `onReject`**（无限递归）。★ `session.#send` 必须看返回值。
 - ★ **网络管线顺序**：量大小→限流→分诊→解析+**zod**（限流必须在解析前）；只有 `ws-server.ts` 碰 `ws`。
+- ★★ **读档契约 = 分级（E3 已办，26 册 §40 / 28 册 §28.5.5）**：单源 `server/engine/load-report.ts`（`LoadReport`/`RejectedEntry`/`isPlainRecord`/`describeValue`），props/temp/skill 三处共用。**① 结构性坏（容器种类不对）⇒ 抛**（`typeof [] === 'object'` ⇒ 空数组会"成功装 0 条"）；**② 条目级坏 ⇒ 丢该条 + 记账**（整包抛会让**版本回滚后全体角色砖档**）；**③ 调用方义务：`rejected` 非空即读档失败**（T12 落实，否则 ② 退化成静默放行 = wushen 形态）。★★ **`SkillBook.load()` 是绕过 `learn()`/`enable()` 的那条路** ⇒ 准入必须写在**数据入口**上；原先一道不判 ⇒ 改档可把**基本技能装进武功槽**。★★ 教训：**新判据要问"会不会被另一条判据满足"** —— 两条重叠时"摘掉一条仍绿"是必然（我第一版锚点就假绿，见 §40.4）。
+- ★ **`load*` 仍是"合并"语义**（不先清空）；"整份替换"由调用方决定。
 - ★★ **P0 批次已修（26 册 §30）**：① 入站业务链路 try/catch + `onInternalError` + `installProcessErrorGuards`；② `--host` + `WS_PATH='/ws'` + `isSameOriginRequest`；③ `isRoleName` 单源 + `session.#byRoleId` 在线唯一。★ 仍未做：**按 IP 限连接数**（N2 后半）；**T12 未做** ⇒ 存档/验签仍缺。
 
 ## 前端（`src/`，26 册 §15–§21；细则 `CONVENTIONS-web-ui.md`）
@@ -107,6 +109,6 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
 
 ## 未做
 
-**已办**：T1/T2/T15–T24（T23④ 未做）；**2026-10-14 P0 批次**（N1/N2/N3/E2，§30）；**文档订正批次**（D1/D4/D6/D7/D9+F11，§31）；**数值裁定批次**（E1 `gj` 照抄 · E8 容量 50/10 · 新建 29 册，§32）；**命名空间隔离批次**（`evasion`/`deflect` + G3.G，§34）。
+**已办**：T1/T2/T15–T24（T23④ 未做）；**2026-10-14 P0 批次**（N1/N2/N3/E2，§30）；**文档订正批次**（D1/D4/D6/D7/D9+F11，§31）；**数值裁定批次**（E1 `gj` 照抄 · E8 容量 50/10 · 新建 29 册，§32）；**命名空间隔离批次**（`evasion`/`deflect` + G3.G，§34）；**有效属性归一**（E7，§37）；**版本控制引入**（§38）；**属性三档读取口 + `score` 指令**（§39）；**读档准入校验**（**E3**，§40）。
 **仍未做**：账号+token 验签+角色存档（**T12**，设计定稿 28 册：登出写+每小时全量+脏标记单事务+显式 `cache_size`+备份轮转）；**B 批** `get/drop/give/use`+`Item` 存 `def`（「打听」`give pub/xiaoer 1000 money` 现哑火）；战斗（`on_use`/`on_kill` 无消费者）；装备/服用；技能第三档 addin；知识·隐藏技能；门派薄壳；**D 批**：面板子系统 100% 不可达（唯一生产性 `openPanel` 是 `social.ts` emote/dialog，只有声明无生产者）；G9 变更-覆盖对账闸门；真浏览器 e2e 入库；T22 第 4 条；`m/l/f/o` 惰性字段；图形化地图/选角 UI/聊天与武学弹窗；G2.3 变异样本（T13）；README（**00 册从未链接 `newmud/README.md`**）。
-★ **E9 待专项分析**（`recount` 只钳 hp 不钳 mp；wushen `world/extends/char/user.js:6` **也只钳 hp** ⇒ 属原作空档；清单见 29 册 §29.6）。★ 同族 P1：E5（`setBusy` 累加 vs 赋值）/E6（busy 永不过期）/E10·E11（`loadProps` 无范围闸门）。
+★ **E9 待专项分析**（`recount` 只钳 hp 不钳 mp；wushen `world/extends/char/user.js:6` **也只钳 hp** ⇒ 属原作空档；清单见 29 册 §29.6）。★ **E3 已办（§40）**；同族 P1 仍有：E5（`setBusy` 累加 vs 赋值）/E6（busy 永不过期）/E10·E11（`loadProps` 只判"有限数值"，**无范围闸门**）。★ **E4 活体判据待拍板**（分析 `_35D-待拍板分析-2026-10-15.md`）。

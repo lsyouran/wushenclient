@@ -786,7 +786,7 @@ describe('engine/skill · 存档边界（snapshot / load）', () => {
     const b = makeNpc();
     const report = b.skills.load(snap);
     expect(report.loaded).toBe(1);
-    expect(report.skipped).toEqual([]);
+    expect(report.rejected).toEqual([]);
     expect(b.skills.levelOf('wd/both')).toBe(15);
     expect(b.skills.enabledOf('sword')).toBe('wd/both');
     expect(snapshotProps(b)).toEqual(snapshotProps(a));
@@ -810,18 +810,124 @@ describe('engine/skill · 存档边界（snapshot / load）', () => {
     ];
     const report = npc.skills.load(raw);
     expect(report.loaded).toBe(1);
-    expect(report.skipped).toEqual(['ghost/skill']);
+    expect(report.rejected).toEqual([{ key: 'ghost/skill', reason: '技能未登记' }]);
     expect(npc.skills.has('ghost/skill')).toBe(false);
   });
 
   it('load 时非法槽名被降级成"未装配"（脏存档不炸整本簿）', () => {
     const npc = makeNpc();
-    npc.skills.load([
+    const report = npc.skills.load([
       { id: 'wd/a', level: 10, exp: 0, enabled: 'nope' as unknown as EnableSlot },
     ]);
     expect(npc.skills.has('wd/a')).toBe(true);
     expect(npc.skills.enabledOf('nope' as unknown as EnableSlot)).toBeUndefined();
     expect(coreOf(npc)).toEqual({}); // 没装配 → 只有 ① 档（这里没有）
+    expect(report.rejected.map((r) => r.key)).toEqual(['wd/a.enabled']);
+  });
+
+  it('★★ E3：改档把**基本技能**写成"启用为 sword" ⇒ 拒绝该槽（改存档能拿到的东西）', () => {
+    // 修复前：`load` 只做 `isEnableSlot` 兜底，装配两道准入完全没查。
+    // `base/force` 是基本技能（type=BASE、slot='force'、can_enables 未声明），
+    // 却被写成"启用为 sword" ⇒ 旧实现照单全收，把它挂上 sword 槽。
+    // 这条正是 26 册 §35 记的"改过的存档可把基本技能装进武功槽"。
+    const npc = makeNpc();
+    const report = npc.skills.load([
+      { id: 'base/force', level: 10, exp: 0, enabled: 'sword' as EnableSlot },
+    ]);
+    expect(npc.skills.has('base/force')).toBe(true); // 技能本身留下（非法的是"装配"）
+    expect(npc.skills.enabledOf('sword')).toBeUndefined(); // 但槽没被占
+    expect(npc.skills.activeTemplate('sword')).toBeUndefined();
+    expect(npc.skills.entryOf('base/force')?.enabled).toBeNull();
+    expect(report.rejected.map((r) => r.key)).toEqual(['base/force.enabled']);
+  });
+
+  it('★★ E3：`isEnablable` 那道必须**单独**能拦（与 `can_enables` 那条不重叠）', () => {
+    // ★ 为什么非得造一个"非 SKILL 却声明了 can_enables"的技能：
+    //   普通基本技能的 `can_enables` 是**空的** ⇒ `can_enables` 那条会替 `isEnablable`
+    //   把它拦下，两条判据**重叠** ⇒ 摘掉 `isEnablable` 测试照样绿（假绿）。
+    //   实测过：摘掉这一道时，上面那条测试报的是
+    //   `基本内功 不能启用为 sword（can_enables = []）` —— 证明它压根没走到这一道。
+    //   这里让两条判据**只差一层**：槽在 can_enables 里，但 type 不是 SKILL。
+    const reg = new SkillRegistry([
+      {
+        id: 'probe/base',
+        def: { name: '假基本技能', type: SKILL_TYPES.BASE, slot: 'force', can_enables: ['sword'] },
+      },
+    ]);
+    const npc = new Npc({
+      oid: 'cccccccccc',
+      path: asWorldId('zz/npc5', 'engine-skill.test:e3-enablable'),
+      name: 'T',
+      def: { name: 'T', desc: 'd' },
+      skillRegistry: reg,
+    });
+    const report = npc.skills.load([
+      { id: 'probe/base', level: 10, exp: 0, enabled: 'sword' as EnableSlot },
+    ]);
+    expect(npc.skills.enabledOf('sword')).toBeUndefined();
+    expect(npc.skills.has('probe/base')).toBe(true);
+    expect(report.rejected.map((r) => r.key)).toEqual(['probe/base.enabled']);
+    // ★ 只有 isEnablable 那道会说"不可装配" ⇒ 这条断言把该分支**单独**钉住
+    expect(report.rejected[0]?.reason).toContain('不可装配');
+  });
+
+  it('★★ E3：装到 `can_enables` 之外的槽 ⇒ 读档时拒绝该槽（与 `enable()` 同判据）', () => {
+    // 与「挂到 can_enables 之外的槽 → 抛错」那条**用户动作**测试是同一判据：
+    // 校验必须写在**数据入口**上，因为 `load` 就是绕过 `enable()` 的那条路。
+    const npc = makeNpc();
+    const report = npc.skills.load([
+      { id: 'wd/a', level: 10, exp: 0, enabled: 'blade' as EnableSlot },
+    ]);
+    expect(npc.skills.enabledOf('blade')).toBeUndefined();
+    expect(npc.skills.entryOf('wd/a')?.enabled).toBeNull();
+    expect(report.rejected[0]?.reason).toContain('can_enables');
+
+    // 对照：同一个技能装到**合法**槽上照常生效
+    // ⇒ 证明上面拒掉的是"越权"，不是"装配"这件事本身。
+    const ok = makeNpc();
+    expect(ok.skills.load([{ id: 'wd/a', level: 10, exp: 0, enabled: 'sword' }]).rejected).toEqual(
+      [],
+    );
+    expect(ok.skills.enabledOf('sword')).toBe('wd/a');
+  });
+
+  it('★ E3：等级越界被归一 + 记账；经验为负被记 0 + 记账', () => {
+    const npc = makeNpc();
+    const report = npc.skills.load([{ id: 'wd/a', level: 9_999, exp: -5, enabled: null }]);
+    expect(npc.skills.levelOf('wd/a')).toBe(REG.getOrThrow('wd/a').maxLevel);
+    expect(npc.skills.entryOf('wd/a')?.exp).toBe(0);
+    expect(report.loaded).toBe(1); // 条目仍然装进去了
+    expect(report.rejected.map((r) => r.key)).toEqual(['wd/a.level', 'wd/a.exp']);
+  });
+
+  it('★ E3：入参不是数组 ⇒ 抛（"整包根本不是存档"，不是"某一条脏"）', () => {
+    for (const bad of [null, undefined, 42, 'x', { 0: 'wd/a' }]) {
+      const npc = makeNpc();
+      expect(() => npc.skills.load(bad), String(bad)).toThrow(SkillError);
+      // 抛之前不许留半成品：簿仍是可用的空簿
+      expect(npc.skills.entries()).toEqual([]);
+    }
+  });
+
+  it('★ E3：记录不是对象 / 缺 id ⇒ 丢该条并记账，其余照读', () => {
+    const npc = makeNpc();
+    const report = npc.skills.load([
+      null,
+      { level: 10, exp: 0, enabled: null }, // 缺 id
+      { id: 42, level: 10, exp: 0, enabled: null }, // id 不是字符串
+      { id: 'wd/a', level: 10, exp: 0, enabled: null },
+    ]);
+    expect(report.loaded).toBe(1);
+    expect(npc.skills.has('wd/a')).toBe(true);
+    expect(report.rejected.map((r) => r.key)).toEqual(['#0', '#1.id', '#2.id']);
+  });
+
+  it('★ E3：干净存档 `rejected` 恒为空 —— 契约 ③（"报告非空即读档失败"）的绿色基线', () => {
+    expect(makeNpc().skills.load([]).rejected).toEqual([]);
+    const a = makeNpc();
+    a.skills.learn('wd/both', 15);
+    a.skills.enable('sword', 'wd/both');
+    expect(makeNpc().skills.load(a.skills.snapshot()).rejected).toEqual([]);
   });
 
   it('snapshot 是**副本**：改它不会动到簿本身', () => {

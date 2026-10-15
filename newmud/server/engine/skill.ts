@@ -32,6 +32,8 @@ import {
 import { GENDER_LABELS, propLabel } from '@shared/constants.js';
 import type { EnableSlot, ExtProp, PropKey, SkillType } from '@shared/constants.js';
 import { COMBAT_FORMULA, isAttrKey } from './formula.js';
+import { describeValue, isPlainRecord } from './load-report.js';
+import type { LoadReport, RejectedEntry } from './load-report.js';
 import {
   addExtProp,
   addProp,
@@ -649,36 +651,68 @@ export class SkillBook {
   }
 
   /**
-   * 从存档恢复。**会先把当前账减掉**，因此即便在"已算过属性"的角色上调用也安全。
-   * 未知技能 id 的记录被丢弃（并计入返回值），不让一个坏 id 污染整本簿。
+   * 从存档恢复（**不可信数据**，存档 / 协议 / 热更）。**会先把当前账减掉**，
+   * 因此即便在"已算过属性"的角色上调用也安全。
+   *
+   * ★ **分级**（E3 裁定，26 册 §40；契约见 `load-report.ts`）：
+   *   ① 入参**不是数组** ⇒ 抛（形状不对，不是"某一条脏"）；
+   *   ② 逐条校验，不合法的那条**丢弃 + 记账**，不让一条坏记录污染整本簿。
+   *
+   * ★★ **为什么这里必须有校验**（原先一道都**没有** —— 这就是 E3 的真漏洞）：
+   *   `enable()` 有三道准入（槽名合法 / `type === SKILL` 才可装配 / 槽在 `can_enables`
+   *   里），而 `load()` 此前只做 `isEnableSlot` 兜底、把不合法一律降级成 `null`，
+   *   **`isEnablable` 与 `can_enables` 两道完全不查** ⇒ 一个手改的存档能把
+   *   **基本技能**启用到武功槽，或把内功启用为剑法，绕过所有用户侧校验。
+   *   ★ 关键认识：`load` **就是绕过 `learn()` / `enable()` 的那条路**，
+   *     所以"校验写在 enable 里"并不覆盖它 —— 校验必须与数据入口同处。
+   *
+   * ★ 通过校验的条目与 `enable()` 走**同一个** `#attachSlot()`（单点记账），
+   *   于是"两条不同技能抢同一槽"在读档路径上同样成立（见 `tests/engine-audit` A3）。
    */
-  public load(raw: readonly SkillState[]): { loaded: number; skipped: readonly string[] } {
+  public load(raw: unknown): LoadReport {
+    if (!Array.isArray(raw)) {
+      throw new SkillError(`load 需要数组（SkillState[]），收到 ${describeValue(raw)}`);
+    }
     this.#releaseLedger();
     this.#states.clear();
     this.#enabledBySlot.clear();
-    const skipped: string[] = [];
-    for (const s of raw) {
-      const tpl = this.#registry.get(s.id);
-      if (tpl === undefined) {
-        skipped.push(s.id);
+
+    const rejected: RejectedEntry[] = [];
+    for (const [index, entry] of raw.entries()) {
+      if (!isPlainRecord(entry)) {
+        rejected.push({ key: `#${index}`, reason: `记录必须是对象，收到 ${describeValue(entry)}` });
         continue;
       }
-      const enabled = s.enabled !== null && isEnableSlot(s.enabled) ? s.enabled : null;
+      const rec = entry as Record<string, unknown>;
+      const id = rec['id'];
+      if (typeof id !== 'string' || id === '') {
+        rejected.push({
+          key: `#${index}.id`,
+          reason: `技能 id 必须是非空字符串，收到 ${describeValue(id)}`,
+        });
+        continue;
+      }
+
+      const tpl = this.#registry.get(id);
+      if (tpl === undefined) {
+        rejected.push({ key: id, reason: '技能未登记' });
+        continue;
+      }
+
+      const level = readLoadedLevel(id, tpl, rec['level'], rejected);
+      const exp = readLoadedExp(id, rec['exp'], rejected);
+      const enabled = readLoadedEnabled(id, tpl, rec['enabled'], rejected);
+
       // ★ 往 `#attachSlot()` 收口（2026-10-13 体检 E2）：`load` / `loadFromDef` / `enable`
       //   三处此前各写一遍"槽占用变更"，其中 `loadFromDef` 那一份漏了"两条不同技能
       //   抢同一槽"。现在这条规则只有一个实现，三处不可能再分家。
       //   触发条件见 `tests/engine-audit.test.ts` 的 A3 与 `tests/engine-skill.test.ts`
       //   的「两条**不同**技能抢同一槽」。
-      if (enabled !== null) this.#attachSlot(enabled, s.id);
-      this.#states.set(s.id, {
-        id: s.id,
-        level: clampLevel(s.level, tpl),
-        exp: Number.isFinite(s.exp) && s.exp > 0 ? s.exp : 0,
-        enabled,
-      });
+      if (enabled !== null) this.#attachSlot(enabled, id);
+      this.#states.set(id, { id, level, exp, enabled });
     }
     this.recompute();
-    return { loaded: this.#states.size, skipped };
+    return { loaded: this.#states.size, rejected };
   }
 
   // ── 内部 ──────────────────────────────────────────────────────────────────
@@ -853,6 +887,89 @@ export class SkillBook {
 function clampLevel(level: number, tpl: SkillTemplate): number {
   if (!Number.isFinite(level)) throw new SkillError(`技能等级需要有限数值，收到 ${String(level)}`);
   return Math.max(0, Math.min(Math.trunc(level), tpl.maxLevel));
+}
+
+// ---------------------------------------------------------------------------
+// 读档时的逐字段校验（E3，26 册 §40）
+// ---------------------------------------------------------------------------
+// ★ 三个函数都是"**只在 load 路径上**的宽松版"：`learn()` 的对应逻辑（`clampLevel`
+//   等）遇到非法值直接**抛** —— 那是用户动作，抛是对的。读档不一样：一条脏数据
+//   不该让整份存档崩掉（见 `load-report.ts` 的分级契约），所以这里一律
+//   "取最保守的值 + 记一条 rejected"，由调用方按 ③ 决定怎么处理。
+
+/** 读 `level`：非有限数值 ⇒ 记 0；越界/小数 ⇒ 用 `clampLevel()` 归一（**同一个实现**） */
+function readLoadedLevel(
+  id: string,
+  tpl: SkillTemplate,
+  raw: unknown,
+  rejected: RejectedEntry[],
+): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    rejected.push({ key: `${id}.level`, reason: `等级必须是有限数值，收到 ${describeValue(raw)}` });
+    return 0;
+  }
+  const clamped = clampLevel(raw, tpl);
+  if (clamped !== raw) {
+    rejected.push({ key: `${id}.level`, reason: `等级已归一（${raw} → ${clamped}）` });
+  }
+  return clamped;
+}
+
+/** 读 `exp`：非有限或负数 ⇒ 记 0 并记账（0 本身合法，不记账） */
+function readLoadedExp(id: string, raw: unknown, rejected: RejectedEntry[]): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    rejected.push({
+      key: `${id}.exp`,
+      reason: `经验必须是非负有限数值，收到 ${describeValue(raw)}`,
+    });
+    return 0;
+  }
+  return raw;
+}
+
+/**
+ * 读 `enabled` —— **E3 的要害**。与 `enable()` 同判据，三道：
+ *   ① 是合法槽名；② `type === SKILL`（只有武功可装配）；③ 槽在 `can_enables` 里。
+ * 任一道不过 ⇒ **丢弃这个槽**（技能仍保留、`enabled = null`）+ 记账。
+ *
+ * ★ 为什么"丢槽"而不是"丢掉整个技能"，也不是"整包抛"：
+ *   非法的是**装配**这件事，技能本身可能是真学会的。丢槽 ⇒ 篡改者拿不到任何东西
+ *   （槽没被占、属性账也没它），而角色不会因为一行脏数据就失忆（可逆、可补）。
+ *   ★ 少装的一个槽必定进 `rejected`，所以**漏不掉** —— 这正是分级契约 ③ 的作用。
+ *
+ * ★ `null` / `undefined` 一律当"未装配"、**不记账**：与 `loadProps()` 对
+ *   "字段缺失 = 该字段没有内容"的取向一致，而且缺 `enabled` 取的是**最保守**的
+ *   那个值（没启用 ⇒ 无任何装配收益），不构成任何越权路径。
+ */
+function readLoadedEnabled(
+  id: string,
+  tpl: SkillTemplate,
+  raw: unknown,
+  rejected: RejectedEntry[],
+): EnableSlot | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string' || !isEnableSlot(raw)) {
+    rejected.push({
+      key: `${id}.enabled`,
+      reason: `非法装配槽 ${describeValue(raw)}，已降级为未装配`,
+    });
+    return null;
+  }
+  if (!tpl.isEnablable) {
+    rejected.push({
+      key: `${id}.enabled`,
+      reason: `${tpl.name}（type=${tpl.type}）不可装配（只有武功可以），已降级为未装配`,
+    });
+    return null;
+  }
+  if (!tpl.canEnables.includes(raw)) {
+    rejected.push({
+      key: `${id}.enabled`,
+      reason: `${tpl.name} 不能启用为 ${raw}（can_enables = [${tpl.canEnables.join(', ')}]），已降级为未装配`,
+    });
+    return null;
+  }
+  return raw;
 }
 
 function mergeInto(

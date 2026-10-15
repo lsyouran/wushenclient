@@ -24,6 +24,9 @@
  *    未登记的键**记账到 `rejected` 而不写进表**。wushen 的 121 vs 70
  *    （使用了 121 个键、只定义 70 个）就是缺了这一层：写进去也没人拦，
  *    于是错键一路静默到运行时。
+ *    ★ **分级口径（结构性抛 / 条目级丢+记账 / 调用方"报告非空即失败"）是三处共用的契约**，
+ *      单源在 `server/engine/load-report.ts`（temp / skill 同此），理由与后果见该文件头注释
+ *      与 28 册 §28.5.5。
  *
  * ⚠️ 除本文件外，任何地方都不得直接访问 `.props` / `.extProps`
  *    （由 G3.E 闸门扫描；本文件是唯一豁免，因为访问器就实现在这里）。
@@ -31,6 +34,8 @@
 
 import { isExtProp, isPropKey } from '@shared/constants.js';
 import type { ExtProp, PropKey } from '@shared/constants.js';
+import { describeValue, isPlainRecord } from './load-report.js';
+import type { LoadReport, RejectedEntry } from './load-report.js';
 
 // ---------------------------------------------------------------------------
 // 容器
@@ -60,16 +65,9 @@ export function createPropHolder(): PropHolder {
   return { props: new Map(), extProps: new Map() };
 }
 
-function describeValue(v: unknown): string {
-  if (typeof v === 'string') return `字符串 ${JSON.stringify(v)}`;
-  if (typeof v === 'number') return Number.isNaN(v) ? 'NaN' : String(v);
-  if (v === null) return 'null';
-  if (v === undefined) return 'undefined';
-  // ★ 数组要先判：`typeof [] === 'object'`，不判的话报错信息会写成"收到 object"，
-  //   读的人根本看不出自己给的是一个数组（26 册 §25）。
-  if (Array.isArray(v)) return '数组';
-  return typeof v;
-}
+// `describeValue` 与「是不是普通对象」的判定现在住在 `load-report.ts`
+// —— 那是「从不可信数据装载」的统一契约，props / temp / skill 三处共用一份
+// （原先 props 与 temp 各有一份，且**行为已经不同**：temp 那份漏了数组分支）。
 
 function assertFiniteNumber(value: unknown, op: string, key: string): void {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -226,16 +224,6 @@ export function snapshotProps(holder: PropHolder): PropSnapshot {
   };
 }
 
-export interface RejectedProp {
-  readonly key: string;
-  readonly reason: string;
-}
-
-export interface LoadReport {
-  readonly loaded: number;
-  readonly rejected: readonly RejectedProp[];
-}
-
 const SNAPSHOT_FIELDS = new Set(['prop', 'ext']);
 
 /**
@@ -250,13 +238,18 @@ const SNAPSHOT_FIELDS = new Set(['prop', 'ext']);
  * ★ **数组不是快照**（2026-10-13 补，26 册 §25）：`typeof [] === 'object'`，
  *   只用 `typeof` 判会放行它，而 `Object.entries([])` 是空的 —— 于是一个空数组
  *   会"成功地装进 0 个属性"，调用方完全看不出自己传错了形状。顶层与嵌套层都拦。
+ *
+ * ★ **分级**（E3 裁定，26 册 §40，与 `load-report.ts` 的契约一致）：
+ *   容器种类不对 ⇒ **抛**；条目级异常（不认识的键 / 非数值）⇒ **丢该条 + 记账**。
+ *   ★ 顶层那个"不认识的字段"属于**条目级**（记账），不是结构性 ——
+ *     因为新版本多加一个字段、旧代码回滚后必须能忽略它，而不是全体砖档。
  */
 export function loadProps(holder: PropHolder, raw: unknown): LoadReport {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isPlainRecord(raw)) {
     throw new PropValueError(`loadProps 需要对象，收到 ${describeValue(raw)}`);
   }
 
-  const rejected: RejectedProp[] = [];
+  const rejected: RejectedEntry[] = [];
   let loaded = 0;
 
   for (const [field, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -265,7 +258,7 @@ export function loadProps(holder: PropHolder, raw: unknown): LoadReport {
       continue;
     }
     if (value === null || value === undefined) continue;
-    if (typeof value !== 'object' || Array.isArray(value)) {
+    if (!isPlainRecord(value)) {
       rejected.push({ key: field, reason: `必须是对象，收到 ${describeValue(value)}` });
       continue;
     }

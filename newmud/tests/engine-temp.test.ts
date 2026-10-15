@@ -110,20 +110,37 @@ describe('engine/temp · 校验与批量操作', () => {
     expect(t.snapshotTemp(100)).toEqual({ alive: 'A' });
   });
 
-  it('loadTemp 是**合并**装载（不清空已有键），并跳过空键名', () => {
+  it('loadTemp 是**合并**装载（不清空已有键），空键名被拒收并记账', () => {
     const t = new TempStore();
     t.setTemp('keep', 1, NEVER_EXPIRES, 0);
-    const n = t.loadTemp({ '': 0, x: 9, y: 'v' }, 0);
-    expect(n).toBe(2);
+    const report = t.loadTemp({ '': 0, x: 9, y: 'v' }, 0);
+    expect(report.loaded).toBe(2);
+    expect(report.rejected.map((r) => r.key)).toEqual(['(空键名)']);
     expect(t.queryTemp('x')).toBe(9);
     expect(t.queryTemp('keep')).toBe(1); // 未被清掉
   });
 
+  it('★ E3：loadTemp 拒收**非有限**的数值（NaN / Infinity 会污染之后所有算术）', () => {
+    const t = new TempStore();
+    const report = t.loadTemp({ nan: Number.NaN, inf: Number.POSITIVE_INFINITY, ok: 3 }, 0);
+    expect(report.loaded).toBe(1);
+    expect(report.rejected.map((r) => r.key)).toEqual(['nan', 'inf']);
+    expect(t.hasTemp('nan', 0)).toBe(false); // 脏键没进表
+    expect(t.queryTemp('ok')).toBe(3);
+  });
+
+  it('★ E3：干净快照往返 `rejected` 恒为空（契约 ③ 的绿色基线）', () => {
+    const t = new TempStore();
+    t.setTemp('num', 1, NEVER_EXPIRES, 0);
+    t.setTemp('str', 'x', 5_000, 0);
+    expect(t.loadTemp(t.snapshotTemp(1_000), 1_000).rejected).toEqual([]);
+  });
+
   it('loadTemp 拒绝非对象（数组 / null / 标量）', () => {
     const t = new TempStore();
-    expect(() => t.loadTemp([] as unknown, 0)).toThrow(TempValueError);
-    expect(() => t.loadTemp(null as unknown, 0)).toThrow(TempValueError);
-    expect(() => t.loadTemp('x' as unknown, 0)).toThrow(TempValueError);
+    for (const bad of [[], ['x'], null, 'x', 42]) {
+      expect(() => t.loadTemp(bad as unknown, 0), JSON.stringify(bad)).toThrow(TempValueError);
+    }
   });
 
   it('removeTemp / clearTemp', () => {
