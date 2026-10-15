@@ -77,6 +77,34 @@ export interface ItemDetailView {
 export interface Actor {
   readonly id: string;
   readonly name: string;
+  /**
+   * 是否**活体**（`hp > 0`）—— 对应 wushen 的 `CHARACTER.prototype.is_living()`。
+   *
+   * ★ 提到 `Actor` 这一层（2026-10-14 体检 **E4**）是为了**堵住"两种写法"的洞**：
+   *   `Actor` 是**所有内容钩子的参数类型**（`on_kill` / `on_die` / `on_accept` /
+   *   `on_use` / `on_study` / `on_learn` / `on_open` / `on_finish` …），
+   *   而 wushen 的内容代码到处要问这一句 —— 于是它**手写了七八遍**：
+   *     `world/cmd/action/go.js:6`   `if (me.hp <= 0) return;`
+   *     `os/char/chara_skill.js:183` `if (this.hp <= 0) return false;`
+   *     `os/char/combat.js:135`      `return this.hp > 0 && …`
+   *     `os/room/room.js:48`         `if (obj.hp) { … }`   ← 鸭子类型，且在**循环内**重复判
+   *     `os/char/character.js:23`    `is_living = function () { return this.hp > 0; }`  ← 已有谓词却没人用
+   *   ⇒ 同一个概念 **5 种写法**。本项目收成**一个成员**，`checkCommandGates` 的
+   *     `allow_die`（`engine/command.ts`）读的是它，房间进出钩子读的也是它。
+   *
+   * ★★ 为什么是**属性**而不是方法：wushen `os/char/npc.js:16` 写的是
+   *   `if (!this.is_fighting() && this.is_living && this.chat_msg)` —— **漏了括号**。
+   *   `this.is_living` 是函数对象，恒为真 ⇒ 那个判据**是死的**（NPC 死了照样说话）。
+   *   属性形态让"忘写括号"这件事**在语法上不可能发生**。
+   *
+   * ★ 实现方**必须**给出真值，不能靠"缺省 falsy"：一个忘了实现的类型会被静默当成
+   *   非活体（钩子一声不响地不触发）—— 与 wushen 的 `obj.hp` 是同一种坏味道。
+   *   上提到契约上之后，`tsc` 会逐处点名（良性破坏）。
+   *
+   * ★ 非角色对象（`Item` / `Room`）**不是** `Actor`，所以它们压根不会被传进进出钩子 ——
+   *   这就把 wushen 用 `if (obj.hp)` 拦"物品进出误触发钩子"那一半，交给了**类型系统**。
+   */
+  readonly isAlive: boolean;
   notify(text: string): void;
   /**
    * 向**本房间**广播一句话（wushen `CHARACTER.prototype.send_room`，
@@ -197,8 +225,8 @@ export interface CommandActor extends Actor {
   readonly room: ActorEnvironment | null;
   /** 我的内容物（背包 / 身上的东西） */
   readonly items: readonly ActorObject[];
-  /** 是否存活（`hp > 0`） */
-  readonly isAlive: boolean;
+  // ★ `isAlive`（活体判据）**已上提到 `Actor`** —— 全项目单源，理由见 `Actor` 上的注释（E4）。
+  //   原先只挂在这里，于是房间进出钩子拿到的 `Actor` 问不到"他还活着吗"。
   /**
    * 四维的**三档读数**（先天 / 后天加成 / 合计）—— 面板与诊断用。
    *
@@ -316,13 +344,26 @@ export interface ActionDef extends CommandGateDecl {
  *     ② **进来/出去的那一个**是活体（`if (obj.hp)`）。
  *   —— 这是**两个不同对象**上的两条判据，别合并。
  *
- * ⚠️ **本项目目前只实现了 ①，② 缺失**（2026-10-14 复查确认，旧注释把两条混成了一条）：
- *   `engine/room.ts` 的 `#hooked()` 只判"房内对象有没有 `def`"（= ①）+ 跳过自己，
- *   **没有**对进出者做"是活体"的判断（wushen 的 `if (obj.hp)`）。
- *   ⇒ 后果：非活体（如物品、或将来"灵魂状态"的角色）进出房间时也会触发 NPC 钩子。
+ * ★ **两条判据都已实现**（② 于 E4 批次补上，2026-10-15）：
+ *   ① 房内那个对象自己有钩子 ⇒ `engine/room.ts#hooksOf()`（判 `def` 存在性）；
+ *   ② 进出者是**活体** ⇒ `Actor.isAlive`，在 `#hooked()` 生成器**开头短路一次**。
  *
- *   ★ 为什么不直接补 ②：当前 `Actor` 契约里**没有** `hp` / `isAlive`，补判据要先扩接口，
- *     属"活体钩子"批次的活 ⇒ 现状记为**已知偏离**，不动代码。
+ *   ★★ **短路的位置是要害 —— 别图省事提到 `fireEnter()` / `allowLeave()` 开头**：
+ *     wushen `do_enter` = `item_changed(obj,true)`（**有** `obj.hp` 判据）
+ *     **然后** `this.on_enter(obj)`（**无条件**）；`do_leave` 反过来 ——
+ *     `this.on_leave` 先跑且**无条件**。⇒ 一个非活体走进来，被压掉的是**房内活体**的钩子，
+ *     **房间自己的 `on_enter` 照跑**。提到函数开头会连房间自己的钩子一起压掉 ——
+ *     偏离 wushen，而且看起来"更整齐"，特别容易写错。
+ *
+ *   ★ **为什么不连"房内那个对象自己是不是活体"一起判（假想中的判据③）**：
+ *     wushen 靠 `NPC.prototype.die()` 里的 `item_changed(this, false)` 把**死 NPC 移出房间**
+ *     （原地留一个 corpse，`os/char/npc.js:123-142`）来达到同样效果 —— 本项目照此
+ *     （死 = 离开房间）。再加一条判据等于**两条机制做同一件事**，只会漂移。
+ *
+ *   ★ 结构上本项目还多一层保障：`Item` **不是** `Actor`（没有 notify / sendRoom /
+ *     sendCommands），所以"物品进出误触发钩子"在**类型层**就被挡住了 ——
+ *     wushen 要在运行时用 `if (obj.hp)` 拦的那一半，这里编译期就成立。
+ *
  *   ★ 旧注释写的"只有 Npc 持 def ⇒ '有没有钩子'天然就是'是不是活体'"是**错的**：
  *     它把判据 ②（看进出者）偷换成了判据 ①（看房内对象）。
  *   ★ 旧注释引用的 `engine/room.ts#runHooksOf` **不存在**（实际函数叫 `hooksOf`，见 `room.ts`）。

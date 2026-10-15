@@ -167,6 +167,9 @@ export class Room extends Container {
   /**
    * 进入本房间。**顺序照 wushen**：先房间里的活体（`item_changed`，`room.js:26`），
    * 再房间自己（`room.js:27`）。
+   *
+   * ★ `me` 不是活体时，**房内活体的钩子全部跳过**，但**房间自己的 `on_enter` 照跑**
+   *   （wushen `do_enter` 里 `this.on_enter` 是无条件的）—— 边界由 `#hooked()` 把守。
    */
   public fireEnter(me: Actor): void {
     for (const hooks of this.#hooked(me)) hooks.on_enter?.(me);
@@ -179,6 +182,10 @@ export class Room extends Container {
    * （wushen 是 `== false` 的严格判定，返回 `undefined` 不算拦）。
    *
    * 默认允许 —— 没有钩子的房间（绝大多数）走这条。
+   *
+   * ★ `me` 不是活体时，**房内活体的 `on_leave` 全部跳过**，但**房间自己的 `on_leave` 照跑**
+   *   （wushen `do_leave` 里 `this.on_leave` 在 `item_changed` **之前**且无条件）——
+   *   边界同样由 `#hooked()` 把守。
    */
   public allowLeave(me: Actor, dir: Direction): boolean {
     if (this.def?.on_leave?.(me, dir) === false) return false;
@@ -189,7 +196,26 @@ export class Room extends Container {
   }
 
   /**
-   * 房间里**带进出钩子的活体**（= NPC），**不含 `me` 自己**。
+   * 房间里**该被调到的活体**（= NPC），**不含 `me` 自己**；**`me` 不是活体时一个都不给**。
+   *
+   * ★ 两条判据都在这儿（E4 / wushen `ROOM.item_changed`）：
+   *   ① 房内对象**自己有钩子**（`hooksOf` 判 `def`）—— 见下面的函数注释；
+   *   ② 进出者**是活体**（wushen `if (obj.hp)`，`os/room/room.js:48`）。
+   *
+   * ★★ ② 的位置是要害：**只压"房内活体"这一层**。房间自己的 `on_enter` / `on_leave`
+   *   由调用方**无条件**跑（wushen `do_enter` / `do_leave` 亦然）——
+   *   所以**不能**把这个判定提到 `fireEnter()` / `allowLeave()` 的开头，
+   *   那会连房间自己的钩子一起压掉（看起来更整齐，但偏离 wushen）。
+   *   `tests/move-full.test.ts` 的「非活体进出」那两条把这条边界钉住了。
+   *
+   * ★ 放在生成器**开头判一次**：wushen 是写在 `for (item of this.items)` **里面**的，
+   *   同一个 `obj` 被反复判 N 遍；而它本质是"这次事件该不该发生"的**全局前置条件**，
+   *   不是"逐个房内对象"的过滤条件。
+   *
+   * ★ 为什么这条今天"看起来多余"、仍需保留：今天只有 `Character.go()` 能触发进出，
+   *   而 `hp <= 0` 的角色过不了命令闸门（`allow_die` 缺省 false，见 `checkCommandGates`）。
+   *   但它是**将来的洞** —— NPC 自主移动、或"灵魂态可移动"一落地就会炸，
+   *   而且炸的样子很荒谬：**死人"走进"客栈，店小二还会招呼他**。
    *
    * ★ 跳过 `me` 是硬要求，不是优化：`fireEnter` 是在 `moveTo` **之后**跑的，
    *   那一刻移动者已经在 `this.items` 里了 —— 不跳的话，一个会走路的 NPC
@@ -203,6 +229,7 @@ export class Room extends Container {
    * ★ 两个调用点共用它，于是"谁算活体 / 跳过谁"只有一处定义（FG-21 同类问题）。
    */
   *#hooked(me: Actor): Generator<EnterLeaveHooks> {
+    if (!me.isAlive) return; // ← 判据 ②（wushen `os/room/room.js:48` 的 `if (obj.hp)`）
     for (const obj of this.items) {
       if (obj.id === me.id) continue;
       const hooks = hooksOf(obj);
@@ -214,9 +241,11 @@ export class Room extends Container {
 /**
  * 取一个房间内对象的进出钩子声明；**没有 `def` 的东西返回 `undefined`**。
  *
- * ★ 这是"谁算活体"的判据本体（wushen 是 `item.on_enter` 存在与否 + `obj.hp`）：
+ * ★ 这是"谁算活体"的判据 **①**（wushen 是 `item.on_enter` 存在与否）：
  *   本项目只有 `Npc`（与 `Room`）持 `def`，`Item` / `Player` 都不持 ——
  *   于是"有钩子"天然等于"是 NPC"。
+ *   ★ 判据 **②**（进出者必须活着）不在这里，在 `#hooked()` 的开头 ——
+ *     它问的是**另一个对象**，别混进来（E4，见 `defs.ts` 的 `EnterLeaveHooks`）。
  *
  * ★ 为什么不写 `obj instanceof Npc`：`character.ts` 已经**运行时** import 了本文件
  *   （`go()` 里的 `instanceof Room`），这里再 import `npc.ts` 就成了

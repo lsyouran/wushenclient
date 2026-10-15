@@ -99,6 +99,7 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
 - ★ **网络管线顺序**：量大小→限流→分诊→解析+**zod**（限流必须在解析前）；只有 `ws-server.ts` 碰 `ws`。
 - ★★ **读档契约 = 分级（E3 已办，26 册 §40 / 28 册 §28.5.5）**：单源 `server/engine/load-report.ts`（`LoadReport`/`RejectedEntry`/`isPlainRecord`/`describeValue`），props/temp/skill 三处共用。**① 结构性坏（容器种类不对）⇒ 抛**（`typeof [] === 'object'` ⇒ 空数组会"成功装 0 条"）；**② 条目级坏 ⇒ 丢该条 + 记账**（整包抛会让**版本回滚后全体角色砖档**）；**③ 调用方义务：`rejected` 非空即读档失败**（T12 落实，否则 ② 退化成静默放行 = wushen 形态）。★★ **`SkillBook.load()` 是绕过 `learn()`/`enable()` 的那条路** ⇒ 准入必须写在**数据入口**上；原先一道不判 ⇒ 改档可把**基本技能装进武功槽**。★★ 教训：**新判据要问"会不会被另一条判据满足"** —— 两条重叠时"摘掉一条仍绿"是必然（我第一版锚点就假绿，见 §40.4）。
 - ★ **`load*` 仍是"合并"语义**（不先清空）；"整份替换"由调用方决定。
+- ★★ **活体判据 = `Actor.isAlive`（E4 已办，26 册 §41）**：wushen 的判据是 `os/room/room.js:48` 的 `if (obj.hp)`（**进出者必须是活体**），但它自己有 `is_living()` 却不用、同一概念写 **5 种**，其中 **`os/char/npc.js:16` 漏括号 ⇒ 恒真死判据**。本项目：`isAlive` 从 `CommandActor` **上提到 `Actor`**（**属性**，不可能忘写括号）；命令闸门 `allow_die` + 房间进出钩子共用。★★ **短路位置是要害**：wushen `do_enter`/`do_leave` 里 `this.on_enter`/`this.on_leave` **无条件** ⇒ 短路只能放 `room.ts#hooked()` 开头（**只压房内活体那一层**），**放 `fireEnter`/`allowLeave` 入口会连房间自己的钩子一起压掉**（看起来更整齐 = 偏离）。★ **不加**"房内对象也须活体"：wushen 靠 `NPC.die()` 的 `item_changed(this,false)` **把死物移出房间**达到，靠"移出"不靠"再判一条"。★ `Item` 不是 `Actor` ⇒ "物品进出误触发钩子"在**类型层**就挡住了。
 - ★★ **P0 批次已修（26 册 §30）**：① 入站业务链路 try/catch + `onInternalError` + `installProcessErrorGuards`；② `--host` + `WS_PATH='/ws'` + `isSameOriginRequest`；③ `isRoleName` 单源 + `session.#byRoleId` 在线唯一。★ 仍未做：**按 IP 限连接数**（N2 后半）；**T12 未做** ⇒ 存档/验签仍缺。
 
 ## 前端（`src/`，26 册 §15–§21；细则 `CONVENTIONS-web-ui.md`）
@@ -109,6 +110,6 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
 
 ## 未做
 
-**已办**：T1/T2/T15–T24（T23④ 未做）；**2026-10-14 P0 批次**（N1/N2/N3/E2，§30）；**文档订正批次**（D1/D4/D6/D7/D9+F11，§31）；**数值裁定批次**（E1 `gj` 照抄 · E8 容量 50/10 · 新建 29 册，§32）；**命名空间隔离批次**（`evasion`/`deflect` + G3.G，§34）；**有效属性归一**（E7，§37）；**版本控制引入**（§38）；**属性三档读取口 + `score` 指令**（§39）；**读档准入校验**（**E3**，§40）。
+**已办**：T1/T2/T15–T24（T23④ 未做）；**2026-10-14 P0 批次**（N1/N2/N3/E2，§30）；**文档订正批次**（D1/D4/D6/D7/D9+F11，§31）；**数值裁定批次**（E1 `gj` 照抄 · E8 容量 50/10 · 新建 29 册，§32）；**命名空间隔离批次**（`evasion`/`deflect` + G3.G，§34）；**有效属性归一**（E7，§37）；**版本控制引入**（§38）；**属性三档读取口 + `score` 指令**（§39）；**读档准入校验**（**E3**，§40）；**活体判据**（**E4**，§41）。
 **仍未做**：账号+token 验签+角色存档（**T12**，设计定稿 28 册：登出写+每小时全量+脏标记单事务+显式 `cache_size`+备份轮转）；**B 批** `get/drop/give/use`+`Item` 存 `def`（「打听」`give pub/xiaoer 1000 money` 现哑火）；战斗（`on_use`/`on_kill` 无消费者）；装备/服用；技能第三档 addin；知识·隐藏技能；门派薄壳；**D 批**：面板子系统 100% 不可达（唯一生产性 `openPanel` 是 `social.ts` emote/dialog，只有声明无生产者）；G9 变更-覆盖对账闸门；真浏览器 e2e 入库；T22 第 4 条；`m/l/f/o` 惰性字段；图形化地图/选角 UI/聊天与武学弹窗；G2.3 变异样本（T13）；README（**00 册从未链接 `newmud/README.md`**）。
-★ **E9 待专项分析**（`recount` 只钳 hp 不钳 mp；wushen `world/extends/char/user.js:6` **也只钳 hp** ⇒ 属原作空档；清单见 29 册 §29.6）。★ **E3 已办（§40）**；同族 P1 仍有：E5（`setBusy` 累加 vs 赋值）/E6（busy 永不过期）/E10·E11（`loadProps` 只判"有限数值"，**无范围闸门**）。★ **E4 活体判据待拍板**（分析 `_35D-待拍板分析-2026-10-15.md`）。
+★ **E9 待专项分析**（`recount` 只钳 hp 不钳 mp；wushen `world/extends/char/user.js:6` **也只钳 hp** ⇒ 属原作空档；清单见 29 册 §29.6）。★ **E3 已办（§40）**；同族 P1 仍有：E5（`setBusy` 累加 vs 赋值）/E6（busy 永不过期）/E10·E11（`loadProps` 只判"有限数值"，**无范围闸门**）。★ **E4 已办（§41）** ⇒ **35-D 三项全部收口**。

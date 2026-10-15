@@ -1321,6 +1321,36 @@ const ALL_MUTATIONS = [
   },
   {
     kind: 'test',
+    file: 'tests/move-full.test.ts',
+    gate: 'G6',
+    label: 'E4(测试)',
+    rule: 'E4 判据②：非活体不触发房内活体的钩子',
+    name: '摘掉 `#hooked` 开头那句活体短路（退回"物品/死人进出也唤醒房里 NPC"）',
+    apply: () =>
+      patchFile('server/engine/room.ts', (t) =>
+        t.replace('    if (!me.isAlive) return;', '    if (false) return;'),
+      ),
+  },
+  {
+    kind: 'test',
+    file: 'tests/move-full.test.ts',
+    gate: 'G6',
+    label: 'E4(测试)',
+    rule: 'E4 判据②的**位置**：只压房内那一层，不压房间自己的钩子',
+    name: '把活体短路**上提**到 `fireEnter` 入口（看起来更整齐，实则把房间自己的 `on_enter` 一起压掉 = 偏离 wushen）',
+    // ★ 这条与上一条**不是重复**：它们打红的是**两条不同的断言**、
+    //   报错也不一样 —— 摘掉判据是"房内钩子多跑了"，放错位置是"房间自己的钩子没跑"。
+    //   一个没有区分性的测试套件会把两者都放过去。
+    apply: () =>
+      patchFile('server/engine/room.ts', (t) =>
+        t.replace(
+          '  public fireEnter(me: Actor): void {\n',
+          '  public fireEnter(me: Actor): void {\n    if (!me.isAlive) return;\n',
+        ),
+      ),
+  },
+  {
+    kind: 'test',
     file: 'tests/engine-skill.test.ts',
     gate: 'SKL',
     label: 'T18(测试)',

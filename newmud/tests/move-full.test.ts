@@ -36,7 +36,7 @@ import { Room } from '../server/engine/room.js';
 import { SkillRegistry } from '../server/engine/skill.js';
 import { asWorldId } from '../shared/ids.js';
 import { MOVE_MESSAGES } from '../shared/constants.js';
-import type { NpcDef, RoomDef } from '../server/world/defs.js';
+import type { Actor, NpcDef, RoomDef } from '../server/world/defs.js';
 
 function makeRoom(id: string, maxItems?: number, def?: RoomDef): Room {
   return new Room({
@@ -438,5 +438,128 @@ describe('FG-16 · 房间里活体的 on_enter / on_leave（wushen `ROOM.item_ch
     // 就会去读 `item.def.on_enter` 而炸出 TypeError（异常会一路抛到 go() 外面）
     expect(calls).toEqual([]);
     expect(to.items).toContain(item);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E4 · 判据 ②「进出者必须是活体」（wushen `if (obj.hp)`）
+// ---------------------------------------------------------------------------
+//
+// 权威：wushen `os/room/room.js:48` —— `item_changed` 的循环里
+//
+//     else { if (obj.hp) {                       // ← ② 进出者必须是活体
+//         if (isin && item.on_enter)  item.on_enter(obj);
+//         else if (!isin && item.on_leave) { if (item.on_leave(obj, dir) == false) return false; }
+//     } }
+//
+// ★★ 这条判据的**边界**是要害：它只压"**房内活体**"那一层。
+//   `do_enter` = `item_changed(obj,true)`（有 ②）**然后** `this.on_enter(obj)`（**无条件**）；
+//   `do_leave` 反过来 —— `this.on_leave` 先跑且**无条件**。
+//   ⇒ 非活体走进来：被压掉的是**房里 NPC** 的钩子，**房间自己的 `on_enter` 照跑**。
+//   ⇒ 所以实现里**不能**把这个判定提到 `fireEnter()` / `allowLeave()` 的开头
+//     （那样看起来更整齐，但会连房间自己的钩子一起压掉 = 偏离 wushen）。
+//     本组第 1、2 条就是钉这个边界的。
+//
+// ★ 为什么用 `go()` 而不是发指令：命令闸门（`allow_die` 缺省 false）本来就会拦住
+//   `hp <= 0` 的角色（wushen 的 `world/cmd/action/go.js:6` 同样）。
+//   命令闸门是**上层**的防线；这里验的是**引擎层**（`ROOM.item_changed` 那一层）的判据 ——
+//   它管的是"任何走 `moveto` 的东西"，不只是玩家指令（NPC 自主移动 / 拖拽 / 传送）。
+//   所以本组**绕过闸门**直接调 `go()`，与 `go()` 自己的注释（"不带闸门"）一致。
+
+describe('E4 · 非活体进出：压房内活体，**不压房间自己**', () => {
+  /** 一个 `hp = 0` 的角色（`isAlive === false`），已站在 `room` 里 */
+  function deadPlayerIn(room: Room, oid = 'p-dead'): Player {
+    const { player } = makePlayer(oid, '阿飞');
+    player.moveTo(room);
+    player.setHp(0);
+    return player;
+  }
+
+  it('★ 死角色走进有 NPC 的房间 ⇒ NPC 的 `on_enter` **不跑**，房间自己的 **照跑**', () => {
+    const calls: string[] = [];
+    const to = makeRoom('dst', undefined, {
+      name: '目标',
+      desc: 'x',
+      on_enter: () => calls.push('dst:room_enter'),
+    });
+    const from = makeRoom('src');
+    from.linkExit('north', to);
+    to.addItem(makeNpc('npc_dst', '店小二', { on_enter: () => calls.push('dst:npc_enter') }));
+
+    const dead = deadPlayerIn(from);
+    expect(dead.isAlive).toBe(false);
+
+    expect(dead.go('north')).toEqual({ ok: true });
+
+    // ★ 落在**区分性**上：漏实现 ② 是两条都跑、错把判定提到函数开头是一条都不跑
+    expect(calls).toEqual(['dst:room_enter']);
+  });
+
+  it('★ 死角色离开有 NPC 的房间 ⇒ NPC 的 `on_leave` **不跑**，房间自己的 **照跑**', () => {
+    const calls: string[] = [];
+    const from = makeRoom('src', undefined, {
+      name: '源',
+      desc: 'x',
+      on_leave: () => {
+        calls.push('src:room_leave');
+      },
+    });
+    const to = makeRoom('dst');
+    from.linkExit('north', to);
+    from.addItem(
+      makeNpc('npc_src', '源房人', {
+        on_leave: () => {
+          calls.push('src:npc_leave');
+        },
+      }),
+    );
+
+    const dead = deadPlayerIn(from);
+    expect(dead.go('north')).toEqual({ ok: true });
+
+    expect(calls).toEqual(['src:room_leave']);
+  });
+
+  it('★ 对照：同一个房间、同一个 NPC，**活人**进来两条钩子都跑', () => {
+    const calls: string[] = [];
+    const to = makeRoom('dst', undefined, {
+      name: '目标',
+      desc: 'x',
+      on_enter: () => calls.push('dst:room_enter'),
+    });
+    const from = makeRoom('src');
+    from.linkExit('north', to);
+    to.addItem(makeNpc('npc_dst', '店小二', { on_enter: () => calls.push('dst:npc_enter') }));
+
+    const a = makePlayer('p-a', '阿飞');
+    a.player.moveTo(from);
+    expect(a.player.isAlive).toBe(true);
+    expect(a.player.go('north')).toEqual({ ok: true });
+
+    // 与第 1 条**只差"活没活"这一个字段** ⇒ 两条一起把 ② 钉死在区分性输入上
+    expect(calls).toEqual(['dst:npc_enter', 'dst:room_enter']);
+  });
+
+  it('★ 死角色**不会被**房里 NPC 的 `on_leave` 拦住（那条钩子根本没被调）', () => {
+    // 判据 ② 的可观察后果：一个"拦路 NPC"对活人有效、对非活体无效
+    const from = makeRoom('src');
+    const to = makeRoom('dst');
+    from.linkExit('north', to);
+    from.addItem(makeNpc('npc_block', '拦路的', { on_leave: () => false }));
+
+    const dead = deadPlayerIn(from, 'p-dead2');
+    expect(from.allowLeave(dead, 'north')).toBe(true); // ← 钩子不跑 ⇒ 拦不住
+
+    const alive = makePlayer('p-a', '阿飞').player;
+    alive.moveTo(from);
+    expect(from.allowLeave(alive, 'north')).toBe(false); // 对照：活人照拦
+  });
+
+  it('★ `Actor.isAlive` 是**契约成员**而不是鸭子类型（忘了实现的类型过不了 `tsc`）', () => {
+    // 判据落在"这个成员在 `Actor` 上"这件事本身：把它从 `Actor` 挪回 `CommandActor`，
+    // `room.ts#hooked` 的 `me.isAlive` 立刻编译不过 —— 比"运行时读到 undefined 当非活体"
+    // 好得多（那种失败是**静默**的：钩子一声不响地不触发）。
+    const a: Actor = makePlayer('p-a', '阿飞').player;
+    expect(typeof a.isAlive).toBe('boolean');
   });
 });
