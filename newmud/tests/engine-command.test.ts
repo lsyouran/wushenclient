@@ -41,6 +41,7 @@ import type {
   RoomDef,
 } from '../server/world/defs.js';
 import type { Channel, Direction } from '../shared/constants.js';
+import type { AttrBreakdown } from '../server/engine/formula.js';
 import { asWorldId } from '../shared/ids.js';
 
 /**
@@ -176,6 +177,15 @@ class TestActor implements CommandActor {
 
   public showItem(detail: ItemDetailView): void {
     this.details.push(detail);
+  }
+
+  /**
+   * `CommandActor.attrBreakdowns` 的桩：`TestActor` 不是真角色（没有先天 / `prop`），
+   * 返回空表。真实的三档读数由 `Character` 给（走 `formula.ts#computeAttrBreakdowns`），
+   * 其口径由 `tests/engine-formula.test.ts` 钉住。
+   */
+  public attrBreakdowns(): readonly AttrBreakdown[] {
+    return [];
   }
 
   public lastMessage(): string {
@@ -423,6 +433,7 @@ describe('engine/command · gateStateOf', () => {
       isAlive: true,
       isBusy: () => false,
       userLevel: 0,
+      attrBreakdowns: () => [],
     };
     expect(gateStateOf(minimal, 1000)).toEqual({
       userLevel: 0,

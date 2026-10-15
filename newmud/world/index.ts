@@ -25,6 +25,7 @@ import './command/move/go.js';
 import './command/chat/say.js';
 import './command/chat/shout.js';
 import './command/chat/tell.js';
+import './command/info/score.js';
 
 /**
  * 清单（相对 `world/` 的路径，顺序 = 加载顺序）。
@@ -45,4 +46,5 @@ export const CONTENT_MODULES: readonly string[] = [
   'command/chat/say.ts',
   'command/chat/shout.ts',
   'command/chat/tell.ts',
+  'command/info/score.ts',
 ];

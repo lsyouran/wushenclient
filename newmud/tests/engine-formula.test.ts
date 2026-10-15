@@ -13,10 +13,13 @@ import { describe, expect, it } from 'vitest';
 
 import { PROP } from '@shared/constants.js';
 import {
+  ATTR_KEYS,
   COMBAT_FORMULA,
   FormulaError,
+  computeAttrBreakdowns,
   computeDerived,
   damageAfterDefense,
+  effectiveAttr,
   formulaSummary,
 } from '../server/engine/formula.js';
 import type { InnateStats } from '../server/engine/formula.js';
@@ -211,6 +214,41 @@ describe('engine/formula · damageAfterDefense（递减减伤）', () => {
   it('非有限参数 → FormulaError', () => {
     expect(() => damageAfterDefense(Number.NaN, 1)).toThrow(FormulaError);
     expect(() => damageAfterDefense(1, Number.POSITIVE_INFINITY)).toThrow(FormulaError);
+  });
+});
+
+describe('engine/formula · computeAttrBreakdowns（属性三档：先天 / 后天 / 合计）', () => {
+  it('★ 合计 === 先天 + 后天加成，且与 effectiveAttr 同值（只有一个口径）', () => {
+    const props = createPropHolder();
+    setProp(props, PROP.strengthBonus, 5);
+    setProp(props, PROP.constitutionBonus, 3);
+    for (const r of computeAttrBreakdowns(BASE, props)) {
+      expect(r.total).toBe(r.innate + r.bonus);
+      expect(r.total).toBe(effectiveAttr(BASE, props, r.key));
+    }
+  });
+
+  it('★ 后天那一档只读 prop 表（无加成时等于先天；补上加成后合计跟着动）', () => {
+    const props = createPropHolder();
+    expect(computeAttrBreakdowns(BASE, props).map((r) => [r.bonus, r.total])).toEqual([
+      [0, 20],
+      [0, 20],
+      [0, 20],
+      [0, 20],
+    ]);
+    setProp(props, PROP.intelligenceBonus, 7);
+    expect(computeAttrBreakdowns(BASE, props)[3]).toEqual({
+      key: 'int',
+      innate: 20,
+      bonus: 7,
+      total: 27,
+    });
+  });
+
+  it('★ 行序恒为 ATTR_KEYS（面板行序稳定，不随调用先后变）', () => {
+    const rows = computeAttrBreakdowns(BASE, createPropHolder());
+    expect(rows.map((r) => r.key)).toEqual(['str', 'con', 'dex', 'int']);
+    expect(rows).toHaveLength(ATTR_KEYS.length);
   });
 });
 

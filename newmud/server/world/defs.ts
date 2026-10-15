@@ -27,6 +27,7 @@ import type {
 } from '@shared/constants.js';
 import type { ObjKind } from '../engine/base.js';
 import type { ViewSubject } from '../engine/view-text.js';
+import type { AttrBreakdown } from '../engine/formula.js';
 import type { WorldId } from '@shared/ids.js';
 
 /** 内容层书写的引用 id（注册时统一校验，见 define.ts） */
@@ -198,6 +199,17 @@ export interface CommandActor extends Actor {
   readonly items: readonly ActorObject[];
   /** 是否存活（`hp > 0`） */
   readonly isAlive: boolean;
+  /**
+   * 四维的**三档读数**（先天 / 后天加成 / 合计）—— 面板与诊断用。
+   *
+   * ★ 合计与 `SkillActor.str/con/dex/int` 读的是**同一个数**（都走
+   *   `formula.ts#effectiveAttr`：先天值 + 后天加成，见 26 册 §37）；这里多做的只是
+   *   把"先天"与"后天"**分开**列出来，好显示 `臂力 25（先天 20 + 后天 5）`。
+   *   wushen 的 `score` 面板正是这么摆的（`world/cmd/dialog/score.js:90-97`）。
+   *
+   * ★ 只覆盖受"先天 + 加成"双影响的四维；`max_mp` 没有"加成"这一路，不在其中。
+   */
+  attrBreakdowns(): readonly AttrBreakdown[];
   /** 是否忙碌中（带 TTL；见 `engine/temp.ts`） */
   isBusy(nowMs?: number): boolean;
   /** GM 等级（wushen `user_level`）：0 = 普通玩家。`allow_level` 按它判定 */

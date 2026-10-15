@@ -45,6 +45,7 @@ node 用托管版 `C:/Users/Administrator/.workbuddy/binaries/node/versions/22.2
   ★★ **数据键英文化（29 册 §29.11 v2「词干表」· 待批）**：核心键 = **英文 snake_case 裸名词**（**不加** `*Bonus`）；派生键由 `ModProp` **机械生成**（`<c>_per`/`diff_<c>`/`diff_<c>_per`/`add_<c>`/`add_<c>_per`）⇒ 核心键若带后缀会生成 `diff_attackBonus` 这种怪键。**定位已从"逐字照抄翻译表"降级为"读懂 wushen 来源的索引"**（用户只学架构、数值后续替换）。
 - ★★ **有效属性（2026-10-15 §37 裁定）**：**实际有效属性 = 先天值 + 后天加成**，唯一口径 = `formula.ts#effectiveAttr()`。**一切门槛/限制读它**（学条件 `SkillLearnCondition.minAttr`、将来的装备要求）。★ **但派生公式读分开值**：`computeDerived()` 里先天/加成位置不同（`attack` 先天在百分比**外**、`defense`/`maxHp` 在**内**；同一 `prop_con*con` 在 `maxHp` 不除10、在 `defense` 除10）⇒ 逐式照抄 wushen，**先合并必偏离原作**。⇒「门槛=合成值、公式=分开值」。
   ⇒ `Character.str/con/dex/int` getter **返回有效值**（内容层/门槛口径统一）；裸先天值只在 `innateSnapshot()`（引擎内部，喂公式）。**`minProp`+`minInnate` 已合并为 `minAttr`**，`str`/`str1` 二义性在 API 上不存在（数据键仍照抄 wushen）。详见 **29 册 §29.13** / **26 册 §37**。
+  ★ **三档读取口（2026-10-15 §39）**：`Character.attrBreakdowns()`（= `CommandActor` 成员 → `formula.ts#computeAttrBreakdowns`）一次给出 `{key,innate,bonus,total}`，`total` **仍走 `effectiveAttr`**（口径不新增）；消费者 = `world/command/info/score.ts`（别名 `score,attr`，打 `臂力 25（先天 20 + 后天 5）`）。**`AttrKey` 由 `ATTR_KEYS` 值表派生**（不再手写四键）。★ 加 `CommandActor` 成员会**打穿所有 implements 替身**（`tsc` 逐处点名 → 良性）。详见 **26 册 §39**。
 - **不用 `enum`**：`as const` 对象 + 派生联合类型（`OBJ_KINDS`/`INNATE_KEYS`/`COMBAT_FORMULA`/`PROP`）。
 - ★★ 教训：引入别名后 **G3.C 键字面量计数从 22 掉到 0** —— 不是"没违规"是**规则失去输入**（FG-7）⇒ 新建 **G3.F** 对账 `PROP` 表 + 2 样本。⇒ **通则：引入一层间接 ⇒ 先问"哪个闸门原本靠直接形态在守、现在还看得见吗？"**
 

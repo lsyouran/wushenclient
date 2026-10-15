@@ -28,8 +28,14 @@ import type { ObjKind } from './base.js';
 import { Room } from './room.js';
 import { TempStore } from './temp.js';
 // `import type` 会被完全擦除，所以引擎 ↔ 内容层的类型引用不产生运行时环。
-import type { ItemDetailView } from '../world/defs.js';import { COMBAT_FORMULA, computeDerived, damageAfterDefense, effectiveAttr } from './formula.js';
-import type { DerivedCombat, InnateStats } from './formula.js';
+import type { ItemDetailView } from '../world/defs.js';import {
+  COMBAT_FORMULA,
+  computeAttrBreakdowns,
+  computeDerived,
+  damageAfterDefense,
+  effectiveAttr,
+} from './formula.js';
+import type { AttrBreakdown, DerivedCombat, InnateStats } from './formula.js';
 import { applyPropMap, createPropHolder, loadProps, snapshotProps } from './props.js';
 import type { LoadReport, PropHolder, PropSnapshot, RawPropMap } from './props.js';
 import { SkillBook, emptySkillRegistry } from './skill.js';
@@ -420,6 +426,16 @@ export abstract class Character extends Container implements PropHolder {
 
   public get maxMp(): number {
     return this.#innate.maxMp;
+  }
+
+  /**
+   * 四维的**三档读数**（先天 / 后天加成 / 合计）—— 面板与诊断用（`CommandActor` 契约）。
+   *
+   * ★ 合计与上面四个 getter **同值**（都走 `effectiveAttr`）；额外给出的只是
+   *   "先天"与"后天"两档，正是面板要的 `臂力 25（先天 20 + 后天 5）`。
+   */
+  public attrBreakdowns(): readonly AttrBreakdown[] {
+    return computeAttrBreakdowns(this.#innate, this.#holder);
   }
 
   /**

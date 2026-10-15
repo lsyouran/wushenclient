@@ -124,8 +124,15 @@ export interface InnateStats {
   readonly forceRad: number;
 }
 
-/** 先天四维的键（`InnateStats` 里"人物自带"的那四个） */
-export type AttrKey = 'str' | 'con' | 'dex' | 'int';
+/**
+ * 先天四维的键（`InnateStats` 里"人物自带"的那四个）。
+ *
+ * ★ 值表与类型**同一来源**：`AttrKey` 由 `ATTR_KEYS` 派生 —— 想加/删维度只改这一处，
+ *   不会出现"类型改了、值表没跟上"（24 册铁律 4：单源真相）。
+ *   公式 / 门槛 / 面板一律遍历 `ATTR_KEYS`，**不各自手写四个键**。
+ */
+export const ATTR_KEYS = ['str', 'con', 'dex', 'int'] as const;
+export type AttrKey = (typeof ATTR_KEYS)[number];
 
 /** 四维 → 它们在 `prop` 里的**加成**键（`PROP.strengthBonus === 'str'` …） */
 const ATTR_BONUS = {
@@ -168,6 +175,43 @@ export function effectiveAttr(
   key: AttrKey,
 ): number {
   return innate[key] + getProp(props, ATTR_BONUS[key]);
+}
+
+/**
+ * 单个属性的**三档读数**（面板 / 诊断用）：先天、后天加成、合计。
+ *
+ * ★ `total` 与 `effectiveAttr()` **同一个数** —— 门槛读的就是它，不会有第二个口径。
+ */
+export interface AttrBreakdown {
+  /** 属性键（`str`/`con`/`dex`/`int`） */
+  readonly key: AttrKey;
+  /** ① 先天值（人物自带） */
+  readonly innate: number;
+  /** ② 后天加成（装备 / 技能给的，存在 `prop` 表里） */
+  readonly bonus: number;
+  /** ③ 合计 = ① + ②，与 `effectiveAttr()` 同值 */
+  readonly total: number;
+}
+
+/**
+ * 四维的三档读数一次取全（面板 / 诊断）。
+ *
+ * ★ `total` 交给 `effectiveAttr()` 算 —— 于是"有效属性"永远只有**一处实现**；
+ *   这里只额外把"先天"与"后天加成"**分开**列出来，好让玩家看到 `臂力 25（先天 20 + 后天 5）`。
+ *   wushen 的 `score` 面板正是这么摆的（`world/cmd/dialog/score.js:90-97` 单独发 `str_add` …）。
+ *
+ * ★ 顺序恒为 `ATTR_KEYS` ⇒ 面板行序稳定，不随谁先调用而变。
+ */
+export function computeAttrBreakdowns(
+  innate: Readonly<Record<AttrKey, number>>,
+  props: PropHolder,
+): readonly AttrBreakdown[] {
+  return ATTR_KEYS.map((key) => ({
+    key,
+    innate: innate[key],
+    bonus: getProp(props, ATTR_BONUS[key]),
+    total: effectiveAttr(innate, props, key),
+  }));
 }
 
 /**

@@ -44,7 +44,7 @@ describe('engine/world · 真实内容的实例化统计', () => {
   });
 
   it('启动日志一行统计含指令数', () => {
-    expect(describeWorld(world.stats)).toContain('指令 6（别名 11）');
+    expect(describeWorld(world.stats)).toContain('指令 7（别名 13）');
   });
 
   it('起始房间取区域 first', () => {
@@ -219,12 +219,12 @@ describe('engine/world · id 空间可复用（读档恢复场景）', () => {
 
 describe('engine/world · 指令表 + 真实内容的三级分发（全链路）', () => {
   it('指令表被建进世界（别名 → 条目）', () => {
-    // 6 条：action/{look,select} + move/go + chat/{say,shout,tell}
-    // 11 个别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper
+    // 7 条：action/{look,select} + move/go + chat/{say,shout,tell} + info/score
+    // 13 个别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper / score,attr
     //   ↑ `chat` 是 wushen 的原词（`world/cmd/channel/chat.js`），
     //     也是前端「世界」页签产出的命令名（26 册 §24.3）
-    expect(world.stats.commands).toBe(6);
-    expect(world.stats.commandAliases).toBe(11);
+    expect(world.stats.commands).toBe(7);
+    expect(world.stats.commandAliases).toBe(13);
     expect(world.commands.lookup('look')?.id).toBe('action/look');
     expect(world.commands.lookup('l')?.id).toBe('action/look');
     expect(world.commands.lookup('select')?.id).toBe('action/select');
@@ -286,6 +286,29 @@ describe('engine/world · 指令表 + 真实内容的三级分发（全链路）
     const { actor, out } = spawn('yz/beidajie1', 'dddddddddd');
     expect(dispatch(world.commands, actor, 'dazuo')).toEqual({ kind: 'unknown' });
     expect(out.messages).toEqual(['什么？']);
+  });
+
+  it('★ info/score 打出属性三档（合计 / 先天 / 后天）', () => {
+    const { actor, out } = spawn('yz/guangchang', 'ffffffffff');
+    expect(dispatch(world.commands, actor, 'score')).toEqual({
+      kind: 'executed',
+      via: 'command',
+      id: 'info/score',
+    });
+    const printed = out.messages.join('\n');
+    expect(printed).toContain('【属性】');
+    // 无加成三维：只报合计
+    expect(printed).toContain('臂力：20');
+    expect(printed).toContain('身法：20');
+    expect(printed).toContain('悟性：20');
+    // 店小二根骨 27 + 基本内功的 3 点根骨加成 ⇒ 展开三档
+    expect(printed).toContain('根骨：30（先天 27 + 后天 3）');
+
+    // 再加 5 点臂力加成；别名 attr 与主名 score 落到同一条
+    setProp(actor, PROP.strengthBonus, 5);
+    out.messages.length = 0;
+    expect(dispatch(world.commands, actor, 'attr').kind).toBe('executed');
+    expect(out.messages.join('\n')).toContain('臂力：25（先天 20 + 后天 5）');
   });
 
   it('真实 NPC 的 ask 动作（三级里的第三级：目标物件动作）', () => {
