@@ -1,0 +1,106 @@
+=== tsc main ===
+exit=0
+=== tsc web ===
+exit=0
+=== vitest ===
+     [33m[2m✓[22m[39m ★ 无法识别的参数 → 退出码 1 且打印用法（不许静默吞掉）[33m 3418[2mms[22m[39m
+   [32m✓[39m ★ 真启动（`npm start` 等价路径） [2m(3)[22m
+     [33m[2m✓[22m[39m 同一个端口上：页面能取到，/ws 也能连上并收到登录回包[33m 2985[2mms[22m[39m
+     [33m[2m✓[22m[39m 被要求停止后会退出（不挂住）[33m 7157[2mms[22m[39m
+     [33m[2m✓[22m[39m --no-web：只跑 WebSocket，页面不存在[33m 2655[2mms[22m[39m
+ [32m✓[39m tests/net-e2e.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 727[2mms[22m[39m
+   [32m✓[39m 端到端（真 WebSocket） [2m(5)[22m
+     [33m[2m✓[22m[39m 明文指令：进去的业务钩子能收到，且能回包[33m 348[2mms[22m[39m
+ [32m✓[39m tests/look-remark.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+ [32m✓[39m tests/chat-say.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 168[2mms[22m[39m
+ [32m✓[39m tests/engine-audit.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 111[2mms[22m[39m
+ [32m✓[39m tests/engine-world.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 126[2mms[22m[39m
+ [32m✓[39m tests/session.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 153[2mms[22m[39m
+ [32m✓[39m tests/engine-skill.test.ts [2m([22m[2m65 tests[22m[2m)[22m[33m 301[2mms[22m[39m
+ [32m✓[39m tests/engine-base.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 153[2mms[22m[39m
+ [32m✓[39m tests/bootstrap.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 188[2mms[22m[39m
+ [32m✓[39m tests/cli-args.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 51[2mms[22m[39m
+ [32m✓[39m tests/validate.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 267[2mms[22m[39m
+ [32m✓[39m tests/engine-temp.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m tests/define.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 222[2mms[22m[39m
+ [32m✓[39m tests/props.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+ [32m✓[39m tests/view-text.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m tests/net-pipeline.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 122[2mms[22m[39m
+ [32m✓[39m tests/engine-formula.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+ [32m✓[39m tests/protocol.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 171[2mms[22m[39m
+ [32m✓[39m tests/move-full.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 99[2mms[22m[39m
+ [32m✓[39m tests/alias-single-source.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 82[2mms[22m[39m
+ [32m✓[39m tests/engine-command.test.ts [2m([22m[2m44 tests[22m[2m)[22m[32m 145[2mms[22m[39m
+ [32m✓[39m tests/engine-sendroom.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 53[2mms[22m[39m
+ [32m✓[39m tests/g3-constants.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 102[2mms[22m[39m
+ [32m✓[39m tests/ids.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+ [32m✓[39m tests/content.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/rate-limit.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+ [32m✓[39m tests/caller-source.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m35 passed[39m[22m[90m (35)[39m
+[2m      Tests [22m [1m[32m670 passed[39m[22m[90m (670)[39m
+[2m   Start at [22m 23:41:42
+[2m   Duration [22m 41.91s[2m (tests 55%, import 17%, transform 16%, environment 10%, worker 2%)[22m
+
+=== gates ===
+    R6.3  node:vm                         71 文件
+    R6.4  MD5 摘要                          71 文件
+    R6.5  硬编码 ws://                       71 文件
+    R6.6  重写校验收口逻辑（只允许出现在 server/world/v  70 文件
+    R6.7  裸数字退出码（tools/ 内必须用 EXIT_PASS /  14 文件
+    R6.8  源码文件为空（空文件对其它闸门不可见 —— 由本规则显式接住  71 文件
+    R6.9  重写派生属性公式（COMBAT_FORMULA / comp  70 文件
+    R6.10 重写技能属性挂载三角（release/attach prop  70 文件
+    R6.11 闸门脚本未安装崩溃守卫（每个 `tools/gate/*.m  10 文件
+
+  ✅ 通过：未发现红线写法
+
+G12 · 路径与改名
+  项目根: D:\ts-mud\newmud
+  目录名: newmud（运行时读取，改名后自动跟随）
+  扫描文件: 120
+  行内豁免: 4
+  ✅ 通过：未发现路径硬编码
+
+G13 · 依赖方向
+  扫描文件: 35
+  ✅ 通过：引擎 / 内容框架 / 内容三层依赖方向正确
+
+G14 · 前端依赖图
+  入口: src/main.js
+  可达文件: 24
+  判据: E1 无裸包名 / E2 无断链
+  ✅ 通过：前端可达图 24 个文件，无裸包名、无断链
+
+G15 · 文档引用（册号存在性）
+  扫描目录: server / shared / tests / src / tools / world
+  扫描文件: 119
+  自身豁免: tools/gate/g15-docrefs.mjs
+  注释里的册号引用: 232
+  存在的册号: 00 / 01 / 02 / 03 / 04 / 05 / 06 / 07 / 08 / 09 / 10 / 11 / 12 / 13 / 14 / 15 / 16 / 17 / 18 / 19 / 20 / 21 / 22 / 23 / 24 / 25 / 26 / 27 / 28
+  ✅ 通过：119 个文件、232 条注释里的册号引用全部指向真实存在的册
+
+================================================================
+汇总
+================================================================
+  ✅ PASS  G2    协议对账
+  ✅ PASS  G3    常量对账
+  ✅ PASS  G5    命名
+  ✅ PASS  G6    红线扫描
+  ✅ PASS  G12   路径与改名
+  ✅ PASS  G13   依赖方向
+  ✅ PASS  G14   前端依赖图
+  ✅ PASS  G15   文档引用
+
+  由测试覆盖（需执行 TS，见 npm test）：
+    G3  常量对账（类型↔守卫等价 / 表内部一致） tests/g3-constants.test.ts
+    G3  属性访问器（键类型 / 数值守卫 / 读档边界） tests/props.test.ts
+    G4  世界引用校验   tests/validate.test.ts
+    G8  不变式 / 注册约束 tests/define.test.ts, tests/content.test.ts
+
+  暂缓（见 docs/25，商业化前不实施）：G10 支付 / G11 GM
+
+  改动任一闸门后，必须跑 `npm run gate:mutation` 证明它仍会变红。
+
+✅ 静态闸门全部通过

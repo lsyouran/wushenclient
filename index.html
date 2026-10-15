@@ -1,0 +1,1909 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="xuan">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+<meta name="theme-color" content="#f4efe4" />
+<title>云梦江湖</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+button { font-family:inherit; appearance:none; -webkit-appearance:none; background:none; border:none; color:inherit; cursor:pointer; touch-action:manipulation; }
+
+:root, html[data-theme="xuan"] {
+  --paper:#f4efe4; --card:#fdfaf2; --card2:#f8f4e9;
+  --ink:#37322a; --ink2:#847c6c; --ink3:#b3ab99;
+  --line:#e4dcc8; --line2:#d4c9ae;
+  --cin:#b64a32; --cin-bg:#f8e9e4;
+  --green:#5d8a66; --teal:#3f7a80; --amber:#8a6b34;
+  --hp:#c2574a; --mp:#6d8ba0; --qi:#c9a35d;
+  --serif:"Noto Serif SC","Songti SC","STSong","SimSun",serif;
+  --mapline:#d8cfb8; --noise:.18;
+  --accent:#c05242; --on-a:#f7e0d9; --on-b:#f2d2ca; --card-hi:#fdfbf4;
+  --kbh: 0px;
+}
+html[data-theme="shui"] {
+  --paper:#e9ede9; --card:#f4f7f4; --card2:#edf1ee;
+  --ink:#2b3330; --ink2:#64736c; --ink3:#9daaa4;
+  --line:#d5ddd6; --line2:#c0cbc3;
+  --cin:#a34e38; --cin-bg:#f2e5df;
+  --hp:#b25a4d; --mp:#5d7f8f; --qi:#b3924f;
+  --mapline:#ccd6cf; --noise:.13;
+  --accent:#b05a44; --on-a:#f0ddd4; --on-b:#e7cfc4; --card-hi:#fbfdfb;
+}
+html[data-theme="ye"] {
+  --paper:#22262b; --card:#2b3138; --card2:#262c33;
+  --ink:#d6d3ca; --ink2:#9aa19d; --ink3:#6d746f;
+  --line:#3c434b; --line2:#4d555e;
+  --cin:#d07a5f; --cin-bg:#3b2f2a;
+  --hp:#d97b6b; --mp:#7fa3b8; --qi:#cfa45f;
+  --mapline:#46505a; --noise:.07;
+  --accent:#c96a52; --on-a:#4a3630; --on-b:#41302b; --card-hi:#333a42;
+}
+html[data-theme="sha"] {
+  --paper:#ece1c8; --card:#f7f0dd; --card2:#f1e7d0;
+  --ink:#453626; --ink2:#857356; --ink3:#b3a284;
+  --line:#ddd0b2; --line2:#c9b995;
+  --cin:#a04a2a; --cin-bg:#f4e4da;
+  --hp:#b85c42; --mp:#5f7f95; --qi:#bd9550;
+  --mapline:#d3c3a0; --noise:.16;
+  --accent:#b05a30; --on-a:#f0d8c8; --on-b:#e6c9b4; --card-hi:#fbf6e8;
+}
+
+html,body { height:100%; }
+body {
+  font:15px/1.6 -apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  background:var(--paper); color:var(--ink);
+  overflow:hidden; overscroll-behavior:none;
+}
+.num { font-variant-numeric:tabular-nums; }
+
+body::after {
+  content:''; position:fixed; inset:0; z-index:2000; pointer-events:none;
+  opacity:var(--noise); background-repeat:repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0 0 0.5'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.app { position:relative; display:flex; flex-direction:column; height:100vh; height:100dvh; max-width:540px; margin:0 auto; background:var(--paper); padding-bottom:var(--kbh); }
+.app.kb #dock, .app.kb #qnav { display:none; }
+
+#fx {
+  position:fixed; top:16%; left:0; right:0; z-index:60; pointer-events:none;
+  display:flex; align-items:center; justify-content:center; gap:14px;
+  font-family:var(--serif); font-size:36px; font-weight:700; letter-spacing:14px; text-indent:14px;
+  color:var(--cin); opacity:0; text-shadow:0 2px 16px rgba(0,0,0,.25);
+}
+#fx.foe { color:#8a2f1d; }
+#fx::before, #fx::after { content:''; height:2px; width:38px; background:currentColor; opacity:.35; border-radius:1px; flex:none; }
+#fx.go { animation:pfmgo 1.15s cubic-bezier(.22,.9,.3,1) both; }
+@keyframes pfmgo {
+  0% { opacity:0; transform:scale(2.4) rotate(-3deg); filter:blur(10px); }
+  18% { opacity:1; transform:scale(1) rotate(0); filter:blur(0); }
+  62% { opacity:1; transform:scale(1); }
+  100% { opacity:0; transform:scale(.92) translateY(-22px); filter:blur(3px); }
+}
+
+.seal { display:inline-block; font-family:var(--serif); background:var(--cin); color:var(--paper); font-size:9.5px; line-height:1.5; padding:0 5px 1px; border-radius:3px; vertical-align:1px; }
+
+header { flex:none; display:flex; align-items:center; gap:10px; padding:8px 12px; padding-top:calc(8px + env(safe-area-inset-top)); background:var(--card); border-bottom:1px solid var(--line); }
+.who { flex:1; min-width:0; }
+.n1 { font-family:var(--serif); font-size:14.5px; font-weight:700; letter-spacing:1px; }
+.n1 em { font-style:normal; background:var(--cin); color:var(--paper); font-size:10px; padding:0 6px 1px; border-radius:3px; margin-left:8px; vertical-align:1px; }
+.n1 .svt { font-size:10px; color:var(--amber); margin-left:9px; letter-spacing:1px; font-weight:600; }
+.n1 .clk { font-size:10px; color:var(--ink3); margin-left:8px; letter-spacing:1px; font-weight:400; }
+.n1 .clk.night { color:var(--mp); }
+.gauge { display:flex; gap:12px; margin-top:5px; }
+.g { display:flex; align-items:center; gap:6px; }
+.g .lb { font-size:10px; color:var(--ink3); }
+.g .tr { width:72px; height:4px; background:var(--paper); border-radius:2px; overflow:hidden; }
+.g .tr i { display:block; height:100%; background:linear-gradient(180deg,var(--accent),var(--hp)); transition:width .4s; }
+.g.m .tr i { background:var(--mp); }
+.g .tx { font-size:10px; color:var(--ink2); }
+.fxbar { display:flex; gap:4px; margin-top:4px; flex-wrap:wrap; }
+.fxbar:empty { display:none; margin:0; }
+.fxp { font-size:9px; padding:1px 7px; border-radius:999px; border:1px solid; letter-spacing:.5px; }
+.fxp.poison { color:var(--cin); border-color:var(--cin); background:var(--cin-bg); }
+.fxp.omen { color:var(--teal); border-color:var(--teal); background:rgba(63,122,128,.07); }
+.mbtn { flex:none; width:38px; height:38px; border:1px solid var(--line2); border-radius:8px; color:var(--ink2); font-size:16px; background:var(--card2); display:flex; align-items:center; justify-content:center; }
+.mbtn:active { background:var(--line); }
+
+#scene { flex:none; max-height:34%; overflow-y:auto; overscroll-behavior:contain; background:linear-gradient(180deg,var(--card),var(--paper)); border-bottom:1px solid var(--line); }
+#scene::-webkit-scrollbar { width:0; }
+.roombar { display:flex; align-items:center; gap:8px; padding:8px 12px 6px; position:sticky; top:0; background:var(--card); z-index:2; }
+.rn { font-family:var(--serif); font-size:16px; font-weight:700; letter-spacing:2px; border-left:3px solid var(--cin); padding-left:9px; line-height:1.25; }
+.app.battling .rn { border-left-color:var(--qi); }
+.rz { font-size:10px; color:var(--ink3); letter-spacing:2px; }
+.rtg { margin-left:auto; width:28px; height:28px; color:var(--ink3); font-size:13px; }
+.app.sc_off #scbody { display:none; }
+.app.sc_off .rtg { transform:rotate(-90deg); }
+#scbody { padding:0 12px 8px; }
+#entlist { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; }
+.sec { grid-column:1 / -1; display:flex; align-items:center; gap:10px; margin:9px 2px 4px; font-size:10px; color:var(--ink3); letter-spacing:4px; text-indent:4px; justify-content:center; }
+.sec::before, .sec::after { content:''; flex:1; border-top:1px solid var(--line); }
+.empty { grid-column:1 / -1; text-align:center; margin:2px 0 4px; font-size:12px; color:var(--ink3); letter-spacing:2px; }
+.ent { border:1px solid var(--line); border-radius:10px; background:var(--card2); overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.05); transition:border-color .15s, background .15s; }
+.ent .crow { display:flex; align-items:baseline; gap:5px; padding:6px 9px 0; min-width:0; flex-wrap:wrap; }
+.ent .ic { font-size:11px; flex:none; align-self:center; }
+.ent .ic.foe { color:var(--cin); }
+.ent .ic.pl { color:var(--teal); }
+.ent .ic.it { color:var(--amber); }
+.ent .nm { font-size:13.5px; font-weight:600; max-width:58%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ent .tt { font-size:10px; color:var(--ink2); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ent .cstat { display:flex; align-items:center; gap:7px; padding:3px 9px 6px; }
+.ent .chtr { flex:1; min-width:0; height:3.5px; background:var(--paper); border-radius:2px; overflow:hidden; }
+.ent .chtr i { display:block; height:100%; background:linear-gradient(180deg,var(--accent),var(--hp)); transition:width .3s; }
+.ent .chtr.low i { animation:hplow .8s infinite alternate; }
+@keyframes hplow { from { opacity:.4; } to { opacity:1; } }
+.ent .ct { font-size:9.5px; color:var(--ink2); flex:none; }
+.ent .ct.gd { color:var(--ink3); letter-spacing:1px; }
+.ent:active { background:var(--line); }
+.ent.foc { border-left:3px solid var(--cin); }
+.ent.plc { border-left:3px solid var(--teal); }
+.ent.itc { border-left:3px solid var(--line2); }
+.ent.sel { border-color:var(--cin); background:var(--cin-bg); }
+.ent.sel .nm { color:var(--cin); }
+.ent .badges { flex:none; display:flex; gap:3px; }
+.ent .bd2 { font-size:8.5px; border:1px solid var(--line2); color:var(--ink3); border-radius:3px; padding:0 3px; align-self:center; flex:none; }
+.ent .bd2.shop { color:var(--amber); border-color:var(--amber); }
+.ent .bd2.fr { color:var(--teal); border-color:var(--teal); }
+.ent .bd2.qn { background:var(--amber); border-color:var(--amber); color:var(--paper); }
+
+/* ═══ 悬浮操作气泡：锚定卡片，不进文档流、零布局破坏 ═══
+   fixed 定位；下放优先/越界翻上；左右钳制；箭头指向卡片中线 */
+.popbar { position:fixed; z-index:15; display:flex; flex-wrap:wrap; gap:5px; padding:7px 8px;
+  background:var(--card); border:1px solid var(--cin); border-radius:10px;
+  box-shadow:0 6px 22px rgba(0,0,0,.24); animation:popin .16s ease both;
+  max-width:min(92vw,340px); }
+@keyframes popin { from { opacity:0; transform:translateY(4px) scale(.97); } }
+.popbar::before { content:''; position:absolute; top:-5px; left:var(--ax,50%); margin-left:-5px;
+  border:5px solid transparent; border-bottom-color:var(--cin); border-top:none; }
+.popbar.up::before { top:auto; bottom:-5px; border-bottom-color:transparent; border-top:5px solid var(--cin); }
+.popbar .eb { flex:1 1 auto; min-width:52px; height:36px; border:1px solid var(--line2); border-radius:8px; background:var(--paper); font-size:12.5px; font-weight:600; letter-spacing:2px; display:flex; align-items:center; justify-content:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 8px; }
+.popbar .eb:active { background:var(--line); transform:scale(.95); }
+.popbar .eb.main { background:linear-gradient(180deg,var(--accent),var(--cin)); border-color:var(--cin); color:var(--paper); }
+.popbar .eb.teal { border-color:var(--teal); color:var(--teal); background:rgba(63,122,128,.07); }
+.popbar .eb.x { flex:0 0 36px; min-width:36px; color:var(--ink3); letter-spacing:0; padding:0; }
+
+.bt { display:flex; align-items:stretch; gap:7px; padding:2px 0 5px; }
+.bcard { flex:1; min-width:0; border:1px solid var(--line); border-radius:11px; background:var(--card2); padding:7px 10px 7px; }
+.bcard.me { border-top:3px solid var(--ink2); background:var(--card); }
+.bcard.foec { cursor:pointer; border-top:3px solid var(--cin); }
+.bhead { display:flex; align-items:baseline; gap:6px; margin-bottom:6px; flex-wrap:wrap; }
+.bnm { font-family:var(--serif); font-size:14.5px; font-weight:700; letter-spacing:1px; }
+.bcard.foec .bnm { color:var(--cin); }
+.btt { font-size:10px; color:var(--ink3); letter-spacing:1px; }
+.btt .fast { color:var(--cin); font-weight:600; }
+.bstat { display:flex; align-items:center; gap:7px; margin:4.5px 0; }
+.bstat .lb { font-size:9.5px; color:var(--ink3); width:20px; flex:none; }
+.bstat .tr { flex:1; min-width:0; height:6px; background:var(--paper); border-radius:3px; overflow:hidden; }
+.bstat .tr i { display:block; height:100%; border-radius:3px; background:linear-gradient(180deg,var(--accent),var(--hp)); transition:width .12s linear; }
+.bstat .tr.mp i { background:var(--mp); }
+.bstat .tr.ch i { background:var(--qi); }
+.bstat .tr.ch.mine i { background:var(--teal); }
+.bstat .tr.ch.full i { background:var(--teal); box-shadow:0 0 6px rgba(63,122,128,.5); }
+.bstat .tr.ch.warn i { background:var(--cin); animation:chwarn .4s infinite alternate; }
+@keyframes chwarn { from{opacity:.45;} to{opacity:1;} }
+.bstat .tx { font-size:10px; color:var(--ink2); width:52px; text-align:right; flex:none; }
+.bvs { align-self:center; flex:none; width:34px; height:34px; border-radius:50%; background:var(--cin-bg); border:1px solid var(--cin); color:var(--cin); display:flex; align-items:center; justify-content:center; font-size:14px; }
+.bcard.hit { animation:bhit .3s; }
+@keyframes bhit { 30% { background:var(--cin-bg); transform:translateX(2px); } }
+.bpfm { margin-top:5px; font-size:10.5px; color:var(--teal); letter-spacing:1px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bpfm b { font-weight:700; }
+.bpfm.none { color:var(--ink3); }
+
+.stage { flex:1; min-height:0; display:flex; flex-direction:column; }
+#logtabs { flex:none; display:flex; align-items:center; gap:6px; padding:5px 12px 4px; background:var(--card); border-bottom:1px solid var(--line); }
+.lt { padding:4px 15px; font-size:12px; letter-spacing:2px; color:var(--ink2); border:1px solid var(--line2); border-radius:999px; background:var(--card2); position:relative; }
+.lt.on { color:var(--cin); border-color:var(--cin); background:var(--cin-bg); }
+.lt .bdg { position:absolute; right:-6px; top:-6px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--cin); color:var(--paper); font-size:9px; line-height:16px; text-align:center; display:none; }
+.lt .bdg.show { display:block; }
+.rgrp { margin-left:auto; display:flex; gap:6px; align-items:center; }
+#filters { display:none; gap:4px; }
+.app.chatmode #filters { display:flex; }
+.ft { padding:3px 10px; font-size:10.5px; letter-spacing:1px; color:var(--ink3); border-radius:999px; border:1px solid transparent; }
+.ft.on { color:var(--teal); border-color:var(--teal); background:rgba(63,122,128,.07); }
+.ibtn { width:34px; height:28px; border:1px solid var(--line2); border-radius:8px; color:var(--ink2); font-size:13px; background:var(--card2); display:flex; align-items:center; justify-content:center; position:relative; }
+.ibtn:active { background:var(--cin-bg); color:var(--cin); }
+.ibtn .bdg { position:absolute; right:-5px; top:-5px; min-width:15px; height:15px; padding:0 4px; border-radius:8px; background:var(--cin); color:var(--paper); font-size:9px; line-height:15px; text-align:center; display:none; }
+.ibtn .bdg.show { display:block; }
+
+.outwrap { flex:1; min-height:0; position:relative; }
+#output { position:absolute; inset:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:10px 16px 8px; user-select:text; line-height:1.7; }
+.msg { margin:3px 0; word-break:break-word; animation:rise .2s ease both; }
+@keyframes rise { from{opacity:0; transform:translateY(3px);} to{opacity:1; transform:none;} }
+.app.chatmode #output .msg:not(.chat) { display:none; }
+.app.chatmode.f-room #output .msg.chat:not(.say) { display:none; }
+.app.chatmode.f-world #output .msg.chat:not(.wor) { display:none; }
+.app.chatmode.f-priv #output .msg.chat:not(.pri) { display:none; }
+.cmd { color:var(--ink3); font-size:12px; }
+.sys { color:var(--ink2); font-size:13.5px; }
+.me { color:var(--ink); font-weight:600; }
+.foe { color:var(--cin); }
+.say { color:var(--green); }
+.gain { color:var(--amber); }
+.hint { color:var(--teal); font-size:12.5px; }
+.wor { color:var(--amber); }
+.pri { color:var(--teal); font-style:italic; }
+.pfmm { color:var(--teal); font-weight:600; }
+.amb { color:var(--ink3); font-size:12px; }
+
+#verbs { flex:none; height:62px; padding:6px 8px; background:var(--card); border-top:1px solid var(--line); display:none; }
+.app.battling #verbs { display:flex; }
+#verbs .skrow { flex:1; display:flex; gap:5px; overflow-x:auto; align-items:stretch; min-width:0; }
+.skrow::-webkit-scrollbar { display:none; }
+.skb { flex:none; width:56px; min-width:56px; position:relative; overflow:hidden; border:1px solid var(--line2); border-radius:10px; background:linear-gradient(180deg,var(--card-hi),var(--card2)); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+.skb:active { transform:scale(.94); background:var(--line); }
+.skb .sn { font-size:11.5px; font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.skb .sc { font-size:8.5px; color:var(--ink3); }
+.skb.on { border-color:var(--cin); background:linear-gradient(180deg,var(--on-a),var(--on-b)); color:var(--cin); box-shadow:0 0 0 1px var(--cin) inset; }
+.skb.act { border-color:var(--teal); color:var(--teal); background:rgba(63,122,128,.07); }
+.skb .cdp { position:absolute; left:0; bottom:0; height:3px; width:0%; background:var(--cin); border-radius:0 2px 0 0; transition:width .1s linear; }
+.skb.cd { opacity:.55; }
+.skb.cd .sn { color:var(--ink2); }
+
+#boverlay { position:fixed; inset:0; z-index:40; display:none; align-items:center; justify-content:center; background:rgba(30,24,16,.55); padding:20px; transition:opacity .5s ease; }
+#boverlay.show { display:flex; }
+#boverlay.fade { opacity:0; pointer-events:none; }
+.bocard { width:min(88vw,380px); background:var(--paper); border:1px solid var(--line2); border-radius:16px; padding:22px 20px 16px; text-align:center; box-shadow:0 16px 60px rgba(0,0,0,.4); animation:bopop .32s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes bopop { from { opacity:0; transform:scale(.8) translateY(20px); } }
+.botitle { font-family:var(--serif); font-size:34px; font-weight:700; letter-spacing:10px; text-indent:10px; color:var(--cin); line-height:1.3; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.botitle.lose { color:var(--ink2); }
+.botitle.flee { color:var(--teal); }
+.bosub { font-size:12.5px; color:var(--ink2); margin:8px 0 12px; }
+.borow { display:flex; align-items:baseline; gap:8px; padding:5px 4px; font-size:13px; color:var(--ink2); text-align:left; }
+.borow .dt { flex:1; border-bottom:1px dotted var(--line2); transform:translateY(-3px); }
+.borow b { color:var(--ink); font-weight:600; }
+.borow b.gain { color:var(--amber); }
+.bobtn { width:100%; margin-top:14px; height:40px; border-radius:12px; background:linear-gradient(180deg,var(--accent),var(--cin)); color:var(--paper); font-family:var(--serif); font-size:14px; font-weight:700; letter-spacing:6px; text-indent:6px; opacity:.92; }
+.bobtn:active { filter:brightness(.9); }
+.bohint { font-size:9.5px; color:var(--ink3); margin-top:7px; letter-spacing:2px; }
+
+#dock { flex:none; height:124px; background:var(--card); border-top:1px solid var(--line); position:relative; overflow:hidden; }
+#mapview { height:100%; display:flex; flex-direction:column; }
+.mapbar { display:flex; align-items:center; gap:8px; width:100%; height:24px; padding:0 12px; color:var(--ink3); font-size:9.5px; letter-spacing:3px; flex:none; }
+.mapbar .tri { margin-left:auto; font-size:9px; transform:rotate(180deg); }
+.mapbar .mx { color:var(--ink2); letter-spacing:0; font-size:10.5px; max-width:72%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mapwrap { flex:1; display:flex; justify-content:center; align-items:center; padding:0 0 4px; min-height:0; }
+#mapSvg { display:block; width:min(60vw,210px); height:auto; }
+#mapSvg .mlink { stroke:var(--mapline); stroke-width:1; }
+#mapSvg .ceg { cursor:pointer; }
+#mapSvg .ce { fill:var(--card); stroke:var(--line2); stroke-width:1; }
+#mapSvg .ceg:active .ce { fill:var(--cin); }
+#mapSvg .et { font-size:10.5px; fill:var(--ink2); text-anchor:middle; }
+#mapSvg .et.unk { fill:var(--ink3); }
+#mapSvg .ccg { cursor:pointer; }
+#mapSvg .cc { fill:var(--cin-bg); stroke:var(--cin); stroke-width:1.5; }
+#mapSvg .cm { font-size:11px; fill:var(--cin); font-weight:700; text-anchor:middle; }
+#mapSvg.combat .ceg { opacity:.25; }
+#mapSvg.combat .ccg { opacity:.5; }
+
+#qbar { position:absolute; inset:0; display:none; flex-direction:column; gap:6px; padding:7px 9px; background:var(--card); }
+.app.qmode #qbar { display:flex; }
+.app.qmode #mapview { display:none; }
+.qrow { flex:1; display:flex; gap:6px; min-height:0; }
+.qb { flex:1; min-width:0; border:1px solid var(--line2); border-radius:9px; background:linear-gradient(180deg,var(--card-hi),var(--card2)); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:2px; overflow:hidden; }
+.qb:active { transform:scale(.95); background:var(--line); }
+.qb .qe { font-size:8.5px; color:var(--ink3); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.qb .qz { font-size:11.5px; font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.qb.x { border-color:var(--cin); }
+.qb.x .qz { color:var(--cin); }
+
+#qnav { flex:none; display:flex; gap:5px; padding:6px 8px; padding-bottom:calc(6px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); }
+.nb { flex:1; min-width:0; height:46px; border:1.5px solid var(--line2); border-radius:10px; background:var(--card2); color:var(--ink2); font-size:10.5px; font-weight:600; line-height:1.3; letter-spacing:1px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.nb span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nb .nico { font-size:15px; line-height:1.1; }
+.nb:active { transform:scale(.95); background:var(--line); }
+.nb.on { border-color:var(--cin); color:var(--cin); background:var(--cin-bg); }
+.nb.sys { color:var(--amber); }
+.nb.term { color:var(--teal); }
+
+/* ═══ 通用弹窗（上半屏锚定：键盘从底部升起永不遮挡）═══ */
+.ipop { position:fixed; inset:0; z-index:20; display:none; align-items:flex-start; justify-content:center; padding:12vh 14px 0; background:rgba(40,32,20,.45); overflow-y:auto; }
+.ipop.show { display:flex; }
+.mcard { width:min(92vw,420px); background:var(--paper); border:1px solid var(--line2); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.3); padding:14px; animation:expdown .2s ease both; margin-bottom:22vh; }
+.spcard { max-height:70vh; overflow-y:auto; }
+.spcard::-webkit-scrollbar { width:0; }
+.cphead { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.cphead h4 { font-family:var(--serif); font-size:16px; letter-spacing:3px; border-left:3px solid var(--cin); padding-left:9px; line-height:1.3; }
+.cphead h4 em { font-style:normal; font-size:10px; color:var(--ink3); letter-spacing:1px; margin-left:8px; }
+.cphead .hgrp { display:flex; align-items:center; gap:6px; }
+.jmp { font-size:11px; padding:5px 10px; border:1px solid var(--line2); border-radius:999px; background:var(--card); color:var(--ink2); letter-spacing:1px; }
+.jmp:active { background:var(--cin-bg); color:var(--cin); border-color:var(--cin); }
+.modes { display:flex; gap:6px; margin-bottom:10px; }
+.modep { flex:1; height:34px; border:1px solid var(--line2); border-radius:9px; background:var(--card); color:var(--ink2); font-size:12.5px; letter-spacing:2px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+.modep:active { background:var(--line); }
+.modep.on { border-color:var(--ink); color:var(--ink); background:var(--card2); }
+.modep.on.k1 { border-color:var(--amber); color:var(--amber); }
+.modep.on.k2 { border-color:var(--teal); color:var(--teal); }
+.tgt { display:none; gap:6px; align-items:center; margin-bottom:8px; font-size:12px; color:var(--ink2); }
+.tgt.show { display:flex; }
+.tgt b { color:var(--teal); font-weight:600; }
+.ipin { display:flex; gap:6px; }
+.ipin input { flex:1; min-width:0; height:42px; padding:0 12px; border:1.5px solid var(--line2); border-radius:10px; outline:none; background:var(--paper); color:var(--ink); font-size:16px; caret-color:var(--cin); }
+.ipin input:focus { border-color:var(--cin); }
+.ipin .send { flex:none; width:64px; height:42px; border-radius:10px; background:linear-gradient(180deg,var(--accent),var(--cin)); color:var(--paper); font-size:13px; letter-spacing:2px; }
+.cpchips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; min-height:20px; }
+.chip { font-size:12px; padding:5px 11px; border:1px solid var(--line2); border-radius:999px; background:var(--card); color:var(--ink2); }
+.chip:active { background:var(--cin-bg); color:var(--cin); }
+.cptip { font-size:10.5px; color:var(--ink3); margin-top:10px; line-height:1.9; }
+
+.mask { position:fixed; inset:0; z-index:9; background:rgba(40,32,20,.35); opacity:0; pointer-events:none; transition:opacity .22s; }
+.mask.show { opacity:1; pointer-events:auto; }
+
+.drawer, .ldrawer { position:fixed; top:0; bottom:0; width:min(84vw,320px); z-index:10; background:var(--paper); display:flex; flex-direction:column; padding:14px 16px; padding-top:calc(14px + env(safe-area-inset-top)); padding-bottom:calc(14px + env(safe-area-inset-bottom)); transition:transform .28s cubic-bezier(.32,.72,.28,1); box-shadow:0 0 24px rgba(0,0,0,.15); }
+.drawer { right:0; border-left:1px solid var(--line2); transform:translateX(105%); }
+.ldrawer { left:0; border-right:1px solid var(--line2); transform:translateX(-105%); }
+.drawer.show, .ldrawer.show { transform:none; }
+.dhead { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+.dhead h3 { font-family:var(--serif); font-size:15px; font-weight:700; letter-spacing:4px; border-left:3px solid var(--cin); padding-left:9px; line-height:1.3; }
+.npTitle { font-family:var(--serif); font-size:19px; font-weight:700; letter-spacing:2px; line-height:1.3; }
+.npTitle.foe { color:var(--cin); }
+.npTitle.pl { color:var(--teal); }
+.npKind { font-size:10px; letter-spacing:2px; color:var(--ink3); margin-top:4px; }
+#npBody { flex:1; overflow-y:auto; min-height:0; }
+#npBody::-webkit-scrollbar { width:0; }
+.npSec { margin:14px 2px 6px; display:flex; align-items:center; gap:8px; font-size:10px; color:var(--ink3); letter-spacing:3px; }
+.npSec::after { content:''; flex:1; border-top:1px solid var(--line); }
+.npBar { display:flex; align-items:center; gap:9px; padding:5px 2px; font-size:13px; }
+.npBar .lb { font-size:11px; color:var(--ink2); width:34px; flex:none; }
+.npBar .tr { flex:1; height:7px; background:var(--card); border-radius:3px; overflow:hidden; }
+.npBar .tr i { display:block; height:100%; background:linear-gradient(180deg,var(--accent),var(--hp)); }
+.npBar .v { font-size:11.5px; color:var(--ink); width:70px; text-align:right; flex:none; }
+.npDesc { font-size:13px; color:var(--ink2); line-height:1.9; padding:2px 2px 6px; }
+.npMv { font-size:12.5px; color:var(--ink); padding:4px 0 4px 14px; position:relative; }
+.npMv::before { content:'·'; position:absolute; left:2px; color:var(--cin); }
+.npMv.dp::before { content:'✷'; font-size:9px; top:1px; color:var(--amber); }
+.npActs { display:flex; flex-wrap:wrap; gap:7px; padding:8px 2px 2px; }
+.npAct { font-size:13px; padding:9px 0; flex:1; min-width:70px; text-align:center; border:1px solid var(--line2); border-radius:9px; background:var(--card); letter-spacing:2px; }
+.npAct:active { background:var(--line); }
+.npAct.main { background:linear-gradient(180deg,var(--accent),var(--cin)); border-color:var(--cin); color:var(--paper); }
+.npAct.teal { border-color:var(--teal); color:var(--teal); background:rgba(63,122,128,.07); }
+.npAct.hold { opacity:.5; pointer-events:none; }
+.shp { display:flex; align-items:center; gap:8px; padding:8px 2px; border-bottom:1px dashed var(--line); }
+.shp:last-child { border-bottom:none; }
+.shp .nm { font-size:13px; font-weight:600; flex:none; }
+.shp .tt { font-size:10.5px; color:var(--ink2); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shp .sp { flex:1; min-width:0; }
+.shp .pr { font-size:11.5px; color:var(--amber); font-weight:600; flex:none; }
+.shpb { flex:none; font-size:11.5px; padding:5px 13px; border:1px solid var(--cin); color:var(--cin); border-radius:6px; background:var(--cin-bg); }
+.shpb:active { background:var(--cin); color:var(--paper); }
+.shpb.off { opacity:.4; pointer-events:none; }
+.shpb.gold { border-color:var(--amber); color:var(--amber); background:rgba(138,107,52,.07); }
+.dtabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+.dtab { flex:1; min-width:52px; padding:8px 0; text-align:center; font-size:12px; letter-spacing:2px; color:var(--ink2); border:1px solid var(--line2); border-radius:8px; background:var(--card); }
+.dtab.on { color:var(--cin); border-color:var(--cin); background:var(--cin-bg); }
+.ldr { display:flex; align-items:baseline; gap:8px; padding:8px 2px; font-size:13px; color:var(--ink2); }
+.ldr .dt { flex:1; border-bottom:1px dotted var(--line2); transform:translateY(-3px); }
+.ldr b { color:var(--ink); font-weight:500; }
+.ldr b.gold { color:var(--amber); }
+.vbs { display:flex; flex-wrap:wrap; gap:6px; padding:4px 2px 8px; }
+.vb { font-size:12px; padding:6px 14px; border:1px solid var(--line2); border-radius:6px; background:var(--card); }
+.vb:active { background:var(--line); }
+.vb.cin { border-color:var(--teal); color:var(--teal); background:rgba(63,122,128,.07); }
+.vb.amb2 { border-color:var(--amber); color:var(--amber); background:rgba(138,107,52,.07); }
+.vb.atk { background:linear-gradient(180deg,var(--accent),var(--cin)); border-color:var(--cin); color:var(--paper); min-width:56px; }
+.vb.def { min-width:56px; }
+.idesc { padding:2px 2px 8px; font-size:12px; color:var(--ink2); line-height:1.7; }
+.cdtag { font-size:9px; color:var(--cin); border:1px solid var(--cin); border-radius:3px; padding:1px 5px; flex:none; }
+.thgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding:4px 2px; }
+.thb { border:1.5px solid var(--line2); border-radius:10px; padding:8px 6px; display:flex; flex-direction:column; gap:3px; align-items:center; background:var(--card); }
+.thb .tn { font-size:11.5px; font-weight:700; letter-spacing:1px; }
+.thb .sub { font-size:10px; font-weight:600; color:var(--ink); }
+.thb .pb { width:100%; height:3px; background:var(--paper); border-radius:2px; overflow:hidden; }
+.thb .pb i { display:block; height:100%; background:var(--teal); }
+.thb .art { font-size:9px; color:var(--ink2); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.thb.on { border-color:var(--cin); box-shadow:0 0 0 1px var(--cin) inset; }
+.thb .sw { width:100%; height:24px; border-radius:6px; border:1px solid var(--line2); }
+.expBox { margin:6px 2px 2px; border:1px solid var(--line2); border-radius:8px; background:var(--card2); padding:8px 10px; }
+.expHead { display:flex; align-items:baseline; gap:6px; font-size:11px; color:var(--ink2); margin-bottom:5px; }
+.expHead b { color:var(--ink); font-size:12px; }
+.expHead .nx { margin-left:auto; font-size:9.5px; color:var(--ink3); }
+.expTr { height:5px; background:var(--paper); border-radius:3px; overflow:hidden; margin-bottom:7px; }
+.expTr i { display:block; height:100%; background:linear-gradient(90deg,var(--teal),var(--green)); border-radius:3px; transition:width .3s; }
+.expInfo { display:flex; gap:14px; flex-wrap:wrap; font-size:10px; color:var(--ink3); padding-bottom:7px; }
+.expInfo b { color:var(--ink); font-weight:600; }
+.expRow { display:flex; align-items:center; gap:8px; }
+.expBtn { flex:1; height:34px; border:1px solid var(--amber); color:var(--amber); border-radius:8px; background:rgba(138,107,52,.07); font-size:13px; font-weight:600; letter-spacing:2px; display:flex; align-items:center; justify-content:center; gap:5px; }
+.expBtn:active { background:var(--amber); color:var(--paper); }
+.expBtn:active .sub { color:var(--paper); }
+.expBtn .sub { font-size:9.5px; letter-spacing:0; font-weight:400; opacity:.85; }
+.expCmd { font-size:10px; color:var(--ink3); flex:none; letter-spacing:0; }
+.abLink { display:block; width:100%; text-align:right; font-size:10.5px; color:var(--ink3); padding:5px 2px 6px; letter-spacing:1px; }
+.abLink:active { color:var(--cin); }
+.abLink.left { text-align:left; }
+/* ═══ 任务行：两行式（上行 名称+徽章；下行 进度/去处 + 赏格）═══ */
+.qrow2 { display:block; width:100%; text-align:left; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--card2); margin:5px 0; }
+.qrow2:active { background:var(--line); }
+.qrow2 .r1 { display:flex; align-items:center; gap:6px; }
+.qrow2 .r1 .nm { font-size:13px; font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.qrow2 .tag { flex:none; font-size:8.5px; background:var(--amber); color:var(--paper); border-radius:3px; padding:0 5px; line-height:1.8; }
+.qrow2 .tag.go { background:none; border:1px solid var(--teal); color:var(--teal); padding:0 4px; }
+.qrow2 .tag.idle { background:none; border:1px solid var(--line2); color:var(--ink3); padding:0 4px; }
+.qrow2 .r2 { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.qrow2 .pt { font-size:10px; color:var(--ink3); flex:none; }
+.qrow2 .pb { flex:1; height:3px; background:var(--paper); border-radius:2px; overflow:hidden; min-width:24px; }
+.qrow2 .pb i { display:block; height:100%; background:var(--teal); }
+.qrow2 .pr { font-size:10.5px; color:var(--amber); font-weight:600; flex:none; }
+/* 抽屉武学页：行式浏览列表 */
+.artrow { display:flex; align-items:center; gap:9px; width:100%; text-align:left; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--card2); margin:5px 0; }
+.artrow:active { background:var(--line); }
+.artrow .ic { font-size:12px; color:var(--amber); flex:none; }
+.artrow .mid { flex:1; min-width:0; }
+.artrow .r1 { display:flex; align-items:baseline; gap:6px; }
+.artrow .nm { font-size:13.5px; font-weight:600; }
+.artrow .lv { font-size:10px; color:var(--amber); font-weight:600; flex:none; }
+.artrow .slots { display:flex; gap:4px; flex-wrap:wrap; margin-top:3px; }
+.artrow .slot { font-size:8.5px; border:1px solid var(--teal); color:var(--teal); border-radius:3px; padding:0 4px; line-height:1.6; }
+.artrow .slot.idle { border-color:var(--line2); color:var(--ink3); }
+.artrow .pb { height:3px; background:var(--paper); border-radius:2px; overflow:hidden; margin-top:5px; }
+.artrow .pb i { display:block; height:100%; background:var(--teal); }
+.artrow .go { flex:none; font-size:11px; color:var(--ink3); }
+.artrow.dim { opacity:.62; }
+.pfmTg { flex:none; font-size:10px; padding:3px 9px; border-radius:999px; border:1px solid var(--line2); color:var(--ink3); background:var(--card); letter-spacing:1px; }
+.pfmTg.on { border-color:var(--teal); background:var(--teal); color:var(--paper); }
+.pfmTg:active { transform:scale(.94); }
+/* ═══ 通用模块模板：卡片 / 标签（后端 module 消息驱动）═══ */
+.mcard2 { border:1px solid var(--line); border-radius:10px; background:var(--card2); padding:8px 10px; margin:5px 0; }
+.mcard2.tap { cursor:pointer; }
+.mcard2.tap:active { background:var(--line); }
+.mcard2 .mt { display:flex; align-items:center; gap:6px; }
+.mcard2 .mt .t1 { font-size:13px; font-weight:600; flex:none; }
+.mcard2 .mt .t2 { font-size:10px; color:var(--ink2); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mcard2 .badge { font-size:8.5px; border-radius:3px; padding:0 4px; line-height:1.7; border:1px solid var(--line2); color:var(--ink3); flex:none; }
+.mcard2 .badge.gold { background:var(--amber); border-color:var(--amber); color:var(--paper); }
+.mcard2 .badge.teal { border-color:var(--teal); color:var(--teal); }
+.mcard2 .msub { font-size:11px; color:var(--ink2); line-height:1.6; margin-top:3px; }
+.mtag { font-size:11px; padding:5px 12px; border:1px solid var(--line2); border-radius:999px; background:var(--card); color:var(--ink2); }
+.mtag.gold { border-color:var(--amber); color:var(--amber); background:rgba(138,107,52,.07); }
+.mtag.teal { border-color:var(--teal); color:var(--teal); background:rgba(63,122,128,.07); }
+.mtag.tap { cursor:pointer; }
+.mtag.tap:active { transform:scale(.95); }
+
+@media (prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
+</style>
+<link rel="icon" href="data:," />
+</head>
+<body>
+
+<div id="fx"></div>
+
+<div class="app" id="app">
+  <header>
+    <div class="who">
+      <div class="n1"><span id="pName">无名剑客</span><em id="lvTx">十二</em><span class="svt num" id="svTx">银 2000</span><span class="clk" id="clkTx"></span></div>
+      <div class="gauge">
+        <div class="g"><span class="lb">气血</span><span class="tr"><i id="hpBar"></i></span><span class="tx num" id="hpTx"></span></div>
+        <div class="g m"><span class="lb">内力</span><span class="tr"><i id="mpBar"></i></span><span class="tx num" id="mpTx"></span></div>
+      </div>
+      <div class="fxbar" id="fxbar"></div>
+    </div>
+    <button class="mbtn" id="menuBtn">☰</button>
+  </header>
+
+  <section id="scene">
+    <div class="roombar">
+      <span class="rn" id="rnText">…</span>
+      <span class="rz" id="rzText"></span>
+      <button class="rtg" id="scnToggle">▾</button>
+    </div>
+    <div id="scbody">
+      <div id="entlist"></div>
+      <!-- 操作气泡不在此渲染：fixed 悬浮、锚定被点卡片，零布局破坏 -->
+    </div>
+  </section>
+
+  <div class="stage">
+    <div id="logtabs">
+      <button class="lt on" data-t="all">叙事</button>
+      <button class="lt" data-t="chat">闲聊<span class="bdg" id="bdg">0</span></button>
+      <div class="rgrp">
+        <div id="filters">
+          <button class="ft on" data-f="">全</button>
+          <button class="ft" data-f="f-room">房</button>
+          <button class="ft" data-f="f-world">世</button>
+          <button class="ft" data-f="f-priv">私</button>
+        </div>
+        <button class="ibtn" id="cmdBtn" title="指令弹窗">✎</button>
+        <button class="ibtn" id="inpBtn" title="聊天弹窗（说/喊/私）">💬<span class="bdg" id="ibdg">0</span></button>
+      </div>
+    </div>
+    <div class="outwrap"><main id="output" aria-live="polite"></main></div>
+  </div>
+
+  <nav id="verbs"></nav>
+
+  <div id="dock">
+    <div id="mapview">
+      <button class="mapbar" id="mapToggle">
+        <span>地图</span><span class="mx" id="mxText"></span><span class="tri">▾</span>
+      </button>
+      <div class="mapwrap"><svg id="mapSvg" viewBox="0 0 196 86"></svg></div>
+    </div>
+    <div id="qbar"></div>
+  </div>
+
+  <nav id="qnav">
+    <button class="nb term" id="nbTerm"><span class="nico">⌨</span><span>指令</span></button>
+    <button class="nb" data-q="cy"><span>常用</span><span>指令</span></button>
+    <button class="nb" data-q="jn"><span>技能</span><span>相关</span></button>
+    <button class="nb" data-q="zd"><span>战斗</span><span>相关</span></button>
+    <button class="nb" data-q="rw"><span>任务</span><span>相关</span></button>
+    <button class="nb" data-q="zn"><span>游戏</span><span>指南</span></button>
+    <button class="nb" data-q="pl"><span>频道</span><span>交流</span></button>
+    <button class="nb sys" id="nbSys"><span class="nico">☰</span><span>系统</span></button>
+  </nav>
+</div>
+
+<div id="boverlay">
+  <div class="bocard">
+    <div class="botitle" id="boTitle">大 胜</div>
+    <div class="bosub" id="boSub"></div>
+    <div id="boRows"></div>
+    <button class="bobtn" id="boOk">收 起</button>
+    <div class="bohint">稍候自动继续 · 点击任意处跳过</div>
+  </div>
+</div>
+
+<!-- ═══ 指令弹窗：纯指令专用（独立于聊天），上半屏锚定 ═══ -->
+<div class="ipop" id="cpop">
+  <div class="mcard">
+    <div class="cphead">
+      <h4>指 令<em>纯行动指令</em></h4>
+      <div class="hgrp">
+        <button class="jmp" id="cpJump">💬 聊天</button>
+        <button class="mbtn" id="cpClose" style="width:32px;height:32px">✕</button>
+      </div>
+    </div>
+    <div class="ipin">
+      <input id="cpInput" type="text" autocomplete="off" autocapitalize="off" enterkeyhint="send" placeholder="北 / 打 野狼 / 学 太极拳 / 帮" />
+      <button class="send" id="cpSend">执行</button>
+    </div>
+    <div class="cpchips" id="cpQuick"></div>
+    <div class="cpchips" id="cpChips"></div>
+    <div class="cptip" id="cpTip">指令直达后端，语义由后端裁决｜发送后弹窗不关，可连续执行｜聊天请点右上 💬</div>
+  </div>
+</div>
+
+<!-- ═══ 聊天弹窗：纯聊天（说/喊/私），独立于指令，上半屏锚定 ═══ -->
+<div class="ipop" id="ipop">
+  <div class="mcard">
+    <div class="cphead">
+      <h4>聊 天<em>说 / 喊 / 私</em></h4>
+      <div class="hgrp">
+        <button class="jmp" id="ipJump">✎ 指令</button>
+        <button class="mbtn" id="ipClose" style="width:32px;height:32px">✕</button>
+      </div>
+    </div>
+    <div class="modes">
+      <button class="modep on" data-m="0">说</button>
+      <button class="modep" data-m="1">喊</button>
+      <button class="modep" data-m="2">私</button>
+    </div>
+    <div class="tgt" id="ipTgt"></div>
+    <div class="ipin">
+      <input id="ipInput" type="text" autocomplete="off" autocapitalize="off" enterkeyhint="send" placeholder="对本房说话……" />
+      <button class="send" id="ipSend">发送</button>
+    </div>
+    <div class="cpchips" id="ipChips"></div>
+    <div class="cptip" id="ipTip">发送后弹窗不关，可连续发言｜私语先在房间点选玩家｜执行指令请点右上 ✎</div>
+  </div>
+</div>
+
+<!-- ═══ 武学操作弹窗：参悟/激发/参战/散功（视觉与抽屉同源）═══ -->
+<div class="ipop" id="spop">
+  <div class="mcard spcard" id="spCard"></div>
+</div>
+
+<div class="mask" id="mask"></div>
+
+<!-- 左抽屉：NPC详情 / 任务册（列表→详情钻取） -->
+<aside class="ldrawer" id="ldrawer">
+  <div class="dhead">
+    <div>
+      <div class="npTitle" id="npName">详 情</div>
+      <div class="npKind" id="npKind"></div>
+    </div>
+    <button class="mbtn" id="lclose" style="width:32px;height:32px">✕</button>
+  </div>
+  <div id="npBody"></div>
+</aside>
+
+<aside class="drawer" id="drawer">
+  <div class="dhead">
+    <h3>名 帖</h3>
+    <button class="mbtn" id="closeBtn" style="width:32px;height:32px">✕</button>
+  </div>
+  <div class="dtabs">
+    <button class="dtab on" data-tab="stats">属 性</button>
+    <button class="dtab" data-tab="bag">行 囊</button>
+    <button class="dtab" data-tab="wuxue">武 学</button>
+    <button class="dtab" data-tab="quest">任 务</button>
+    <button class="dtab" data-tab="sys">系 统</button>
+    <!-- 通用模块页签（module 消息下发即挂页）由 JS 注入到此 -->
+  </div>
+  <div id="dbody"></div>
+</aside>
+
+<!-- ⚠️ 本文件由 minshe/tools/build_web.py 生成，请勿手改；改 www/app.part.html（或 relay/app.part.relay.html / relay/portal.part.html）后重新构建。上半部分 <style> 逐字节取自根目录 index.html 模板。 -->
+
+<!-- ═══ 连线面板：复用既有 .ipop/.mcard/.cphead/.ipin/.send/.cpchips/.cptip 类，
+     ★ 全部观感调整走【行内样式】（颜色一律取主题变量 → 多主题自动跟随），
+       不改模板 <style> 块（build_web.py 的"样式零改动"闸门会逐字节比对）。═══ -->
+<div class="ipop" id="lopop">
+  <div class="mcard" style="padding:0;overflow:hidden;border-radius:16px;border-color:var(--line2);box-shadow:0 14px 44px rgba(0,0,0,.32)">
+    <!-- 品牌区 -->
+    <div style="padding:15px 18px 13px;background:linear-gradient(168deg,var(--cin-bg) 0%,transparent 76%);border-bottom:1px solid var(--line)">
+      <div class="cphead" style="margin-bottom:0">
+        <h4>云梦江湖<em>网页客户端</em></h4>
+        <div class="hgrp"><span class="jmp" id="loState">未连接</span></div>
+      </div>
+      <div style="margin-top:7px;font-size:11px;color:var(--ink2);letter-spacing:.4px">一入江湖岁月催 —— 账号即名号，新账号直接建角</div>
+    </div>
+    <!-- 表单区 -->
+    <div style="padding:14px 16px 16px">
+      <div class="ipin">
+        <input id="loHost" type="text" autocomplete="off" autocapitalize="off" placeholder="服务器地址" />
+        <input id="loPort" type="text" autocomplete="off" autocapitalize="off" placeholder="端口" style="max-width:84px" />
+      </div>
+      <div class="ipin" style="margin-top:8px">
+        <input id="loId" type="text" autocomplete="off" autocapitalize="off" placeholder="账号（4–20 位，字母开头）" />
+      </div>
+      <div class="ipin" style="margin-top:8px">
+        <input id="loPw" type="password" autocomplete="off" placeholder="密码" />
+      </div>
+      <button class="send" id="loGo" style="width:100%;height:46px;border-radius:11px;margin-top:12px;font-size:15px;letter-spacing:6px;border:none;background:linear-gradient(180deg,var(--accent),var(--cin));color:var(--paper);box-shadow:0 3px 12px rgba(0,0,0,.16)">登 录</button>
+      <div class="cpchips" id="loChips" style="margin-top:10px"></div>
+      <div class="cptip" id="loTip" style="margin-top:10px;font-size:11px">新玩家：直接填一个新账号 + 密码点「登 录」，服务端会让你建角色（注册即登录）。老玩家填原有账号密码。｜账号 4–20 位、字母开头、只含 <code>a-z0-9_</code></div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════════════
+   云梦江湖 · minshe 网页客户端
+   ───────────────────────────────────────────────────────────────────────────
+   布局与样式：100% 沿用根目录 index.html 模板（本文件未改动 <style> 与既有 DOM）。
+   本脚本只做两件事：① 把驱动文本流解成结构化事件  ② 把事件画进模板的卡槽。
+
+   传输：FluffOS 原生 websocket 端口（config.ini: external_port_N : websocket <port>）
+         子协议 ascii ⇒ event.data 已是字符串（bare-LF）
+   协议：minshe/mudlib/include/zjmud.h（唯一真相）
+         ESA = "\x1b"  ⇒  控制标记 = ESC + 3 位数字
+         $zj# 字段分隔 · $br# 行内换行 · $z2# 次分隔
+         ESC[u:cmds:xxx] 可点按钮 · ESC[s:N] 尺寸提示 · ESC[..m ANSI 颜色
+
+   上行：纯文本命令行（与 telnet 完全一致），移动命令 = 出口方向名（见 feature/command.c:75）
+   下行标记（本脚本已实现的）：见下方 CODES 表；未实现的标记走 narrate 原样降级。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══ 0 · 基础工具 ═══ */
+const $  = id => document.getElementById(id);
+const el = (t, c, s) => { const n = document.createElement(t); if (c) n.className = c; if (s != null) n.textContent = s; return n; };
+const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const CN = '〇一二三四五六七八九';
+function cnNum(n) {
+  if (n >= 100) return String(n);
+  if (n < 10) return CN[n];
+  const t = (n / 10 | 0), o = n % 10;
+  return (t > 1 ? CN[t] : '') + '十' + (o ? CN[o] : '');
+}
+const output = $('output'), app = $('app');
+
+/* ═══ 1 · 协议常量（唯一真相：include/zjmud.h）═══ */
+const ESC = '\x1b';
+const SEP = '$zj#', SEP2 = '$z2#', BR = '$br#';
+const CODES = {
+  '000':'SYSY',    '001':'INPUTTXT','002':'TITLE',   '003':'EXIT',   '004':'LONG',
+  '005':'OBIN',    '006':'BTSET',   '007':'OBLONG',  '008':'OBACTS', '009':'OBACTS2',
+  '010':'YESNO',   '011':'MAPTXT',  '012':'HPTXT',   '013':'MORETXT','014':'FORCECMD',
+  '015':'TMPSAY',  '016':'FMSG',    '017':'FNOMSG',  '020':'POPMENU','021':'TTMENU',
+  '022':'CHARHP',  '023':'LONGXX',  '100':'CHANNEL', '903':'EXITRM', '905':'OBOUT',
+  '913':'EXITCL',  '999':'SYSEXIT'
+};
+/* 行终止符：这些标记的载荷到 \n 为止（驱动侧均为单行）；其余按"到下一标记为止"处理 */
+const LINE_END = new Set(['SYSY','TITLE','EXIT','OBIN','BTSET','TMPSAY','FORCECMD','CHARHP',
+  'CHANNEL','TTMENU','EXITRM','OBOUT','EXITCL','MAPTXT','HPTXT','YESNO','POPMENU',
+  'OBACTS','OBACTS2','INPUTTXT','FMSG','FNOMSG','LONG','LONGXX','MORETXT']);
+/* ANSI 颜色 → 模板叙事类名（NARR_CLS 白名单内） */
+const SGR2CLS = { 30:'amb', 31:'foe', 32:'say', 33:'gain', 34:'sys', 35:'pri', 36:'hint', 37:'',
+                  90:'amb', 91:'foe', 92:'say', 93:'gain', 94:'sys', 95:'pri', 96:'hint', 97:'' };
+/* 服务端编译诊断行（logind 把 LPCC 输出 write 给玩家）*/
+const DIAG_RE = [
+  /^编译时段错误[:：]/, /\bwarning:\s/, /\berror:\s/, /^\s*note: while loading/,
+  /^\s*\d+\s*\|\s/, /^\s*\|\s*\^/, /^\s*note: /
+];
+const ARROW = { north:'↑', south:'↓', east:'→', west:'←', northeast:'↗', northwest:'↖',
+  southeast:'↘', southwest:'↙', up:'⇧', down:'⇩', enter:'⇥', out:'⇤', in:'⇥',
+  northup:'⇧', southdown:'⇩', eastup:'⇧', westup:'⇧', '那里':'↗', '这里':'↘' };
+/* 方向坐标（地图用）：[dx, dy] 单位圆 */
+const DIRV = { north:[0,-1], south:[0,1], east:[1,0], west:[-1,0], northeast:[0.75,-0.75],
+  northwest:[-0.75,-0.75], southeast:[0.75,0.75], southwest:[-0.75,0.75],
+  up:[0,-1], down:[0,1], enter:[1,0], out:[-1,0] };
+
+/* ═══ 2 · 本地配置 ═══ */
+/* ★ 驱动的 websocket 端口（config.ini `external_port_2`）。本页可以被【任意静态服务】托管
+   （`tools/serve_web.mjs` / 中继 / 你自己的 nginx），那时 `location.port` 是静态服务的端口、
+   不是驱动的 ⇒ 端口只认这个常量 + 表单里填的值，**不从 location.port 推**。 */
+const DRIVER_WS_PORT = '2203';
+const CFG = {
+  key: 'minshe.web.v1',
+  d: { host:'', port:DRIVER_WS_PORT, id:'', },
+  load() { try { Object.assign(this.d, JSON.parse(localStorage.getItem(this.key) || '{}')); } catch (e) {} },
+  save() { try { localStorage.setItem(this.key, JSON.stringify({ host:this.d.host, port:this.d.port, id:this.d.id })); } catch (e) {} }
+};
+
+/* ═══ 3 · Net 传输层 ═══ */
+const DEC = new TextDecoder('utf-8');   /* 有状态：多字节 UTF-8 可能跨帧被切断（FluffOS AGENTS.md 硬规则 6） */
+const Net = {
+  ws: null, state: 'idle', retry: 0,
+  url() {
+    const h = CFG.d.host || location.hostname || '127.0.0.1';
+    const p = CFG.d.port || DRIVER_WS_PORT;
+    return 'ws://' + h + ':' + p;
+  },
+  connect() {
+    if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
+    const url = this.url();
+    this.setState('connecting', '连接中 ' + url);
+    try {
+      /* 子协议 ascii：驱动以裸文本下发（见 fluffos/src/www/index.html 的协议选择）
+         ★ 必须把 binaryType 设成 arraybuffer：驱动发的是二进制帧，
+           默认 'blob' 会让 new Uint8Array(ev.data) 拿到空数组（Blob 不是 ArrayLike），
+           症状是"连上了但什么都收不到"。官方 README 亦点名此坑。 */
+      this.ws = new WebSocket(url, ['ascii']);
+      this.ws.binaryType = 'arraybuffer';
+    } catch (e) {
+      this.setState('error', '无法建立连接：' + e.message);
+      return;
+    }
+    this.ws.onopen = () => { this.retry = 0; this.setState('open', '已连接'); UI.sysmsg('已连接 ' + url + '，等待版本校验……'); };
+    this.ws.onmessage = ev => {
+      const d = ev.data;
+      if (typeof d === 'string') Wire.feed(d);
+      else if (d instanceof ArrayBuffer) Wire.feed(DEC.decode(new Uint8Array(d), { stream: true }));
+      else if (d && d.arrayBuffer) d.arrayBuffer().then(b => Wire.feed(DEC.decode(new Uint8Array(b), { stream: true })));
+    };
+    this.ws.onclose = () => {
+      const was = this.state === 'open';
+      this.setState('closed', '连接断开');
+      Hub.resetSession();
+      if (was && this.retry < 5) {
+        this.retry++;
+        UI.sysmsg('连接断开，' + (2 * this.retry) + 's 后重连（' + this.retry + '/5）……');
+        setTimeout(() => this.connect(), 2000 * this.retry);
+      } else {
+        UI.sysmsg('连接已断开。');
+        UI.showBo('断 线', '与服务器的连接已断开', [
+          ['地址', this.url()],
+          ['已重试', this.retry + ' 次']
+        ], 'lose', '点击任意处关闭 · 重新登录请点 ☰ → 系统 → 重连');
+        Login.show();
+      }
+    };
+    this.ws.onerror = () => this.setState('error', '连接错误');
+  },
+  send(line) {
+    if (!this.ws || this.ws.readyState !== 1) { UI.sysmsg('尚未连接。'); return false; }
+    this.ws.send(line + '\n');
+    return true;
+  },
+  setState(s, text) {
+    this.state = s;
+    const badge = $('loState');
+    if (badge) badge.textContent = text;
+    const sv = $('svTx');
+    if (sv) sv.textContent = s === 'open' ? '联机' : (s === 'connecting' ? '连接中' : '离线');
+  }
+};
+
+/* ═══ 4 · Wire 流扫描：把裸流切成 [文本段] / [标记+载荷] ═══ */
+const Wire = {
+  buf: '', carry: '', pend: null, timer: 0,
+  feed(chunk) {
+    this.buf += chunk;
+    this.pump();
+  },
+  /* 找下一个"协议标记"（ESC + 3 位数字）。ANSI 的 CSI 一定带 '['，不会误判 */
+  nextMark(from) {
+    for (let i = from; i + 3 < this.buf.length; i++) {
+      if (this.buf[i] !== ESC) continue;
+      const c = this.buf.slice(i + 1, i + 4);
+      if (/^[0-9]{3}$/.test(c) && CODES[c]) return i;
+    }
+    return -1;
+  },
+  pump() {
+    if (this.timer) { clearTimeout(this.timer); this.timer = 0; }
+    for (;;) {
+      /* ① 有未闭合标记 → 等终止 */
+      if (this.pend) {
+        let end = -1, ate = 0;
+        if (LINE_END.has(this.pend.code)) {
+          const k = this.buf.indexOf('\n', 0);
+          if (k >= 0) { end = k; ate = 1; }
+        }
+        if (end < 0) { const k = this.nextMark(0); if (k >= 0) end = k; }
+        if (end < 0) { this.arm(); return; }        /* 等更多数据 / 走空闲兜底 */
+        const payload = this.buf.slice(0, end);
+        const code = this.pend.code;
+        this.buf = this.buf.slice(end + ate);
+        this.pend = null;
+        Hub.marker(code, payload.replace(/\r/g, ''));
+        continue;
+      }
+      /* ② 找下一个标记；之前的是叙事文本 */
+      const i = this.nextMark(0);
+      if (i < 0) { this.emitText(this.buf); this.buf = ''; this.armIdle(); return; }
+      if (i > 0) { this.emitText(this.buf.slice(0, i)); this.buf = this.buf.slice(i); }
+      /* buf[0] 是 ESC */
+      if (this.buf.length < 4) { this.arm(); return; }
+      const code = CODES[this.buf.slice(1, 4)];
+      this.buf = this.buf.slice(4);
+      this.pend = { code: code };
+    }
+  },
+  arm() { if (!this.timer) this.timer = setTimeout(() => { this.timer = 0; this.flushPending(); }, 60); },
+  armIdle() { if (!this.timer) this.timer = setTimeout(() => { this.timer = 0; this.flushCarry(); }, 140); },
+  flushPending() {                       /* 兜底：标记迟迟不闭合也先落地，避免卡流 */
+    if (this.pend) {
+      const code = this.pend.code, p = this.buf;
+      this.buf = ''; this.pend = null;
+      Hub.marker(code, p.replace(/\r/g, ''));
+    }
+    this.pump();
+  },
+  flushCarry() { if (this.carry) { const t = this.carry; this.carry = ''; Hub.narrate(t); } },
+  emitText(s) {
+    if (!s) return;
+    this.carry += s;
+    let k;
+    while ((k = this.carry.indexOf('\n')) >= 0) {
+      const line = this.carry.slice(0, k);
+      this.carry = this.carry.slice(k + 1);
+      Hub.narrate(line);
+    }
+  }
+};
+
+/* ═══ 5 · Ansi：ANSI SGR → 模板类名；ESC[u:..]/ESC[s:..] → 可点按钮 ═══ */
+const Ansi = {
+  /* 把一段含 ANSI 的文本转成 HTML（已转义）。inline=true 时把 ESC[u:xx] 渲染成可点按钮 */
+  html(s, inline) {
+    let out = '', cls = '', i = 0, plain = '';
+    const flush = () => { if (plain) { out += cls ? '<span class="' + cls + '">' + esc(plain) + '</span>' : esc(plain); plain = ''; } };
+    while (i < s.length) {
+      /* 协议分隔符必须先于普通字符处理：$br# 是行内换行，$zj#/$z2# 是字段分隔。
+         漏掉这一步的话它们会作为普通文本被 esc() 原样吐给用户（实测在面板正文/叙事流里都漏过）。 */
+      if (s.startsWith(BR, i)) { flush(); out += '<br>'; i += BR.length; continue; }
+      if (s.startsWith(SEP, i)) { flush(); i += SEP.length; continue; }
+      if (s.startsWith(SEP2, i)) { flush(); i += SEP2.length; continue; }
+      const c = s[i];
+      if (c !== ESC) { plain += c; i++; continue; }
+      if (s[i + 1] === '[') {
+        /* ESC[u:cmd] 可点按钮 / ESC[s:N] 尺寸提示 */
+        const r = /^\x1b\[([a-z]):([^\]\x1b]*)\]/.exec(s.slice(i));
+        if (r) {
+          flush();
+          if (r[1] === 'u' && inline) out += '<span class="mtag teal tap" data-cmd="' + esc(r[2]) + '">' + esc(this.label(r[2])) + '</span>';
+          i += r[0].length; continue;
+        }
+        const m = /^\x1b\[([0-9;]*)m/.exec(s.slice(i));
+        if (m) {
+          const parts = (m[1] || '0').split(';');
+          if (parts.indexOf('0') >= 0 || m[1] === '') cls = '';
+          for (const p of parts) { const n = parseInt(p, 10); if (SGR2CLS[n] !== undefined) cls = SGR2CLS[n]; }
+          flush();
+          i += m[0].length; continue;
+        }
+        const any = /^\x1b\[[0-9;]*[A-Za-z]/.exec(s.slice(i));
+        if (any) { i += any[0].length; continue; }
+        i += 2; continue;
+      }
+      if (/^[0-9]{3}$/.test(s.slice(i + 1, i + 4))) { i += 4; continue; }   /* 残标记：丢弃 */
+      i++;
+    }
+    flush();
+    return out;
+  },
+  /* 去色 + 去标记，得到纯文本 */
+  strip(s) {
+    return String(s)
+      .replace(/\x1b\[[a-z]:[^\]\x1b]*\]/g, '')
+      .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+      .replace(/\x1b[0-9]{3}/g, '')
+      .replace(/\$br#/g, ' ')
+      .replace(/\$(zj|z2)#/g, ' ')
+      .replace(/[\r\n]+/g, ' ')
+      .trim();
+  },
+  /* 主类名（用于整行归类） */
+  cls(s) {
+    let cls = '', last = -1;
+    const re = /\x1b\[([0-9;]*)m/g; let m;
+    while ((m = re.exec(s))) {
+      const parts = (m[1] || '0').split(';');
+      if (parts.indexOf('0') >= 0 || m[1] === '') cls = '';
+      for (const p of parts) { const n = parseInt(p, 10); if (SGR2CLS[n] !== undefined) { cls = SGR2CLS[n]; last = m.index; } }
+    }
+    return cls;
+  },
+  label(cmd) {
+    const t = String(cmd).replace(/^cmds:/, '');
+    return t.length > 12 ? t.slice(0, 11) + '…' : t;
+  }
+};
+/* 流内可点按钮统一委托：data-cmd → 执行 */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-cmd]');
+  if (!t) return;
+  const raw = t.getAttribute('data-cmd');
+  if (!raw) return;
+  Mud.exec(raw.replace(/^cmds:/, ''));
+});
+
+/* ═══ 6 · State 状态镜像（前端唯一数据源）═══ */
+const State = {
+  room: { title:'', long:'', zone:'' },
+  exits: [],        /* {dir,name}：dir 命中 DIRV 的是真方向，其余是服务端塞进同一个 ZJEXIT 的动作 */
+  items: [],        /* {name,cmd,obj}：obj=cmd 含路径 ⇒ 实体；否则是 item_desc 入口 */
+  enemies: [],
+  hp: {}, topMenu: null, menu: null, verbs: [],
+  panel: { title:'', html:'', acts:[] },
+  self: { name:'', level:0, hpPct:0, hpDisp:'', mpPct:0, mpDisp:'', jingPct:0, jingDisp:'' },
+  booted: false
+};
+/* 实体 vs item_desc 的可判定规则：desc_of_objects 给的是 `look <file_name>`（含 '/'），
+   look_room_item 给的是 `look <中文名>`（无 '/'）。这是协议层的形状差异，不靠文案猜。*/
+const isObjCmd = c => /^look\s+\S*[\/.]/.test(String(c));
+
+/* ═══ 7 · Hub 标记分发（协议 → 状态/UI）═══ */
+const Hub = {
+  resetSession() {
+    State.exits = []; State.items = []; State.enemies = []; State.hp = {};
+    State.menu = null; State.verbs = []; State.booted = false;
+    State.room = { title:'', long:'', zone:'' };
+    UI.renderScene(); UI.renderMap(); UI.renderQbar(); UI.renderVerbs();
+  },
+  /* 纯文本行：版本校验拦截 → prompt 抑制 → 大图/编译诊断折叠 → 说话/私聊路由 → 叙事 */
+  art: 0, diag: 0,
+  narrate(line) {
+    const t = Ansi.strip(line);
+    if (!t) return;
+    /* logind.c:85 下发 "ver1.0,<crypt>"，客户端须回一个非 "//" 的行 */
+    const v = /^ver1\.0,(.+)$/.exec(t);
+    if (v) { Login.verify(v[1].trim()); return; }
+    if (t === '>') return;                     /* feature/message.c:217 的提示符 */
+    /* adm/daemons/bitmapd.c 的点阵字库画面：网页端无法真渲染，整段折叠 */
+    if ((t.match(/[○●]/g) || []).length >= 12) { this.art++; return; }
+    if (this.art) { UI.narrate('amb', '（服务端点阵画面已折叠 ' + this.art + ' 行 · 终端客户端可见原文）'); this.art = 0; }
+    /* 首次登录会懒编译 char.c 等，LPCC 的诊断被 logind 直接 write 给玩家
+       （形如「编译时段错误：/inherit/char/char.c:4: warning: ...」+ 代码摘录行）。
+       这些是服务端噪音，不是叙事：折叠成一行计数。 */
+    if (DIAG_RE.some(re => re.test(t))) { this.diag++; return; }
+    if (this.diag) { UI.narrate('amb', '（服务端编译诊断已折叠 ' + this.diag + ' 行 · 详见 mudlib/log/debug.log）'); this.diag = 0; }
+    const html = Ansi.html(line, true);
+    if (/说道[：:]/.test(t))      return UI.chatMsg(html, 'say', 'f-room');
+    if (/千里传音/.test(t))       return UI.chatMsg(html, 'pri', 'f-priv');
+    const cls = Ansi.cls(line) || (/^【/.test(t) ? 'hint' : (/得到|获得|你捡起/.test(t) ? 'gain' : 'sys'));
+    return UI.narrate(cls, html);
+  },
+  marker(code, payload) {
+    switch (code) {
+      case 'SYSY':      return Hub.sysy(payload);
+      case 'TITLE':     return Hub.title(payload);
+      case 'LONG':      return UI.setRoomLong(payload);
+      case 'EXIT':      return Hub.exits(payload, false);
+      case 'EXITRM':    return Hub.exits(payload, true);
+      case 'EXITCL':    State.exits = []; UI.renderScene(); return UI.renderMap();
+      case 'OBIN':      return Hub.objs(payload, false);
+      case 'OBOUT':     return Hub.objs(payload, true);
+      case 'HPTXT':     return Hub.hptxt(payload);
+      case 'CHARHP':    return Hub.charhp(payload);
+      case 'OBLONG':
+      case 'LONGXX':    return Hub.panel(payload);
+      case 'OBACTS':
+      case 'OBACTS2':   return Hub.menu(payload, 'colon');
+      case 'POPMENU':   return Hub.menu(payload, 'pipe');
+      case 'TTMENU':    return Hub.topmenu(payload);
+      case 'BTSET':     return Hub.btset(payload);
+      case 'FORCECMD':  return Hub.forcecmd(payload);
+      case 'INPUTTXT':  return Hub.inputtxt(payload);
+      case 'CHANNEL':   return UI.chatMsg(Ansi.html(payload, true), 'say', 'wor');
+      case 'TMPSAY':    return UI.narrate('sys', Ansi.html(payload, true));
+      case 'MAPTXT':    return Hub.menu(payload);
+      case 'MORETXT':   return UI.narrate('hint', Ansi.html(payload, true));
+      case 'SYSEXIT':   return Hub.sysexit();
+      default:          return UI.narrate('amb', Ansi.html(payload || '', true));
+    }
+  },
+  /* \x1b002 房间名 = "本房渲染开始"的信号。look.c 每次 look 都重发 TITLE→LONG→EXIT→OBIN，
+     所以收到 TITLE 就清场：否则换房后上一间的出口/实体/菜单会残留（模板注释也提醒过这点）。*/
+  title(p) {
+    State.exits = []; State.items = []; State.enemies = []; State.hp = {};
+    State.menu = null; State.topMenu = null; State.verbs = [];
+    State.room.title = Ansi.strip(p) || '';
+    $('rnText').textContent = State.room.title || '……';
+    UI.renderScene(); UI.renderMap(); UI.renderQbar(); UI.renderVerbs();
+  },
+  sysexit() {
+    UI.sysmsg('（服务器断开了你的连接）');
+    UI.showBo('断 线', '服务器已断开本连接', [
+      ['地址', Net.url()], ['原因', 'SYSEXIT（ESC999）'], ['重连', '自动尝试中']
+    ], 'lose', '点击任意处关闭');
+  },
+  /* \x1b000 + 状态码：0007 登录成功 / 0008 需建角（logind.c:199/211/227/275） */
+  sysy(p) {
+    const c = Ansi.strip(p).trim();
+    if (c === '0007') {
+      UI.sysmsg('登录成功，正在加载世界……');
+      Login.logged = true;
+      Login.charPending = false;
+      Login.hide();
+      $('spop').classList.remove('show');           /* 建角成功 → 收起建角卡 */
+      $('boverlay').classList.remove('show');       /* 断线重连成功 → 收起断线面板 */
+      return;
+    }
+    if (c === '0008') { UI.sysmsg('该账号尚无角色，请创建：'); Login.createChar(); return; }
+    UI.narrate('hint', '【系统】' + esc(c));
+  },
+  /* \x1b003 item ($zj# item)*
+     item 两形态（proto/protocol.json s2c.003）：
+       两字段 <key>:<label>             → key 既是地图方向又是要发的命令（常规出口）
+       三字段 <key>:<label>:<cmd>       → key 只是地图槽位，真命令在第三段
+                                          （cmds/skill/exercise.c:60 打坐时占住 northwest 槽，真命令是 halt）
+     ★ 以前一律按两字段处理 ⇒ 三字段那个按钮点了会【发 northwest 走掉】而不是 halt。 */
+  exits(p, remove) {
+    const list = [];
+    p.split(SEP).forEach(raw => {
+      const s = Ansi.strip(raw); if (!s) return;
+      const parts = s.split(':');
+      const dir = parts[0].trim();
+      if (!dir) return;
+      let nm, cmd;
+      if (parts.length >= 3) { nm = parts[1].trim(); cmd = parts.slice(2).join(':').trim(); }
+      else { nm = (parts[1] || '').trim(); cmd = dir; }
+      list.push({ dir: dir, name: nm, cmd: cmd || dir });
+    });
+    if (remove) {
+      const del = list.map(x => x.dir);
+      State.exits = State.exits.filter(e => del.indexOf(e.dir) < 0);
+    } else {
+      const known = {}; State.exits.forEach(e => known[e.dir] = e);
+      list.forEach(e => { known[e.dir] = e; });
+      State.exits = Object.keys(known).map(k => known[k]);
+    }
+    UI.renderScene(); UI.renderMap();
+  },
+  /* \x1b005 <名>:look <目标>$zj#…（look.c:356 desc_of_objects）
+     ★ 同一个标记承载两种东西，靠 cmd 的形状区分（不靠文案）：
+       实体   → look /d/xxx/npc/yyy（含路径）
+       item_desc 入口 → look 指定洗点（纯中文，看的是房间的物品描述，里面往往带 ZJOBACTS 菜单）*/
+  objs(p, remove) {
+    const list = [];
+    p.split(SEP).forEach(raw => {
+      const s = Ansi.strip(raw); if (!s) return;
+      const i = s.indexOf(':');
+      const nm = (i < 0 ? s : s.slice(0, i)).trim();
+      const cmd = (i < 0 ? '' : s.slice(i + 1)).trim();
+      if (nm) list.push({ name: nm, cmd: cmd, obj: isObjCmd(cmd) });
+    });
+    if (remove) {
+      const del = list.map(x => x.name);
+      State.items = State.items.filter(e => del.indexOf(e.name) < 0);
+    } else {
+      const known = {}; State.items.forEach(e => known[e.name] = e);
+      list.forEach(e => { known[e.name] = e; });
+      State.items = Object.keys(known).map(k => known[k]);
+    }
+    UI.renderScene();
+  },
+  /* \x1b012 $r,w,h,s# 条目║条目…（hp1.c:107-141）
+     条目形如 "<名字或气血 850>:<cur%>/<mid%>/<max%>:#色:命令" —— 注意是**百分比**，
+     真实数值只在标签里（name 后那个显示串，GetHp1 已按万/亿折算）。
+     分组规则：每个"名字"条目起一组，其后至多 3 条（气血/内力/精神）属该组。
+     第 1 组是自己，其余是敌人（char.c 心跳调 hp1 时会把敌人一并推下来）。*/
+  hptxt(p) {
+    const s = p.replace(/^\$[0-9,]+#/, '');
+    const groups = [];
+    let cur = null;
+    s.split('║').forEach(raw => {
+      const t = Ansi.strip(raw); if (!t) return;
+      const f = t.split(':');
+      if (f.length < 2) return;
+      const num = (f[1] || '').split('/').map(x => parseInt(x, 10) || 0);
+      const lab = f[0].trim();
+      const mm = /^(气血|内力|精神)\s*(.*)$/.exec(lab);
+      const o = { pct: num[0] || 0, disp: '', cmd: (f[3] || '').trim() };
+      if (mm) {
+        o.key = mm[1]; o.disp = mm[2] || '';
+        if (!cur) { cur = { name: '', hp:null, mp:null, jing:null }; groups.push(cur); }
+        if (o.key === '气血') cur.hp = o; else if (o.key === '内力') cur.mp = o; else cur.jing = o;
+      } else {
+        cur = { name: lab.replace(/\+\(∞\)|\(\d+\)/g, '').trim(), hp:null, mp:null, jing:null };
+        groups.push(cur);
+      }
+    });
+    if (!groups.length) return;
+    const me = groups[0], sg = State.self;
+    if (me.name) sg.name = me.name;
+    if (me.hp) { sg.hpPct = me.hp.pct; sg.hpDisp = me.hp.disp; }
+    if (me.mp) { sg.mpPct = me.mp.pct; sg.mpDisp = me.mp.disp; }
+    if (me.jing) { sg.jingPct = me.jing.pct; sg.jingDisp = me.jing.disp; }
+    State.enemies = groups.slice(1).map(g => ({ name:g.name || '敌人',
+      pct: g.hp ? g.hp.pct : 0, disp: g.hp ? g.hp.disp : '' }));
+    UI.syncTop(); UI.renderScene();
+  },
+  /* \x1b022 look <文件>$zj#qi:eff_qi:max_qi（char.c:183） */
+  charhp(p) {
+    const i = p.indexOf(SEP);
+    if (i < 0) return;
+    const cmd = Ansi.strip(p.slice(0, i)).trim();
+    const n = p.slice(i + SEP.length).split(':').map(x => parseInt(x, 10) || 0);
+    const target = cmd.replace(/^look\s+/, '').trim();
+    State.hp[target] = { cur:n[0]||0, mid:n[1]||0, max:n[2]||0 };
+    UI.renderScene();
+  },
+  /* \x1b007 面板文本（hp.c / skills.c / who.c / item_desc …）
+     落点三分：点实体查详情 → 左抽屉；长面板（≥12 行）→ #spop 模态（不刷屏叙事流）；其余 → 叙事卡片 */
+  panel(p) {
+    const text = p.replace(/^\n+/, '');
+    const lines = text.split('\n');
+    const title = Ansi.strip(lines[0] || '').slice(0, 24) || '详情';
+    const body = lines.map(l => Ansi.html(l, true)).join('<br>');
+    State.panel = { title: title, html: body };
+    /* 顺手抽取面板里露出的等级（hp.c: 「Level : N」） */
+    const lv = /Level\s*[:：]\s*(\d+)/.exec(text);
+    if (lv) { State.self.level = parseInt(lv[1], 10) || 0; UI.syncTop(); }
+    if (Detail.pending) { Detail.pending = false; clearTimeout(Detail._pt); UI.drawerPanel(title, body); }
+    else if (lines.filter(l => Ansi.strip(l)).length >= 12) UI.spopPanel(title, body);
+    else UI.outputPanel(title, body);
+  },
+  /* \x1b008/\x1b009 $r,w,h,s# 标签:命令 $zj#…
+     服务端下发菜单（含房间 item_desc 里内嵌的那种）= "此刻要你挑一个"，
+     所以自动切到快捷栏视图（#qbar），否则用户根本看不到按钮。 */
+  menu(p, style) {
+    const m = Hub.parseMenu(p, style);
+    if (!m.items.length) return;
+    State.menu = m; UI.renderQbar();
+    if (!app.classList.contains('qmode')) app.classList.add('qmode');
+  },
+  /* \x1b021 顶栏菜单（logind.c:363） */
+  topmenu(p) {
+    const m = Hub.parseMenu(p);
+    if (!m.items.length) return;
+    State.topMenu = m; UI.renderQbar();
+    if (!app.classList.contains('qmode')) app.classList.add('qmode');
+  },
+  /* ★ 三种菜单型消息语法各不相同（proto/protocol.json s2c.008/009/020）：
+       008 OBACTS    <标签>:<命令>  用 $zj# 分隔，无尺寸前缀
+       009 OBACTS2   $r,w,h,s# 前缀 + 同上
+       020 POPMENU   <标签>|<命令>  用 $z2# 分隔，无尺寸前缀   ← cmds/skill/skills.c:465
+     以前一律按 008 的规则解析 ⇒ POPMENU 找不到 ':'，全部条目被跳过 ⇒ 整个技能弹出菜单静默消失。 */
+  parseMenu(p, style) {
+    let rows = 0, cols = 0;
+    const h = /^\$(\d+),(\d+),(\d+),(\d+)#/.exec(p);
+    if (h) { rows = +h[1]; cols = +h[2]; p = p.slice(h[0].length); }
+    const pipe = style === 'pipe';
+    const items = [];
+    (pipe ? p.split(SEP2) : p.split(SEP)).forEach(raw => {
+      const s = Ansi.strip(raw); if (!s) return;
+      const i = pipe ? s.indexOf('|') : s.indexOf(':');
+      if (i < 0) return;
+      const label = s.slice(0, i).trim(), cmd = s.slice(i + 1).trim();
+      if (label && cmd) items.push({ label: label, cmd: cmd });
+    });
+    return { rows: rows, cols: cols, items: items };
+  },
+  /* \x1b006 b1:组名$br#按钮名:命令$zj#…（perform.c:40） */
+  btset(p) {
+    const items = [];
+    p.split(SEP).forEach(raw => {
+      const s = Ansi.strip(raw); if (!s) return;
+      /* 单条目形如 "b1:组名$br#按钮名:命令"，取 $br# 之后那段 */
+      const seg = s.split(BR);
+      const last = seg[seg.length - 1];
+      const i = last.indexOf(':'); if (i < 0) return;
+      const label = last.slice(0, i).trim(), cmd = last.slice(i + 1).trim();
+      if (label && cmd) items.push({ label: label, cmd: cmd });
+    });
+    State.verbs = items;
+    UI.renderVerbs();
+  },
+  /* \x1b014 <命令>\n：驱动要求客户端立即执行（logind.c:390 help yd / news） */
+  forcecmd(p) { const c = Ansi.strip(p); if (c) { UI.echo(c, true); Mud.raw(c); } },
+  /* \x1b001 <问题>$zj#<预填>（ZJSEP 分隔，INPUTTXT 宏） */
+  inputtxt(p) {
+    const i = p.indexOf(SEP);
+    const q = Ansi.strip(i < 0 ? p : p.slice(0, i));
+    const pre = i < 0 ? '' : Ansi.strip(p.slice(i + SEP.length));
+    UI.narrate('hint', esc(q));
+    CmdPop.open(pre);
+  }
+};
+
+/* ═══ 8 · Up 上行漏斗（★ 唯一出口）═══
+ * 所有要发给服务端的东西都从这里出。好处是"上行协议编码"只有一处：
+ *   直连模式：把字段拼成一行原始协议文本（用字段分隔符连接）
+ *   中继模式：换成 JSON 信封（见 relay/app.part.relay.html 覆盖 Up.send）
+ * 若不做这个漏斗，中继模式就得去重写 Login.createChar 那一整段 DOM —— 布局代码会被复制两份。
+ * kind ∈ version_ack | login | create_char | cmd | input
+ */
+const Up = {
+  write(line) { return Net.send(line); },
+  send(kind, a) {
+    a = a || {};
+    switch (kind) {
+      case 'version_ack': return this.write(a.token);
+      case 'login':       return this.write([a.account, a.password, a.tag, a.email].join('║'));
+      case 'create_char': return this.write([a.gender, a.name].join('║'));
+      case 'cmd':
+      case 'input':       return this.write(a.line);
+      default:            return false;
+    }
+  }
+};
+
+/* ═══ 8b · Mud 上行 ═══ */
+const Mud = {
+  raw(line) {
+    return Up.send('cmd', { line: line });
+  },
+  exec(raw) {
+    const line = String(raw).replace(/[\r\n]+/g, ' ').trim();
+    if (!line) return;
+    Up.send('cmd', { line: line });
+    UI.echo(line, false);
+    CmdPop.push(line);
+  }
+};
+
+/* ═══ 9 · UI 渲染层 ═══ */
+const UI = {
+  /* ── 顶栏 ── */
+  syncTop() {
+    const s = State.self;
+    if (s.name) $('pName').textContent = s.name;
+    $('lvTx').textContent = s.level ? cnNum(s.level) : '';
+    $('hpBar').style.width = clamp(s.hpPct || 0, 0, 100) + '%';
+    $('mpBar').style.width = clamp(s.mpPct || 0, 0, 100) + '%';
+    $('hpBar').title = (s.hpPct || 0) + '%';
+    $('mpBar').title = (s.mpPct || 0) + '%';
+    $('hpTx').textContent = s.hpDisp || '';
+    $('mpTx').textContent = s.mpDisp || '';
+    /* 精神/敌数只进 fxbar 芯片（不改 header 结构） */
+    const fx = $('fxbar');
+    fx.innerHTML = '';
+    if (s.jingDisp) fx.appendChild(el('span', 'fxp omen', '精神 ' + s.jingDisp));
+    if (State.enemies.length) fx.appendChild(el('span', 'fxp poison', '敌 ' + State.enemies.length
+      + (State.enemies[0].disp ? ' ' + State.enemies[0].name + ' ' + State.enemies[0].disp : '')));
+  },
+  sysmsg(t) { this.narrate('sys', esc(t)); },
+  narrate(cls, html) {
+    const safe = (cls === 'cmd') ? null : cls;
+    const d = el('div', 'msg ' + (safe || 'sys'));
+    d.innerHTML = html;
+    output.appendChild(d);
+    this.trim();
+    /* 建角卡开着时把系统提示同时回显进卡里：服务端的"名字重复/含敏感词/存档问题"
+       只走叙事流，而叙事流在 .ipop 遮罩后面 —— 不回显就等于"点了没反应"。 */
+    if (typeof Login !== 'undefined' && Login.charPending) {
+      const m = $('ccMsg');
+      if (m) { m.innerHTML = html; m.style.display = 'block'; }   /* 卡内提示条：默认 display:none，首次写入才显形 */
+    }
+    if ($('ltChat').classList.contains('on')) this.unread++;
+    else output.scrollTop = output.scrollHeight;
+    this.updUnread();
+  },
+  narrMsg(cls, html) {
+    const d = el('div', 'msg ' + (cls || 'sys'));
+    d.innerHTML = html;
+    output.appendChild(d);
+    this.trim();
+    const chatTab = $('ltChat').classList.contains('on');
+    if (!chatTab) output.scrollTop = output.scrollHeight;
+  },
+  echo(line, forced) {
+    const d = el('div', 'msg cmd', (forced ? '· 服务器：' : '> ') + line);
+    output.appendChild(d);
+    this.trim();
+    output.scrollTop = output.scrollHeight;
+  },
+  chatMsg(html, cls, filter) {
+    const d = el('div', 'msg chat ' + cls + ' ' + filter);
+    d.innerHTML = html;
+    output.appendChild(d);
+    this.trim();
+    if ($('ltChat').classList.contains('on')) output.scrollTop = output.scrollHeight;
+    else { this.unread++; this.updUnread(); }
+  },
+  trim() { while (output.childElementCount > 600) output.removeChild(output.firstChild); },
+  unread: 0,
+  updUnread() {
+    const b = $('bdg');
+    if (this.unread > 0) { b.textContent = this.unread > 99 ? '99+' : this.unread; b.classList.add('show'); }
+    else b.classList.remove('show');
+  },
+  /* ── 场景 ── */
+  setRoomLong(p) {
+    const txt = Ansi.html(p, true);
+    State.room.long = txt;
+    this.narrMsg('amb', txt);
+  },
+  /* 卡片工厂：复用模板 .ent/.crow/.ic/.nm/.tt/.badges 结构 */
+  /* kind 是机器可读的卡片类别（exit/obj/look/act），供自检脚本用结构化选择器定位，
+     避免"取最后一个 .ent"这种偶然成立的断言 —— ZJEXIT 里混着非方向动作，最后一个未必是实体。 */
+  entCard(icon, iconCls, name, sub, badge, onClick, kind) {
+    const c = el('div', 'ent'), row = el('div', 'crow');
+    if (kind) c.dataset.kind = kind;
+    row.appendChild(el('span', 'ic ' + iconCls, icon));
+    row.appendChild(el('span', 'nm', name || ''));
+    if (sub) row.appendChild(el('span', 'tt', sub));
+    if (badge) { const b = el('span', 'badges'); b.appendChild(el('span', 'bd2', badge)); row.appendChild(b); }
+    c.appendChild(row);
+    c.onclick = onClick;
+    return c;
+  },
+  renderScene() {
+    const list = $('entlist');
+    const dirs = State.exits.filter(x => DIRV[x.dir]);
+    const acts = State.exits.filter(x => !DIRV[x.dir]);
+    const objs = State.items.filter(x => x.obj);
+    const look = State.items.filter(x => !x.obj);
+    $('rzText').textContent = dirs.length ? '出口 ' + dirs.length : '';
+    list.innerHTML = '';
+    /* ① 明显出口（真方向：能走） */
+    list.appendChild(el('div', 'sec', '明显出口'));
+    if (!dirs.length) list.appendChild(el('div', 'empty', '此处无路可去'));
+    dirs.forEach(x => list.appendChild(UI.entCard(ARROW[x.dir] || '↗', 'it', x.name || x.dir, x.dir, '',
+      () => Mud.exec(x.cmd || x.dir), 'exit')));
+    /* ② 此处有（实体：NPC/玩家/物品） */
+    list.appendChild(el('div', 'sec', '此处有'));
+    if (!objs.length) list.appendChild(el('div', 'empty', '四下无人'));
+    objs.forEach(it => {
+      const c = UI.entCard(/player|user/.test(it.cmd) ? '☺' : '☯', /player|user/.test(it.cmd) ? 'pl' : 'foe',
+        it.name, it.cmd.replace(/^look\s+/, ''), '可查', () => {
+          Detail.markPending();
+          Mud.exec(it.cmd);
+          Detail.open(it);
+        }, 'obj');
+      /* 该实体的血条：优先用 ZJCHARHP 的真数值，其次用 HPTXT 分组的百分比 */
+      const key = it.cmd.replace(/^look\s+/, '').trim();
+      const hp = State.hp[key] || State.enemies.filter(e => e.name === it.name)[0];
+      if (hp && (hp.pct || hp.max)) {
+        const p = hp.pct != null ? hp.pct : (hp.cur / (hp.max || 1) * 100);
+        const st = el('div', 'cstat');
+        const tr = el('span', 'chtr' + (p < 30 ? ' low' : ''));
+        const i2 = el('i'); i2.style.width = clamp(p, 0, 100) + '%'; tr.appendChild(i2);
+        st.appendChild(tr);
+        st.appendChild(el('span', 'ct', hp.disp || (hp.cur + '/' + hp.max)));
+        c.appendChild(st);
+      }
+      list.appendChild(c);
+    });
+    /* ③ 可看之处（item_desc 入口：往往点开就是服务端下发的菜单） */
+    if (look.length) {
+      list.appendChild(el('div', 'sec', '可看之处'));
+      look.forEach(it => list.appendChild(UI.entCard('❖', 'it', it.name, '查看', '', () => {
+        State.menu = null; State.topMenu = null; UI.renderQbar();
+        Mud.exec(it.cmd);            /* 服务端面板/菜单随后自己落位 */
+      }, 'look')));
+    }
+    /* ④ 可做之事（服务端塞进 ZJEXIT 的非方向动作：fullme / fuben / mazemap …） */
+    if (acts.length) {
+      list.appendChild(el('div', 'sec', '可做之事'));
+      acts.forEach(x => list.appendChild(UI.entCard('✦', 'it', x.name || x.dir, x.dir, '',
+        () => Mud.exec(x.cmd || x.dir), 'act')));
+    }
+  },
+  /* ── 地图（复用 #mapSvg 的 .mlink/.ceg/.ce/.et/.ccg/.cc/.cm）── */
+  renderMap() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = $('mapSvg');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const cx = 98, cy = 44, RX = 60, RY = 28;
+    const mk = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    $('mxText').textContent = State.room.title || '';
+    State.exits.filter(x => DIRV[x.dir]).forEach(x => {
+      const v = DIRV[x.dir];
+      const px = cx + v[0] * RX, py = cy + v[1] * RY;
+      svg.appendChild(mk('line', { x1:cx, y1:cy, x2:px, y2:py, class:'mlink' }));
+      const g = mk('g', { class:'ceg' });
+      g.appendChild(mk('rect', { x:px - 17, y:py - 9, width:34, height:18, rx:4, class:'ce' }));
+      const t = mk('text', { x:px, y:py + 3.5, class:'et' + (x.name ? '' : ' unk') });
+      t.textContent = (x.name || x.dir).slice(0, 4);
+      g.appendChild(t);
+      g.addEventListener('click', () => Mud.exec(x.cmd || x.dir));
+      svg.appendChild(g);
+    });
+    const cg = mk('g', { class:'ccg' });
+    cg.appendChild(mk('circle', { cx:cx, cy:cy, r:11, class:'cc' }));
+    const cm = mk('text', { x:cx, y:cy + 4, class:'cm' });
+    cm.textContent = (State.room.title || '?').slice(0, 1);
+    cg.appendChild(cm);
+    svg.appendChild(cg);
+  },
+  /* ── 快捷栏（dock 内 qbar，与地图互斥；见 .app.qmode）── */
+  renderQbar() {
+    const bar = $('qbar');
+    bar.innerHTML = '';
+    const groups = [];
+    if (State.menu && State.menu.items.length) groups.push(State.menu.items);
+    if (State.topMenu && State.topMenu.items.length) groups.push(State.topMenu.items);
+    if (!groups.length) { app.classList.remove('qmode'); return; }
+    const flat = [];
+    groups.forEach(g => g.forEach(it => flat.push(it)));
+    const back = el('div', 'qrow');
+    const b0 = el('button', 'qb x');
+    b0.appendChild(el('span', 'qe', '返回'));
+    b0.appendChild(el('span', 'qz', '地图'));
+    b0.onclick = () => app.classList.toggle('qmode');
+    back.appendChild(b0);
+    /* 服务端给了 $r,w,h,s# 就按其列数排；否则 3 列 */
+    let per = 3;
+    if (State.menu && State.menu.cols) per = Math.min(4, Math.max(1, State.menu.cols));
+    bar.appendChild(back);
+    for (let i = 0; i < flat.length; i += per) {
+      const row = el('div', 'qrow');
+      flat.slice(i, i + per).forEach(it => {
+        const b = el('button', 'qb');
+        const lab = UI.qbLabels(it.label);
+        b.appendChild(el('span', 'qe', lab[1]));
+        b.appendChild(el('span', 'qz', lab[0]));
+        b.title = it.label + '  →  ' + it.cmd;
+        b.onclick = () => Mud.exec(it.cmd);
+        row.appendChild(b);
+      });
+      bar.appendChild(row);
+    }
+  },
+  /* 菜单项标签拆成两行：主名 + 副名。服务端标签形如
+     `1. 扬州人氏` / `臂力流(降龙十八掌)` / `HIW显示正常数值 HIG987600`（颜色已被 strip） */
+  qbLabels(raw) {
+    let main = String(raw).trim(), sub = '';
+    const pn = /^(\d+\.)\s*(.+)$/.exec(main);
+    if (pn) { sub = pn[1]; main = pn[2]; }
+    const pk = /^(.*?)[（(]([^）)]*)[）)]\s*$/.exec(main);
+    if (pk) { if (!sub) sub = pk[2]; main = pk[1]; }
+    else if (!sub) { const sp = main.split(/\s+/); if (sp.length > 1) { main = sp[0]; sub = sp.slice(1).join(' '); } }
+    return [main, sub];
+  },
+  /* ── 动作栏（#verbs，靠 .app.battling 显示，模板自身约定）── */
+  renderVerbs() {
+    const v = $('verbs');
+    v.innerHTML = '';
+    if (!State.verbs.length) { app.classList.remove('battling'); return; }
+    const row = el('div', 'skrow');
+    State.verbs.forEach(it => {
+      const b = el('button', 'skb');
+      b.appendChild(el('span', 'sn', it.label.slice(0, 4)));
+      b.appendChild(el('span', 'sc', it.cmd.split(' ')[0].slice(0, 4)));
+      b.title = it.cmd;
+      b.onclick = () => Mud.exec(it.cmd);
+      row.appendChild(b);
+    });
+    v.appendChild(row);
+    app.classList.add('battling');
+  },
+  /* ── 面板卡片（无抽屉时的落点，复用 .mcard2 模板类）── */
+  outputPanel(title, html) {
+    const card = el('div', 'mcard2');
+    const mt = el('div', 'mt');
+    mt.appendChild(el('span', 't1', title));
+    mt.appendChild(el('span', 't2', '服务端面板'));
+    card.appendChild(mt);
+    const sub = el('div', 'msub');
+    sub.innerHTML = html;
+    card.appendChild(sub);
+    output.appendChild(card);
+    this.trim();
+    output.scrollTop = output.scrollHeight;
+  },
+  /* ── 长面板模态（#spop / .mcard.spcard：max-height 70vh 可滚动，不刷屏叙事流）── */
+  spopPanel(title, html) {
+    const card = $('spCard');
+    card.innerHTML = '';
+    const head = el('div', 'cphead');
+    head.appendChild(el('h4', null, title || '面板'));
+    const grp = el('div', 'hgrp');
+    const close = el('button', 'mbtn', '✕');
+    close.style.cssText = 'width:32px;height:32px';
+    close.onclick = () => $('spop').classList.remove('show');
+    grp.appendChild(close);
+    head.appendChild(grp);
+    card.appendChild(head);
+    const body = el('div', 'idesc');
+    body.innerHTML = html;
+    card.appendChild(body);
+    $('spop').classList.add('show');
+  },
+  /* ── 大胜/断线面板（#boverlay，模板自带 .botitle/.bosub/.borow/.bobtn）── */
+  showBo(title, sub, rows, cls, hint) {
+    $('boTitle').textContent = title || '';
+    $('boTitle').className = 'botitle ' + (cls || '');
+    $('boSub').textContent = sub || '';
+    const box = $('boRows');
+    box.innerHTML = '';
+    (rows || []).forEach(r => {
+      const d = el('div', 'borow');
+      d.appendChild(el('span', null, r[0]));
+      d.appendChild(el('span', 'dt', ''));
+      const b = el('b', null, r[1]);
+      d.appendChild(b);
+      box.appendChild(d);
+    });
+    const h = document.querySelector('#boverlay .bohint');
+    if (h && hint) h.textContent = hint;
+    $('boverlay').classList.add('show');
+  },
+  /* ── 左抽屉面板（实体详情）── */
+  drawerPanel(title, html) {
+    $('npName').textContent = title || '详情';
+    $('npKind').textContent = '服务端面板';
+    const body = $('npBody');
+    body.innerHTML = '';
+    const div = el('div', 'npDesc');
+    div.innerHTML = html;
+    body.appendChild(div);
+    const acts = el('div', 'npActs');
+    acts.appendChild(btnAct('关闭', () => Drawer.closeLeft(), ''));
+    body.appendChild(acts);
+    Drawer.openLeft();
+  }
+};
+function btnAct(label, fn, kind) {
+  const b = el('button', 'npAct ' + (kind || ''), label);
+  b.onclick = fn;
+  return b;
+}
+
+/* ═══ 10 · 抽屉 / 弹窗 ═══ */
+const Drawer = {
+  m: $('mask'),
+  openLeft() { $('ldrawer').classList.add('show'); this.m.classList.add('show'); },
+  closeLeft() { $('ldrawer').classList.remove('show'); if (!$('drawer').classList.contains('show')) this.m.classList.remove('show'); },
+  openRight(tab) { $('drawer').classList.add('show'); this.m.classList.add('show'); if (tab) setTab(tab); },
+  closeRight() { $('drawer').classList.remove('show'); if (!$('ldrawer').classList.contains('show')) this.m.classList.remove('show'); }
+};
+const Detail = {
+  cur: null, pending: false, _pt: 0,
+  /* 服务端未必回 ZJOBLONG（例如 look 一个物品只回纯文本）⇒ pending 不能永久挂着，
+     否则下一个无关面板会被错误地塞进左抽屉。4s 兜底清掉。 */
+  markPending() {
+    this.pending = true;
+    clearTimeout(this._pt);
+    this._pt = setTimeout(() => { this.pending = false; }, 4000);
+  },
+  open(it) {
+    this.cur = it;
+    $('npName').textContent = it.name;
+    $('npKind').textContent = it.cmd.replace(/^look\s+/, '') || '';
+    const body = $('npBody');
+    body.innerHTML = '';
+    body.appendChild(el('div', 'npSec', '交互'));
+    const acts = el('div', 'npActs');
+    const tgt = it.name;
+    acts.appendChild(btnAct('查看', () => { Detail.markPending(); Mud.exec('look ' + tgt); }, 'main'));
+    acts.appendChild(btnAct('问询', () => Mud.exec('ask ' + tgt), 'teal'));
+    acts.appendChild(btnAct('挑战', () => Mud.exec('kill ' + tgt), ''));
+    acts.appendChild(btnAct('私语', () => { ChatPop.open(2, tgt); }, 'teal'));
+    body.appendChild(acts);
+    body.appendChild(el('div', 'npDesc', '（等待服务端返回详情…）'));
+    /* 乐观打开：#npName/#npBody 就住在左抽屉里，不 openLeft 的话点了卡片什么都看不见，
+       只能等服务端面板回来时靠 drawerPanel() 顺带打开 —— 回慢了或只回纯文本就白点。 */
+    Drawer.openLeft();
+  }
+};
+const CmdPop = {
+  hist: [],
+  HKEY: 'minshe.cmd.hist.v1',
+  init() {
+    try { const a = JSON.parse(localStorage.getItem(this.HKEY) || '[]'); if (Array.isArray(a)) this.hist = a.slice(0, 24); } catch (e) { this.hist = []; }
+  },
+  open(prefill) {
+    ChatPop.close();
+    $('cpop').classList.add('show');
+    const ip = $('cpInput');
+    if (prefill != null) ip.value = prefill;
+    this.chips();
+    setTimeout(() => ip.focus(), 60);
+  },
+  close() { $('cpop').classList.remove('show'); $('cpInput').blur(); },
+  push(line) {
+    if (this.hist[0] !== line) this.hist.unshift(line);
+    this.hist = this.hist.slice(0, 24);
+    try { localStorage.setItem(this.HKEY, JSON.stringify(this.hist)); } catch (e) {}
+    this.chips();
+  },
+  chips() {
+    const q = $('cpQuick'), c = $('cpChips');
+    q.innerHTML = ''; c.innerHTML = '';
+    QUICK.forEach(x => q.appendChild(chip(x[0], () => Mud.exec(x[1]))));
+    this.hist.forEach(h => c.appendChild(chip(h, () => { $('cpInput').value = h; $('cpInput').focus(); })));
+  }
+};
+function chip(label, fn) { const b = el('button', 'chip', label); b.onclick = fn; return b; }
+const ChatPop = {
+  mode: 0, target: '',
+  open(mode, target) {
+    CmdPop.close();
+    this.mode = mode || 0;
+    if (target) this.target = target;
+    $('ipop').classList.add('show');
+    document.querySelectorAll('.modep').forEach(b => b.classList.toggle('on', +b.dataset.m === this.mode));
+    this.hint();
+    const ip = $('ipInput');
+    ip.placeholder = ['对本房说话……', '对全服喊话……', '私语给 ' + (this.target || '某人') + '……'][this.mode];
+    setTimeout(() => ip.focus(), 60);
+  },
+  close() { $('ipop').classList.remove('show'); $('ipInput').blur(); },
+  hint() {
+    const t = $('ipTgt');
+    if (this.mode === 2) { t.classList.add('show'); t.innerHTML = '对象：<b>' + esc(this.target || '（未选）') + '</b>　（房间列表里点「私语」选人）'; }
+    else t.classList.remove('show');
+  },
+  send() {
+    const v = $('ipInput').value.trim();
+    if (!v) return;
+    if (this.mode === 0) Mud.exec('say ' + v);
+    else if (this.mode === 1) Mud.exec('shout ' + v);
+    else { if (!this.target) { UI.sysmsg('先选私语对象。'); return; } Mud.exec('tell ' + this.target + ' ' + v); }
+    $('ipInput').value = '';
+  }
+};
+/* 指令/聊天弹窗内的快捷指令（全部来自 cmds/ 实际存在的动词）*/
+const QUICK = [
+  ['状态', 'hp'], ['属性', 'hp1'], ['技能', 'skills'], ['行囊', 'i'],
+  ['地图', 'help ditu'], ['附近', 'help ditus'], ['时间', 'time'], ['在座', 'who'],
+  ['恢复', 'exert recover'], ['回精', 'exert regenerate'], ['打坐', 'dazuo'], ['吐纳', 'tuna'],
+  ['打斗', 'kill'], ['弃战', 'halt'], ['退出', 'quit']
+];
+const PALETTE = {
+  cy: ['look', 'hp', 'hp1', 'i', 'score', 'time', 'who', 'help'],
+  jn: ['skills', 'enable', 'learn', 'study', 'practice', 'research', 'apprentice', 'abandon'],
+  zd: ['kill', 'perform', 'exert', 'enforce', 'prepare', 'wield', 'unwield', 'wear', 'remove', 'halt'],
+  rw: ['fuben', 'help', 'ask', 'answer', 'give', 'id'],
+  zn: ['help', 'help yd', 'help ditu', 'help ditus', 'news', 'time', 'who'],
+  pl: ['chat', 'rumor', 'shout', 'sos', 'family', 'party', 'bill', 'ic', 'tell']
+};
+
+/* ═══ 11 · 登录 / 建角 ═══ */
+const Login = {
+  step: 'ver',            /* ver → user → char */
+  creds: null,            /* 登录报文，用于断线后自动重登（只留在内存） */
+  logged: false,
+  charPending: false,     /* 建角卡开着时为 true：系统提示同时回显进卡里（见 UI.narrate） */
+  init() {
+    CFG.load();
+    const host = CFG.d.host || location.hostname || '127.0.0.1';
+    const port = CFG.d.port || DRIVER_WS_PORT;
+    $('loHost').value = host;
+    $('loPort').value = port;
+    $('loId').value = CFG.d.id || '';
+    const chips = $('loChips');
+    chips.innerHTML = '';
+    /* ★ 不用 location.port 拼端口：本页可能由别的静态服务托管（见 DRIVER_WS_PORT 处的说明）。 */
+    chips.appendChild(chip('用当前页主机 + 驱动端口 ' + DRIVER_WS_PORT, () => {
+      $('loHost').value = location.hostname || '127.0.0.1';
+      $('loPort').value = DRIVER_WS_PORT;
+      Net.connect();
+    }));
+    $('loGo').onclick = () => this.submit();
+    ['loId', 'loPw', 'loHost', 'loPort'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') this.submit(); }));
+    $('loPw').addEventListener('focus', () => {           /* 未连上时点密码框顺手重连 */
+      if (this.step === 'ver' && Net.state !== 'open' && Net.state !== 'connecting') Net.connect();
+    });
+  },
+  show() { $('lopop').classList.add('show'); },
+  hide() { $('lopop').classList.remove('show'); },
+  /* 版本校验：驱动下发 "ver1.0,<crypt>"，客户端回一个非 "//" 的行即过（logind.c:96-108）*/
+  verify(token) {
+    this.step = 'user';
+    this.token = token;
+    Up.send('version_ack', { token: token });
+    if (this.creds) {                     /* 断线重连：跳过表单直接重登 */
+      UI.sysmsg('版本校验通过，正在自动重新登录……');
+      Up.send('login', this.creds);
+      return;
+    }
+    UI.sysmsg('版本校验回执已发送，请输入账号密码。');
+    this.show();
+    setTimeout(() => $('loId').focus(), 80);
+  },
+  submit() {
+    if (this.step === 'ver') { Net.connect(); return; }
+    const id = $('loId').value.trim(), pw = $('loPw').value.trim();
+    if (!id || !pw) { UI.sysmsg('请填写账号与密码。'); return; }
+    CFG.d.id = id; CFG.d.host = $('loHost').value.trim(); CFG.d.port = $('loPort').value.trim(); CFG.save();
+    /* 登录报文字段：账号 / 密码 / 密文 / email（见 proto/protocol.json c2s.login） */
+    this.creds = { account: id, password: pw, tag: 'minshe-web', email: id + '@local' };
+    Up.send('login', this.creds);
+    UI.sysmsg('登录报文已发送……');
+  },
+  /* 0008 → get_char：性别║昵称（logind.c:251；服务端仍兼容旧的 3 字段写法） */
+  createChar() {
+    /* ★ 必须先收起连线面板：两张卡都是 .ipop（z-index 同为 20），
+       #lopop 在 DOM 里排在 #spop 之后 ⇒ 同时 show 时连线面板会盖住建角卡，
+       用户看到的是"点了登录没反应"，实际是建角卡被压在下层。 */
+    this.hide();
+    const card = $('spCard');
+    card.innerHTML = '';
+    /* 品牌区：与连线卡同一套观感（复用 .cphead 排版；颜色取主题变量 → 多主题自动跟随）。
+       -14px 横向负边距是为贴合 .mcard 自带的 14px 内边距，做出"通栏"效果。 */
+    const band = el('div');
+    band.style.cssText = 'padding:14px 18px 12px;margin:-14px -14px 12px;'
+      + 'background:linear-gradient(168deg,var(--cin-bg) 0%,transparent 76%);border-bottom:1px solid var(--line)';
+    const head = el('div', 'cphead'); head.style.marginBottom = '0';
+    head.appendChild(el('h4', null, '建 立 角 色'));
+    band.appendChild(head);
+    const bsub = el('div', null, '取一个江湖名号 —— 建好即刻入世');
+    bsub.style.cssText = 'margin-top:6px;font-size:11px;color:var(--ink2);letter-spacing:.4px';
+    band.appendChild(bsub);
+    card.appendChild(band);
+
+    const flabel = t => {
+      const d = el('div', null, t);
+      d.style.cssText = 'font-size:11px;color:var(--ink3);margin:0 0 4px 2px;letter-spacing:1px';
+      return d;
+    };
+    /* ★ P17 去掉「头像」：服务端那个 img 字段全库零读取（只写不读、还落进存档），
+       MUD 里也没有任何地方渲染它 —— 建角只要 性别 + 昵称。 */
+    card.appendChild(flabel('性别'));
+    const ipin = el('div', 'ipin');
+    const SEL_CSS = 'height:42px;border-radius:10px;border:1.5px solid var(--line2);background:var(--paper);color:var(--ink);padding:0 10px';
+    const gsel = el('select', null); gsel.style.cssText = SEL_CSS;
+    ['男', '女'].forEach(g => { const o = el('option', null, g); o.value = g; gsel.appendChild(o); });
+    ipin.appendChild(gsel);
+    card.appendChild(ipin);
+
+    const lab2 = flabel('昵称'); lab2.style.marginTop = '10px'; card.appendChild(lab2);
+    const nin = el('input', null); nin.placeholder = '2–4 个中文字'; nin.maxLength = 4;
+    const ipin2 = el('div', 'ipin');
+    ipin2.appendChild(nin);
+    card.appendChild(ipin2);
+    const go = el('button', 'send', '创 建');
+    /* ★ .send 在模板里只有 `.ipin .send` 这一条规则 —— 全宽 CTA 不在 .ipin 里，
+       不内联配色就退化成浏览器默认灰按钮。这里照抄模板那条的配方（渐变+纸色字）。 */
+    go.style.cssText = 'width:100%;height:46px;border-radius:11px;margin-top:12px;font-size:15px;letter-spacing:6px;'
+      + 'border:none;background:linear-gradient(180deg,var(--accent),var(--cin));color:var(--paper);box-shadow:0 3px 12px rgba(0,0,0,.16)';
+    /* 建角失败（昵称重复/含敏感词/id 不合法…）时服务端只回一行提示并重新等输入。
+       ⇒ 卡**不关**、提示回显进卡里（ccMsg），否则用户面对一张空屏反复点"创建"。
+       成功由 Hub.sysy 收到 0007 时统一收起（同时关掉 #spop 与 #lopop）。 */
+    const ccMsg = el('div', 'cptip'); ccMsg.id = 'ccMsg';
+    ccMsg.style.cssText = 'display:none;margin-top:10px;padding:8px 10px;border-radius:9px;font-size:12px;'
+      + 'background:var(--cin-bg);border:1px solid var(--line2);color:var(--cin);line-height:1.6';
+    const ccShow = t => { ccMsg.textContent = t; ccMsg.style.display = 'block'; };
+    go.onclick = () => {
+      const nm = nin.value.trim();
+      if (!nm) { ccShow('请填昵称。'); return; }
+      ccShow('建角报文已发送……');
+      Up.send('create_char', { gender: gsel.value, name: nm });
+    };
+    card.appendChild(go);
+    card.appendChild(ccMsg);
+    const tips = el('div', 'cptip', '昵称 2–4 个中文字；性别写入存档。');
+    tips.style.marginTop = '10px';
+    card.appendChild(tips);
+    this.charPending = true;
+    $('spop').classList.add('show');
+    setTimeout(() => nin.focus(), 80);
+  }
+};
+
+/* ═══ 12 · 右侧名帖（属性/行囊/武学/任务/系统）═══ */
+let lastTab = 'sys';
+function setTab(tab) {
+  lastTab = tab;
+  document.querySelectorAll('.dtab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  const body = $('dbody');
+  body.innerHTML = '';
+  if (tab === 'stats') { panelRow(body, [['状态总览', 'hp'], ['详细属性', 'hp1'], ['经验评估', 'score'], ['所在时地', 'time']]); Mud.exec('hp'); Mud.exec('hp1'); }
+  else if (tab === 'bag') { panelRow(body, [['随身行囊', 'i'], ['物品鉴定', 'id']]); Mud.exec('i'); }
+  else if (tab === 'wuxue') { panelRow(body, [['武学总览', 'skills'], ['激发', 'enable'], ['参悟', 'research'], ['习练', 'practice']]); Mud.exec('skills'); }
+  else if (tab === 'quest') { panelRow(body, [['副本地图', 'fuben'], ['求助频道', 'sos'], ['在座诸君', 'who']]); Mud.exec('fuben'); }
+  else {
+    body.appendChild(el('div', 'npSec', '连线'));
+    const addr = el('div', 'npDesc');
+    addr.innerHTML = '地址：<b>' + esc(Net.url()) + '</b><br>状态：<b>' + esc($('loState').textContent) + '</b><br>协议：<b>FluffOS websocket · ascii</b>';
+    body.appendChild(addr);
+    body.appendChild(el('div', 'npSec', '操作'));
+    const acts = el('div', 'npActs');
+    acts.appendChild(btnAct('重连', () => Net.connect(), 'main'));
+    acts.appendChild(btnAct('清屏', () => { output.innerHTML = ''; UI.unread = 0; UI.updUnread(); }, ''));
+    acts.appendChild(btnAct('断线', () => { if (Net.ws) Net.ws.close(); }, ''));
+    acts.appendChild(btnAct('收起场景', () => app.classList.toggle('sc_off'), 'teal'));
+    acts.appendChild(btnAct('快捷栏', () => app.classList.toggle('qmode'), 'teal'));
+    body.appendChild(acts);
+    const q = el('div', 'npSec', '常用');
+    body.appendChild(q);
+    const w = el('div', 'vbs');
+    QUICK.forEach(x => { const b = el('button', 'vb', x[0]); b.onclick = () => Mud.exec(x[1]); w.appendChild(b); });
+    body.appendChild(w);
+  }
+}
+function panelRow(body, list) {
+  body.appendChild(el('div', 'npSec', '入口'));
+  const acts = el('div', 'npActs');
+  list.forEach(x => { const b = el('button', 'npAct teal', x[0]); b.onclick = () => Mud.exec(x[1]); acts.appendChild(b); });
+  body.appendChild(acts);
+}
+
+/* ═══ 13 · 事件绑定 ═══ */
+function bind() {
+  $('menuBtn').onclick = () => Drawer.openRight(lastTab);
+  $('closeBtn').onclick = () => Drawer.closeRight();
+  $('lclose').onclick = () => Drawer.closeLeft();
+  $('mask').onclick = () => { Drawer.closeRight(); Drawer.closeLeft(); };
+  $('scnToggle').onclick = () => app.classList.toggle('sc_off');
+  $('mapToggle').onclick = () => app.classList.toggle('qmode');
+  document.querySelectorAll('.dtab').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  /* 叙事/闲聊 */
+  const ltAll = document.querySelector('.lt[data-t="all"]'), ltChat = document.querySelector('.lt[data-t="chat"]');
+  ltChat.id = 'ltChat';
+  ltAll.onclick = () => { ltAll.classList.add('on'); ltChat.classList.remove('on'); app.classList.remove('chatmode'); };
+  ltChat.onclick = () => {
+    ltChat.classList.add('on'); ltAll.classList.remove('on'); app.classList.add('chatmode');
+    UI.unread = 0; UI.updUnread(); output.scrollTop = output.scrollHeight;
+  };
+  document.querySelectorAll('.ft').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.ft').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    app.className = app.className.replace(/\bf-\S+/g, '').trim();
+    if (b.dataset.f) app.classList.add(b.dataset.f);
+  });
+  /* 指令弹窗 */
+  $('cmdBtn').onclick = () => CmdPop.open('');
+  $('cpClose').onclick = () => CmdPop.close();
+  $('cpSend').onclick = () => { const v = $('cpInput').value.trim(); if (v) { Mud.exec(v); $('cpInput').value = ''; } };
+  $('cpInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('cpSend').click(); });
+  $('cpJump').onclick = () => ChatPop.open(0);
+  $('spop').onclick = e => { if (e.target === $('spop')) $('spop').classList.remove('show'); };
+  /* 聊天弹窗 */
+  $('inpBtn').onclick = () => ChatPop.open(0);
+  $('ipClose').onclick = () => ChatPop.close();
+  $('ipSend').onclick = () => ChatPop.send();
+  $('ipInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('ipSend').click(); });
+  $('ipJump').onclick = () => CmdPop.open('');
+  document.querySelectorAll('.modep').forEach(b => b.onclick = () => ChatPop.open(+b.dataset.m));
+  /* 底栏导航 */
+  $('nbTerm').onclick = () => CmdPop.open('');
+  document.querySelectorAll('.nb[data-q]').forEach(b => b.onclick = () => CmdPop.open(''));
+  document.querySelectorAll('.nb[data-q]').forEach(b => {
+    const key = b.dataset.q, arr = PALETTE[key] || [];
+    b.onclick = () => {
+      CmdPop.open('');
+      const q = $('cpQuick'); q.innerHTML = '';
+      arr.forEach(c => q.appendChild(chip(c, () => Mud.exec(c))));
+    };
+  });
+  $('nbSys').onclick = () => Drawer.openRight('sys');
+  /* 大胜面板 */
+  $('boOk').onclick = () => $('boverlay').classList.remove('show');
+  $('boverlay').onclick = () => $('boverlay').classList.remove('show');
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      $('boverlay').classList.remove('show');
+      document.querySelectorAll('.ipop.show').forEach(x => x.classList.remove('show'));
+      Drawer.closeRight(); Drawer.closeLeft();
+    }
+  });
+  document.addEventListener('click', e => {
+    const t = e.target.closest('.mtag.tap[data-cmd]');
+    if (t) Mud.exec(t.getAttribute('data-cmd').replace(/^cmds:/, ''));
+  });
+}
+
+/* ═══ 14 · 启动 ═══ */
+(function boot() {
+  bind();
+  CmdPop.init();
+  Login.init();
+  Login.show();
+  $('lvTx').textContent = '';          /* 模板默认值「十二」是假数据，未知就留空 */
+  UI.syncTop(); UI.renderScene(); UI.renderMap();
+  /* 若页面本身就是驱动通过 websocket 端口的 HTTP 侧服务的（同源），直接连 */
+  if (location.port) setTimeout(() => Net.connect(), 120);
+})();
+</script>
+</body>
+</html>

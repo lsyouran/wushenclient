@@ -1,0 +1,7 @@
+C:\Users\wawj\Downloads\wushen\WuShenMud2
+建议用上面的路径免得还得改。
+如果非得用别的路径，可以直接修改（启动（正常只需要这个））这个文件即可。
+@echo off
+cd /d C:\Users\wawj\Downloads\wushen\WuShenMud2（改这个）
+npm start
+pause

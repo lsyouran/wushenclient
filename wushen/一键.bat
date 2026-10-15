@@ -1,0 +1,9 @@
+@echo off
+cd /d C:\Users\wawj\Downloads\wushen\WuShenMud2
+echo 正在清除node_modules...
+rmdir /s /q node_modules
+echo 正在重装依赖...
+npm install
+echo 启动服务器...
+npm start
+pause

@@ -1,0 +1,2537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
+    <title>GM管理后台 v9.0 - 完整功能版</title>
+    <style>
+        /* ============================================================
+                   CSS 变量 & 基础重置
+                   ============================================================ */
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-card: #0d1117;
+            --border-color: #30363d;
+            --border-light: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-white: #f0f6fc;
+            --accent-orange: #f0883e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-purple: #6f42c1;
+            --radius: 8px;
+            --radius-lg: 10px;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            --transition: 0.2s ease;
+            --font: 'Microsoft YaHei', 'PingFang SC', -apple-system, sans-serif;
+            --mono: 'Consolas', 'Monaco', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 12px;
+            min-height: 100vh;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* ============================================================
+                   Header / 顶部导航
+                   ============================================================ */
+        header {
+            background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
+            border: 1px solid var(--border-color);
+            padding: 12px 18px;
+            border-radius: var(--radius-lg);
+            margin-bottom: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        header h1 {
+            color: var(--accent-orange);
+            font-size: 20px;
+        }
+        header h1 span {
+            color: var(--accent-blue);
+        }
+        header h1 small {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: normal;
+            margin-left: 8px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* ============================================================
+                   状态徽章
+                   ============================================================ */
+        .status-badge {
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            background: var(--accent-green);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .status-badge.offline {
+            background: var(--accent-red);
+        }
+        .status-badge .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            background: #fff;
+        }
+        .status-badge.offline .dot {
+            animation: none;
+            background: #f85149;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .online-count {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .online-count strong {
+            color: var(--accent-orange);
+        }
+
+        /* ============================================================
+                   按钮系统
+                   ============================================================ */
+        .btn {
+            padding: 6px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #fff;
+            transition: all var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            font-weight: 500;
+            text-decoration: none;
+            user-select: none;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.1);
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn-primary { background: var(--accent-green); }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-danger { background: var(--accent-red); }
+        .btn-danger:hover { background: #da3633; }
+        .btn-warning { background: var(--accent-yellow); }
+        .btn-warning:hover { background: #e3b341; }
+        .btn-success { background: var(--accent-blue); }
+        .btn-success:hover { background: #388bfd; }
+        .btn-purple { background: var(--accent-purple); }
+        .btn-purple:hover { background: #7c3aed; }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .btn-outline:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            transform: none;
+        }
+
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
+        .btn-xs { padding: 2px 8px; font-size: 11px; }
+
+        /* ============================================================
+                   网格布局
+                   ============================================================ */
+        .grid {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 14px;
+        }
+
+        /* ============================================================
+                   侧边栏
+                   ============================================================ */
+        .sidebar {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 6px;
+            height: fit-content;
+        }
+        .sidebar .menu-item {
+            padding: 10px 14px;
+            margin: 2px 0;
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all var(--transition);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sidebar .menu-item:hover {
+            background: #1c2128;
+            color: var(--text-white);
+        }
+        .sidebar .menu-item.active {
+            background: #1f2937;
+            color: var(--accent-orange);
+        }
+        .sidebar .menu-item .badge {
+            margin-left: auto;
+            background: #1f2937;
+            padding: 1px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* ============================================================
+                   主内容面板
+                   ============================================================ */
+        .main-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            min-height: 480px;
+        }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+        .panel-header h2 {
+            color: var(--text-white);
+            font-size: 20px;
+        }
+        .panel-header .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* ============================================================
+                   统计卡片
+                   ============================================================ */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 12px 14px;
+            border-radius: var(--radius);
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--accent-orange);
+        }
+        .stat-card .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* ============================================================
+                   表格
+                   ============================================================ */
+        .table-wrapper {
+            overflow-x: auto;
+            overflow-y: auto;
+            max-height: none;
+        }
+        .table-wrapper table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            min-width: 480px;
+        }
+        .table-wrapper th {
+            background: var(--bg-card);
+            padding: 8px 12px;
+            text-align: left;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 500;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .table-wrapper td {
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-primary);
+            vertical-align: middle;
+        }
+        .table-wrapper tr:hover td {
+            background: #1c2128;
+        }
+
+        /* ============================================================
+                   搜索框
+                   ============================================================ */
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .search-box input,
+        .search-box select {
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: var(--font);
+        }
+        .search-box input:focus,
+        .search-box select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        .search-box input {
+            flex: 1;
+            min-width: 140px;
+        }
+
+        /* ============================================================
+                   GM控制台
+                   ============================================================ */
+        .console-target {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            padding: 10px 16px;
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            border: 1px solid var(--border-color);
+        }
+        .console-target label {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .console-target select {
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            flex: 1;
+            min-width: 140px;
+            font-size: 14px;
+        }
+        .console-target .current-target {
+            color: var(--accent-green);
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .section-title {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin: 12px 0 6px 0;
+            padding: 4px 12px;
+            background: var(--bg-card);
+            border-radius: 4px;
+            display: inline-block;
+            font-weight: 500;
+        }
+
+        .console-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 6px;
+            margin: 6px 0 10px 0;
+        }
+        .console-buttons .btn {
+            justify-content: center;
+            padding: 6px 10px;
+            font-size: 12px;
+            background: #1c2128;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+        .console-buttons .btn:hover {
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+            background: #1f2937;
+        }
+        .console-buttons .btn.danger:hover {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        .console-buttons .btn.success:hover {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .console-buttons .btn.warning:hover {
+            border-color: var(--accent-yellow);
+            color: var(--accent-yellow);
+        }
+        .console-buttons .btn .icon {
+            font-size: 14px;
+        }
+
+        .console-output {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            max-height: 220px;
+            overflow-y: auto;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-top: 8px;
+        }
+        .console-output .error { color: var(--accent-red); }
+        .console-output .success { color: var(--accent-green); }
+        .console-output .info { color: var(--accent-blue); }
+        .console-output .warn { color: var(--accent-yellow); }
+        .console-output .cmd { color: var(--accent-orange); }
+
+        .custom-cmd-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .custom-cmd-row input {
+            flex: 1;
+            min-width: 160px;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+        .custom-cmd-row input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        /* ============================================================
+                   属性修改面板
+                   ============================================================ */
+        .attr-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            margin: 8px 0;
+        }
+        .attr-panel .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .attr-panel .row .name {
+            color: var(--accent-orange);
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .attr-panel .row .info {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .attr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 6px;
+            margin: 6px 0 10px 0;
+        }
+        .attr-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-secondary);
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border-light);
+        }
+        .attr-item label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 36px;
+            flex-shrink: 0;
+        }
+        .attr-item input {
+            flex: 1;
+            min-width: 44px;
+            padding: 3px 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 13px;
+            text-align: center;
+            width: 100%;
+        }
+        .attr-item input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .attr-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .family-note {
+            background: #1a1a2e;
+            border: 1px solid #2d2d44;
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin: 6px 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .family-note strong {
+            color: var(--accent-orange);
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        /* ============================================================
+                   Toast / 通知
+                   ============================================================ */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 24px;
+            border-radius: var(--radius);
+            z-index: 999;
+            animation: slideUp 0.3s ease;
+            font-size: 14px;
+            max-width: 420px;
+            box-shadow: var(--shadow);
+            pointer-events: none;
+        }
+        .toast.success { background: var(--accent-green); color: #fff; }
+        .toast.error { background: var(--accent-red); color: #fff; }
+        .toast.info { background: var(--accent-blue); color: #fff; }
+        .toast.warn { background: var(--accent-yellow); color: #fff; }
+        @keyframes slideUp {
+            from { transform: translateY(80px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* ============================================================
+                   模态框
+                   ============================================================ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 24px 28px;
+            border-radius: 12px;
+            max-width: 460px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal h3 {
+            color: var(--text-white);
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+        .modal .form-group { margin-bottom: 10px; }
+        .modal .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+        .modal .form-group input,
+        .modal .form-group select {
+            width: 100%;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        .modal .form-group input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        .modal .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        /* ============================================================
+                   存档列表
+                   ============================================================ */
+        .backup-item {
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: 4px;
+            margin: 3px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .backup-item .time {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .backup-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+            font-size: 15px;
+        }
+
+        .pagination {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 12px;
+            padding: 10px 16px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+        }
+        .pagination .info {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        .pagination .current {
+            color: var(--accent-orange);
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-card);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+
+        /* ============================================================
+                   响应式
+                   ============================================================ */
+        @media (max-width: 820px) {
+            .grid { grid-template-columns: 1fr; }
+            .sidebar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                padding: 6px 8px;
+                overflow-x: auto;
+            }
+            .sidebar .menu-item {
+                flex: 0 0 auto;
+                padding: 6px 12px;
+                font-size: 13px;
+                white-space: nowrap;
+            }
+            .sidebar .menu-item .badge { display: none; }
+            .main-content { padding: 14px 12px; }
+            .panel-header h2 { font-size: 17px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .console-buttons { grid-template-columns: repeat(2, 1fr); }
+            .attr-grid { grid-template-columns: repeat(2, 1fr); }
+            .search-box { flex-direction: column; }
+            .search-box input { min-width: auto; width: 100%; }
+            .console-target { flex-direction: column; align-items: stretch; }
+            .console-target select { min-width: auto; }
+            header h1 { font-size: 17px; }
+            header h1 small { display: block; margin-left: 0; font-size: 11px; }
+            .header-right { width: 100%; justify-content: flex-start; }
+            .custom-cmd-row { flex-direction: column; }
+            .custom-cmd-row input { width: 100%; }
+            .table-wrapper { max-height: 400px; }
+            .table-wrapper table { font-size: 12px; min-width: 400px; }
+            .table-wrapper th, .table-wrapper td { padding: 4px 8px; }
+            .btn { font-size: 12px; padding: 4px 12px; }
+            .toast { max-width: 90%; right: 12px; bottom: 12px; font-size: 13px; padding: 10px 16px; }
+            .modal { padding: 18px 16px; }
+            .attr-item { padding: 3px 6px; }
+            .attr-item input { min-width: 36px; font-size: 12px; }
+            .attr-panel { padding: 10px 10px; }
+            .console-output { font-size: 12px; padding: 10px 12px; max-height: 160px; }
+            .backup-item { font-size: 12px; }
+        }
+
+        @media (max-width: 480px) {
+            body { padding: 6px; font-size: 13px; }
+            .main-content { padding: 10px 8px; border-radius: 6px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+            .stat-card { padding: 8px 10px; }
+            .stat-card .value { font-size: 18px; }
+            .console-buttons { grid-template-columns: repeat(2, 1fr); gap: 4px; }
+            .console-buttons .btn { font-size: 11px; padding: 4px 6px; }
+            .attr-grid { grid-template-columns: repeat(2, 1fr); gap: 4px; }
+            .attr-item label { font-size: 11px; min-width: 28px; }
+            .attr-item input { font-size: 11px; padding: 2px 4px; min-width: 30px; }
+            .panel-header { flex-direction: column; align-items: stretch; }
+            .panel-header .actions { justify-content: flex-start; }
+            .btn { font-size: 11px; padding: 3px 10px; }
+            .table-wrapper table { font-size: 11px; min-width: 340px; }
+            .table-wrapper th, .table-wrapper td { padding: 3px 6px; }
+            .console-target { padding: 8px 12px; }
+            .console-output { font-size: 11px; padding: 8px 10px; max-height: 130px; }
+            .family-note { font-size: 11px; padding: 6px 10px; }
+            .modal { padding: 14px 12px; max-width: 100%; }
+            .modal h3 { font-size: 16px; }
+            .toast { font-size: 12px; padding: 8px 14px; max-width: 95%; }
+            header { padding: 8px 12px; }
+            header h1 { font-size: 15px; }
+            .sidebar .menu-item { font-size: 12px; padding: 5px 10px; }
+            .section-title { font-size: 12px; }
+            .backup-item { font-size: 11px; padding: 4px 8px; }
+            .attr-panel .row .name { font-size: 14px; }
+            .attr-panel .row .info { font-size: 12px; }
+        }
+
+        .text-muted { color: var(--text-secondary); }
+        .text-center { text-align: center; }
+        .mt-8 { margin-top: 8px; }
+        .mb-8 { margin-bottom: 8px; }
+        .flex-1 { flex: 1; }
+        .w-full { width: 100%; }
+        .gap-6 { gap: 6px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- HEADER -->
+    <header>
+        <h1>🎮 <span>GM</span> 管理后台 <small>v9.0 · 完整功能版</small></h1>
+        <div class="header-right">
+            <span class="status-badge online" id="serverStatus"><span class="dot"></span> 运行中</span>
+            <span class="online-count">👥 <strong id="onlineCount">0</strong> 在线</span>
+            <button class="btn btn-primary btn-sm" onclick="refreshAll()">🔄 刷新</button>
+            <button class="btn btn-warning btn-sm" onclick="showBackupModal()">💾 存档</button>
+        </div>
+    </header>
+
+    <!-- GRID -->
+    <div class="grid">
+
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="menu-item active" data-panel="dashboard">📊 仪表盘</div>
+            <div class="menu-item" data-panel="users">👥 角色管理 <span class="badge" id="userBadge">0</span></div>
+            <div class="menu-item" data-panel="accounts">📋 账号管理 <span class="badge" id="accountBadge">0</span></div>
+            <div class="menu-item" data-panel="online">🟢 在线玩家 <span class="badge" id="onlineBadge">0</span></div>
+            <div class="menu-item" data-panel="console">💻 GM控制台</div>
+            <div class="menu-item" data-panel="attrs">📊 属性修改</div>
+            <div class="menu-item" data-panel="items">📦 物品管理 <span class="badge" id="itemBadge">0</span></div>
+            <div class="menu-item" data-panel="rooms">🏠 房间列表 <span class="badge" id="roomBadge">0</span></div>
+            <div class="menu-item" data-panel="logs">📜 操作日志</div>
+        </div>
+
+        <!-- 主内容 -->
+        <div class="main-content">
+
+            <!-- ==================== PANEL: 仪表盘 ==================== -->
+            <div class="panel active" id="panel-dashboard">
+                <div class="panel-header">
+                    <h2>📊 服务器概览</h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="refreshStats()">🔄 刷新</button>
+                        <button class="btn btn-warning btn-sm" onclick="showCreateUser()">➕ 创建角色</button>
+                    </div>
+                </div>
+                <div class="stats-grid" id="statsGrid">
+                    <div class="stat-card"><div class="value" id="statOnline">-</div><div class="label">在线玩家</div></div>
+                    <div class="stat-card"><div class="value" id="statTotal">-</div><div class="label">总角色数</div></div>
+                    <div class="stat-card"><div class="value" id="statRooms">-</div><div class="label">房间数</div></div>
+                    <div class="stat-card"><div class="value" id="statNPCs">-</div><div class="label">NPC数</div></div>
+                    <div class="stat-card"><div class="value" id="statCommands">-</div><div class="label">命令数</div></div>
+                    <div class="stat-card"><div class="value" id="statSkills">-</div><div class="label">技能数</div></div>
+                </div>
+                <div class="text-center text-muted" style="font-size:14px;padding:8px;">💡 点击左侧菜单进入不同管理模块</div>
+            </div>
+
+            <!-- ==================== PANEL: 角色管理 ==================== -->
+            <div class="panel" id="panel-users">
+                <div class="panel-header">
+                    <h2>👥 角色管理</h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadUsers()">🔄 刷新</button>
+                        <button class="btn btn-warning btn-sm" onclick="showCreateUser()">➕ 创建角色</button>
+                    </div>
+                </div>
+                <div class="search-box">
+                    <input type="text" placeholder="🔍 搜索角色..." id="userSearch" oninput="filterUsers()">
+                    <select id="userFilter" onchange="filterUsers()">
+                        <option value="all">全部</option>
+                        <option value="online">在线</option>
+                        <option value="offline">离线</option>
+                        <option value="gm">GM</option>
+                    </select>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead><tr><th>ID</th><th>角色名</th><th>等级</th><th>权限</th><th>状态</th><th>操作</th></tr></thead>
+                        <tbody id="userTableBody"><tr><td colspan="6" class="loading">加载中</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+<!-- ==================== PANEL: 账号管理 ==================== -->
+<div class="panel" id="panel-accounts">
+    <div class="panel-header">
+        <h2>📋 账号管理 <span style="font-size:14px;color:var(--text-secondary);" id="accountSubCount">(0)</span></h2>
+        <div class="actions">
+            <button class="btn btn-primary btn-sm" onclick="loadAccounts()">🔄 刷新</button>
+            <button class="btn btn-warning btn-sm" onclick="showCreateAccount()">➕ 创建账号</button>
+        </div>
+    </div>
+    <div class="search-box">
+        <input type="text" placeholder="🔍 搜索账号..." id="accountSearch" oninput="filterAccounts()">
+        <select id="accountFilter" onchange="filterAccounts()">
+            <option value="all">全部</option>
+            <option value="admin">管理员</option>
+            <option value="normal">普通</option>
+        </select>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>用户名</th>
+                    <th>权限等级</th>
+                    <th>手机号</th>
+                    <th>角色数</th>
+                    <th>注册时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="accountTableBody"><tr><td colspan="7" class="loading">加载中</td></tr></tbody>
+        </table>
+    </div>
+</div>
+            <!-- ==================== PANEL: 在线玩家 ==================== -->
+            <div class="panel" id="panel-online">
+                <div class="panel-header">
+                    <h2>🟢 在线玩家 <span style="font-size:14px;color:var(--text-secondary);" id="onlineSubCount">(0)</span></h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadOnline()">🔄 刷新</button>
+                        <button class="btn btn-success btn-sm" onclick="showBroadcast()">📢 广播</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead><tr><th>ID</th><th>角色名</th><th>等级</th><th>门派</th><th>位置</th><th>HP</th><th>操作</th></tr></thead>
+                        <tbody id="onlineTableBody"><tr><td colspan="7" class="loading">加载中</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ==================== PANEL: GM控制台 ==================== -->
+            <div class="panel" id="panel-console">
+                <div class="panel-header">
+                    <h2>💻 GM控制台</h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadTargets()">🔄 刷新目标</button>
+                        <button class="btn btn-outline btn-sm" onclick="clearConsole()">🗑️ 清空</button>
+                    </div>
+                </div>
+
+                <div class="console-target">
+                    <label>🎯 目标：</label>
+                    <select id="gmTarget" onchange="updateTargetDisplay()">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                    <span class="current-target" id="targetDisplay">❌ 未选择</span>
+                </div>
+
+                <div class="section-title">📋 信息查看</div>
+                <div class="console-buttons">
+                    <button class="btn" onclick="gmAction('stats')"><span class="icon">📊</span> 查看属性</button>
+                    <button class="btn" onclick="gmAction('who')"><span class="icon">👥</span> 在线玩家</button>
+                    <button class="btn" onclick="gmAction('room')"><span class="icon">🏠</span> 当前房间</button>
+                    <button class="btn" onclick="gmAction('inv')"><span class="icon">📦</span> 查看背包</button>
+                    <button class="btn" onclick="gmAction('skills')"><span class="icon">🎯</span> 查看技能</button>
+                    <button class="btn" onclick="gmAction('score')"><span class="icon">📈</span> 查看评分</button>
+                </div>
+
+                <div class="section-title">💚 状态恢复</div>
+                <div class="console-buttons">
+                    <button class="btn success" onclick="gmAction('heal')"><span class="icon">💚</span> 恢复满状态</button>
+                    <button class="btn success" onclick="gmAction('full')"><span class="icon">💪</span> 完全恢复</button>
+                    <button class="btn success" onclick="gmAction('recount')"><span class="icon">🔄</span> 重算属性</button>
+                </div>
+
+                <div class="section-title">💰 奖励 <span style="color:var(--text-secondary);font-weight:normal;font-size:12px;">(输入数值后点击按钮)</span></div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;align-items:center;">
+                    <input type="number" id="rewardAmount" value="10000" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:14px;width:120px;min-width:80px;flex:0 0 auto;" />
+                    <span style="color:var(--text-secondary);font-size:13px;">数值可正(增加) / 负(减少)</span>
+                </div>
+                <div class="console-buttons">
+                    <button class="btn success" onclick="gmActionWithReward('exp')"><span class="icon">⭐</span> 经验</button>
+                    <button class="btn success" onclick="gmActionWithReward('pot')"><span class="icon">🔮</span> 潜能</button>
+                    <button class="btn success" onclick="gmActionWithReward('money')"><span class="icon">💰</span> 金钱</button>
+                    <button class="btn success" onclick="gmActionWithReward('set cash_money')"><span class="icon">💎</span> 元宝</button>
+                </div>
+
+                <div class="section-title">🚀 传送</div>
+                <div class="console-buttons">
+                    <button class="btn" onclick="gmAction('go yz/wumiao')"><span class="icon">🏛️</span> 武庙</button>
+                    <button class="btn" onclick="gmAction('go yz/kedian')"><span class="icon">🏨</span> 客栈</button>
+                    <button class="btn" onclick="gmAction('go yz/guangchang')"><span class="icon">🏛️</span> 广场</button>
+                    <button class="btn" onclick="gmAction('go shaolin/shanmen')"><span class="icon">🏯</span> 少林</button>
+                    <button class="btn" onclick="gmAction('go wd/guangchang')"><span class="icon">⛰️</span> 武当</button>
+                    <button class="btn" onclick="gmAction('go huashan/zhenyue')"><span class="icon">🏔️</span> 华山</button>
+                    <button class="btn" onclick="gmAction('go emei/jinding')"><span class="icon">🏔️</span> 峨眉</button>
+                    <button class="btn" onclick="gmAction('go gaibang/shudong')"><span class="icon">🏚️</span> 丐帮</button>
+                    <button class="btn" onclick="gmAction('go xiaoyao/qingcaop')"><span class="icon">🌿</span> 逍遥</button>
+                    <button class="btn" onclick="gmAction('go shashou/damen')"><span class="icon">🗡️</span> 杀手</button>
+                    <button class="btn" onclick="gmAction('go xiangyang/guangchang')"><span class="icon">🏯</span> 襄阳</button>
+                </div>
+
+                <div class="section-title">🛠️ 高级</div>
+                <div class="console-buttons">
+                    <button class="btn danger" onclick="gmAction('kill')"><span class="icon">💀</span> 自杀(测试)</button>
+                    <button class="btn" onclick="gmAction('refresh')"><span class="icon">🔄</span> 刷新状态</button>
+                    <button class="btn" onclick="gmAction('sync')"><span class="icon">📡</span> 同步客户端</button>
+                    <button class="btn" onclick="gmAction('time')"><span class="icon">🕐</span> 服务器时间</button>
+                    <button class="btn" onclick="gmAction('status')"><span class="icon">📊</span> 服务器状态</button>
+                    <button class="btn" onclick="gmAction('save')"><span class="icon">💾</span> 保存数据</button>
+                    <button class="btn btn-purple" onclick="gmAction('set user_level 9')"><span class="icon">👑</span> 赋予GM</button>
+                    <button class="btn btn-purple" onclick="gmAction('showprop')"><span class="icon">📊</span> 查看后天属性</button>
+                </div>
+
+                <div class="section-title">✏️ 自定义命令</div>
+                <div class="custom-cmd-row">
+                    <input type="text" id="gmCustomCommand" placeholder="输入自定义GM命令..." onkeydown="if(event.key==='Enter') execCustomGM()">
+                    <button class="btn btn-primary" onclick="execCustomGM()">▶ 执行</button>
+                </div>
+
+                <div class="console-output" id="consoleOutput">
+                    <span class="info">⚡ GM控制台已就绪，选择目标后点击按钮操作</span>
+                </div>
+            </div>
+
+            <!-- ==================== PANEL: 属性修改 ==================== -->
+            <div class="panel" id="panel-attrs">
+                <div class="panel-header">
+                    <h2>📊 属性修改 <span style="font-size:13px;color:var(--text-secondary);">(自由填写 · 全部属性)</span></h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadAttrs()">📊 读取属性</button>
+                        <button class="btn btn-success btn-sm" onclick="applyAttrs()">💾 应用修改</button>
+                        <button class="btn btn-outline btn-sm" onclick="resetAttrs()">🔄 重置</button>
+                        <button class="btn btn-purple btn-sm" onclick="quickSetGM()">👑 设为GM</button>
+                    </div>
+                </div>
+
+                <div class="console-target">
+                    <label>🎯 目标：</label>
+                    <select id="attrTarget" onchange="loadAttrs()">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                    <span style="color:var(--text-secondary);font-size:13px;" id="attrTargetInfo">未选择</span>
+                </div>
+
+                <div id="attrPanel" style="display:none;">
+                    <div class="attr-panel">
+                        <div class="row">
+                            <span class="name" id="attrPlayerName">-</span>
+                            <span class="info">门派: <span id="attrFamily">-</span> | 等级: <span id="attrLevel">-</span></span>
+                        </div>
+
+                        <div style="margin:6px 0;">
+                            <div style="color:var(--accent-orange);font-size:13px;">🏛️ 门派转换</div>
+                            <div class="flex-row">
+                                <select id="a_family" style="padding:4px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                                    <option value="NONE">无门派</option>
+                                    <option value="SHAOLIN">少林</option>
+                                    <option value="WUDANG">武当</option>
+                                    <option value="HUASHAN">华山</option>
+                                    <option value="EMEI">峨眉</option>
+                                    <option value="GAIBANG">丐帮</option>
+                                    <option value="XIAOYAO">逍遥</option>
+                                    <option value="SHASHOU">杀手</option>
+                                </select>
+                                <button class="btn btn-warning btn-sm" onclick="applyFamily()">转换门派</button>
+                            </div>
+                            <div class="family-note">
+                                📌 <strong>门派转换生效条件：</strong><br>
+                                1. 目标玩家必须在线 (user_level ≥ 9 才能执行)<br>
+                                2. 转换后需要 <strong>重新登录</strong> 才能看到称号变化<br>
+                                3. 会 <strong>遗忘当前门派武功</strong>，返还已消耗的潜能
+                            </div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">📌 基础属性 (直接设置，正增负减)</div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>气血</label><input type="number" id="a_hp"></div>
+                            <div class="attr-item"><label>气血上限</label><input type="number" id="a_maxHp"></div>
+                            <div class="attr-item"><label>内力</label><input type="number" id="a_mp"></div>
+                            <div class="attr-item"><label>内力上限</label><input type="number" id="a_limitMp"></div>
+                            <div class="attr-item"><label>经验</label><input type="number" id="a_exp"></div>
+                            <div class="attr-item"><label>潜能</label><input type="number" id="a_pot"></div>
+                            <div class="attr-item"><label>金钱</label><input type="number" id="a_money"></div>
+                            <div class="attr-item"><label>等级</label><input type="number" id="a_level"></div>
+                            <div class="attr-item"><label>权限</label><input type="number" id="a_userLevel"></div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">📌 先天属性</div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>臂力</label><input type="number" id="a_str"></div>
+                            <div class="attr-item"><label>根骨</label><input type="number" id="a_con"></div>
+                            <div class="attr-item"><label>身法</label><input type="number" id="a_dex"></div>
+                            <div class="attr-item"><label>悟性</label><input type="number" id="a_int"></div>
+                            <div class="attr-item"><label>容貌</label><input type="number" id="a_per"></div>
+                            <div class="attr-item"><label>福缘</label><input type="number" id="a_kar"></div>
+                            <div class="attr-item"><label>性别</label><input type="number" id="a_gender" min="1" max="3"></div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">📌 后天属性 (装备/技能加成) <span style="color:var(--accent-yellow);font-size:11px;">使用 setprop 命令</span></div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>臂力</label><input type="number" id="p_str"></div>
+                            <div class="attr-item"><label>根骨</label><input type="number" id="p_con"></div>
+                            <div class="attr-item"><label>身法</label><input type="number" id="p_dex"></div>
+                            <div class="attr-item"><label>悟性</label><input type="number" id="p_int"></div>
+                            <div class="attr-item"><label>容貌</label><input type="number" id="p_per"></div>
+                            <div class="attr-item"><label>福缘</label><input type="number" id="p_kar"></div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">⚔️ 战斗属性 (部分需重算生效) <span style="color:var(--accent-yellow);font-size:11px;">使用 setprop 命令</span></div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>攻击</label><input type="number" id="p_gj"></div>
+                            <div class="attr-item"><label>防御</label><input type="number" id="p_fy"></div>
+                            <div class="attr-item"><label>命中</label><input type="number" id="p_mz"></div>
+                            <div class="attr-item"><label>躲闪</label><input type="number" id="p_ds"></div>
+                            <div class="attr-item"><label>招架</label><input type="number" id="p_zj"></div>
+                            <div class="attr-item"><label>暴击</label><input type="number" id="p_bj"></div>
+                            <div class="attr-item"><label>攻速</label><input type="number" id="p_gjsd" step="0.1"></div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">📊 高级战斗属性 (后天加成) <span style="color:var(--accent-yellow);font-size:11px;">使用 setprop 命令</span></div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>最终伤害%</label><input type="number" id="p_add_sh_per" step="0.01"></div>
+                            <div class="attr-item"><label>忽视防御%</label><input type="number" id="p_diff_fy_per" step="0.01"></div>
+                            <div class="attr-item"><label>暴击伤害%</label><input type="number" id="p_add_bjsh_per" step="0.01"></div>
+                            <div class="attr-item"><label>暴击抵抗</label><input type="number" id="p_diff_bj" step="0.01"></div>
+                            <div class="attr-item"><label>负面抵抗%</label><input type="number" id="p_diff_downside_per" step="0.01"></div>
+                            <div class="attr-item"><label>伤害减免</label><input type="number" id="p_diff_sh" step="0.01"></div>
+                            <div class="attr-item"><label>伤害减免%</label><input type="number" id="p_diff_sh_per" step="0.01"></div>
+                            <div class="attr-item"><label>释放时间减少</label><input type="number" id="p_releasetime" step="0.01"></div>
+                            <div class="attr-item"><label>释放时间减少%</label><input type="number" id="p_releasetime_per" step="0.01"></div>
+                            <div class="attr-item"><label>忙乱时间</label><input type="number" id="p_busy" step="0.01"></div>
+                            <div class="attr-item"><label>忙乱时间%</label><input type="number" id="p_busy_per" step="0.01"></div>
+                            <div class="attr-item"><label>忽视忙乱</label><input type="number" id="p_diff_busy" step="0.01"></div>
+                            <div class="attr-item"><label>忽视忙乱%</label><input type="number" id="p_diff_busy_per" step="0.01"></div>
+                            <div class="attr-item"><label>冷却时间减少</label><input type="number" id="p_distime" step="0.01"></div>
+                            <div class="attr-item"><label>冷却时间减少%</label><input type="number" id="p_distime_per" step="0.01"></div>
+                            <div class="attr-item"><label>内力消耗减少</label><input type="number" id="p_expend_mp" step="0.01"></div>
+                            <div class="attr-item"><label>内力消耗减少%</label><input type="number" id="p_expend_mp_per" step="0.01"></div>
+                            <div class="attr-item"><label>打坐效率%</label><input type="number" id="p_dazuo_per" step="0.01"></div>
+                            <div class="attr-item"><label>学习效率%</label><input type="number" id="p_study_per" step="0.01"></div>
+                            <div class="attr-item"><label>练习效率%</label><input type="number" id="p_lianxi_per" step="0.01"></div>
+                        </div>
+
+                        <div style="color:var(--text-secondary);font-size:12px;margin:6px 0 4px 0;">💰 奖励 (正数增加，负数减少)</div>
+                        <div class="attr-grid">
+                            <div class="attr-item"><label>经验</label><input type="number" id="r_exp"></div>
+                            <div class="attr-item"><label>潜能</label><input type="number" id="r_pot"></div>
+                            <div class="attr-item"><label>黄金</label><input type="number" id="r_gold"></div>
+                            <div class="attr-item"><label>白银</label><input type="number" id="r_silver"></div>
+                            <div class="attr-item"><label>铜板</label><input type="number" id="r_copper"></div>
+                            <div class="attr-item"><label>元宝</label><input type="number" id="r_cash"></div>
+                        </div>
+
+                        <div class="attr-actions">
+                            <button class="btn btn-success btn-sm" onclick="applyAttrs()">💾 应用全部修改</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadAttrs()">📊 重新读取</button>
+                            <button class="btn btn-primary btn-sm" onclick="gmAction('heal')">💚 满状态</button>
+                            <button class="btn btn-danger btn-sm" onclick="resetAttrs()">🔄 重置</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== PANEL: 物品管理 ==================== -->
+            <div class="panel" id="panel-items">
+                <div class="panel-header">
+                    <h2>📦 物品管理 <span style="font-size:14px;color:var(--text-secondary);" id="itemSubCount">(0)</span></h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadItems()">🔄 刷新</button>
+                    </div>
+                </div>
+                <!-- ★ 目标玩家选择 -->
+                <div class="console-target" style="margin-bottom:10px;">
+                    <label>🎯 目标玩家：</label>
+                    <select id="itemTarget" onchange="updateItemTargetDisplay()">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                    <span class="current-target" id="itemTargetDisplay">❌ 未选择</span>
+                </div>
+                <!-- ★ 发放数量设置 -->
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:8px 16px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border-color);">
+                    <label style="color:var(--text-secondary);font-size:14px;">📦 发放数量：</label>
+                    <input type="number" id="itemGiveCount" value="1" min="1" style="padding:4px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:14px;width:80px;">
+                    <span style="color:var(--text-secondary);font-size:12px;">(点击物品的"发放"按钮将发放此数量)</span>
+                </div>
+                <div class="search-box">
+                    <input type="text" placeholder="🔍 搜索物品..." id="itemSearch" oninput="loadItems()">
+                    <select id="itemLimit" onchange="loadItems()">
+                        <option value="50">50条</option>
+                        <option value="100" selected>100条</option>
+                        <option value="200">200条</option>
+                        <option value="500">500条</option>
+                        <option value="1000">1000条</option>
+                    </select>
+                    <span style="color:var(--text-secondary);font-size:12px;" id="itemCountInfo"></span>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead><tr><th>路径</th><th>名称</th><th>类型</th><th>品阶</th><th>操作</th></tr></thead>
+                        <tbody id="itemTableBody"><tr><td colspan="5" class="loading">加载中</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ==================== PANEL: 房间列表 ==================== -->
+            <div class="panel" id="panel-rooms">
+                <div class="panel-header">
+                    <h2>🏠 房间列表 <span style="font-size:14px;color:var(--text-secondary);" id="roomSubCount">(0)</span></h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadRooms()">🔄 刷新</button>
+                    </div>
+                </div>
+                <!-- ★ 目标玩家选择 -->
+                <div class="console-target" style="margin-bottom:10px;">
+                    <label>🎯 目标玩家：</label>
+                    <select id="roomTarget" onchange="updateRoomTargetDisplay()">
+                        <option value="">-- 请选择 --</option>
+                    </select>
+                    <span class="current-target" id="roomTargetDisplay">❌ 未选择</span>
+                </div>
+                <div class="search-box">
+                    <input type="text" placeholder="🔍 搜索房间..." id="roomSearch" oninput="loadRooms()">
+                    <select id="roomAreaFilter" onchange="loadRooms()">
+                        <option value="all">全部区域</option>
+                    </select>
+                    <select id="roomLimit" onchange="loadRooms()">
+                        <option value="50">50条</option>
+                        <option value="100" selected>100条</option>
+                        <option value="200">200条</option>
+                        <option value="500">500条</option>
+                    </select>
+                    <span style="color:var(--text-secondary);font-size:12px;" id="roomCountInfo"></span>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead><tr><th>路径</th><th>名称</th><th>区域</th><th>操作</th></tr></thead>
+                        <tbody id="roomTableBody"><tr><td colspan="4" class="loading">加载中</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ==================== PANEL: 操作日志 ==================== -->
+            <div class="panel" id="panel-logs">
+                <div class="panel-header">
+                    <h2>📜 操作日志</h2>
+                    <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="loadLogs()">🔄 刷新</button>
+                        <button class="btn btn-outline btn-sm" onclick="loadLogs(200)">显示更多</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead><tr><th>时间</th><th>操作者</th><th>命令</th></tr></thead>
+                        <tbody id="logTableBody"><tr><td colspan="3" class="loading">加载中</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div><!-- /main-content -->
+    </div><!-- /grid -->
+</div><!-- /container -->
+
+<!-- ============================================================
+模态框
+============================================================ -->
+<!-- 创建角色 -->
+<div class="modal-overlay" id="createModal">
+    <div class="modal">
+        <h3>➕ 创建测试角色</h3>
+        <div class="form-group"><label>角色名称</label><input type="text" id="newUserName" placeholder="输入角色名" onkeydown="if(event.key==='Enter') confirmCreateUser()"></div>
+        <div class="form-group"><label>初始等级</label><input type="number" id="newUserLevel" value="1" min="1"></div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmCreateUser()">✅ 创建</button>
+        </div>
+    </div>
+</div>
+<!-- 创建账号 -->
+<div class="modal-overlay" id="createAccountModal">
+    <div class="modal">
+        <h3>➕ 创建账号</h3>
+        <div class="form-group"><label>用户名</label><input type="text" id="newAccountName" placeholder="5-15位字母或数字" onkeydown="if(event.key==='Enter') confirmCreateAccount()"></div>
+        <div class="form-group"><label>密码</label><input type="password" id="newAccountPwd" placeholder="6-20位" onkeydown="if(event.key==='Enter') confirmCreateAccount()"></div>
+        <div class="form-group"><label>手机号(可选)</label><input type="text" id="newAccountPhone" placeholder="请输入手机号码" onkeydown="if(event.key==='Enter') confirmCreateAccount()"></div>
+        <div class="form-group"><label>权限等级</label>
+            <select id="newAccountLevel">
+                <option value="0">普通用户</option>
+                <option value="5">管理员</option>
+                <option value="9">GM</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeAccountModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmCreateAccount()">✅ 创建</button>
+        </div>
+    </div>
+</div>
+<!-- 广播 -->
+<div class="modal-overlay" id="broadcastModal">
+    <div class="modal">
+        <h3>📢 广播消息</h3>
+        <div class="form-group"><label>消息内容</label><input type="text" id="broadcastMessage" placeholder="输入广播内容..." onkeydown="if(event.key==='Enter') confirmBroadcast()"></div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeBroadcast()">取消</button>
+            <button class="btn btn-success" onclick="confirmBroadcast()">📢 发送</button>
+        </div>
+    </div>
+</div>
+
+<!-- 存档 -->
+<div class="modal-overlay" id="backupModal">
+    <div class="modal">
+        <h3>💾 存档 / 回档</h3>
+        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <button class="btn btn-success" onclick="createBackup()">💾 创建存档</button>
+            <button class="btn btn-outline" onclick="loadBackups()">🔄 刷新</button>
+        </div>
+        <div class="backup-list" id="backupList"><div class="loading">加载中...</div></div>
+        <div class="modal-actions"><button class="btn btn-outline" onclick="closeBackupModal()">关闭</button></div>
+    </div>
+</div>
+
+<!-- ============================================================
+JavaScript
+============================================================ -->
+<script>
+// ============================================================
+// 配置
+// ============================================================
+const GM_API = 'http://localhost:8090/gm';
+
+let allUsers = [], allItems = [], allRooms = [];
+let currentPanel = 'dashboard';
+let logLimit = 100;
+let currentTargetId = '';
+
+// ============================================================
+// 工具函数
+// ============================================================
+function toast(msg, type) {
+    type = type || 'info';
+    var el = document.createElement('div');
+    el.className = 'toast ' + type;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 3000);
+}
+
+function formatTime(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString('zh-CN');
+}
+
+function closeModal() {
+    document.getElementById('createModal').classList.remove('active');
+}
+function closeBroadcast() {
+    document.getElementById('broadcastModal').classList.remove('active');
+}
+function closeBackupModal() {
+    document.getElementById('backupModal').classList.remove('active');
+}
+
+function showBroadcast() {
+    document.getElementById('broadcastModal').classList.add('active');
+    document.getElementById('broadcastMessage').value = '';
+    document.getElementById('broadcastMessage').focus();
+}
+
+function showBackupModal() {
+    document.getElementById('backupModal').classList.add('active');
+    loadBackups();
+}
+
+function updateTargetDisplay() {
+    var sel = document.getElementById('gmTarget');
+    var display = document.getElementById('targetDisplay');
+    if (sel.value) {
+        var text = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value;
+        display.textContent = '✅ ' + text;
+        display.style.color = '#3fb950';
+        currentTargetId = sel.value;
+    } else {
+        display.textContent = '❌ 未选择';
+        display.style.color = '#f85149';
+        currentTargetId = '';
+    }
+    var attrSel = document.getElementById('attrTarget');
+    if (attrSel && sel.value) {
+        for (var i = 0; i < attrSel.options.length; i++) {
+            if (attrSel.options[i].value === sel.value) {
+                attrSel.value = sel.value;
+                break;
+            }
+        }
+    }
+}
+
+function quickSetGM() {
+    var el = document.getElementById('a_userLevel');
+    if (el) el.value = 9;
+    toast('👑 已设置权限为 GM (9)，点击"应用修改"生效', 'info');
+}
+
+function getRewardAmount() {
+    var val = parseInt(document.getElementById('rewardAmount').value);
+    if (isNaN(val)) return 10000;
+    return val;
+}
+
+// ============================================================
+// API 调用
+// ============================================================
+function api(endpoint, options) {
+    options = options || {};
+    var url = GM_API + endpoint;
+    return fetch(url, {
+        method: options.method || 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: options.body || undefined
+    }).then(function(res) {
+        if (!res.ok) {
+            return res.json().then(function(data) {
+                throw new Error(data.error || data.message || '请求失败 (HTTP ' + res.status + ')');
+            });
+        }
+        return res.json();
+    });
+}
+
+// ============================================================
+// 面板切换
+// ============================================================
+document.querySelectorAll('.menu-item').forEach(function(el) {
+    el.onclick = function() {
+        document.querySelectorAll('.menu-item').forEach(function(m) { m.classList.remove('active'); });
+        this.classList.add('active');
+        var panel = this.dataset.panel;
+        document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+        document.getElementById('panel-' + panel).classList.add('active');
+        currentPanel = panel;
+        switch (panel) {
+            case 'dashboard': refreshStats(); break;
+            case 'users': loadUsers(); break;
+            case 'accounts': loadAccounts(); break;
+            case 'online': loadOnline(); break;
+            case 'attrs': loadAttrs(); break;
+            case 'items': loadItems(); break;
+            case 'rooms': loadRooms(); break;
+            case 'logs': loadLogs(); break;
+        }
+    };
+});
+
+// ============================================================
+// 仪表盘
+// ============================================================
+function refreshStats() {
+    api('/stats').then(function(data) {
+        var stats = data.data || {};
+        document.getElementById('statOnline').textContent = stats.online || 0;
+        document.getElementById('statTotal').textContent = stats.total || 0;
+        document.getElementById('statRooms').textContent = stats.rooms || 0;
+        document.getElementById('statNPCs').textContent = stats.npcs || 0;
+        document.getElementById('statCommands').textContent = stats.commands || 0;
+        document.getElementById('statSkills').textContent = stats.skills || 0;
+        document.getElementById('onlineCount').textContent = stats.online || 0;
+        document.getElementById('onlineBadge').textContent = stats.online || 0;
+        document.getElementById('userBadge').textContent = stats.total || 0;
+        updateStatus(true);
+    }).catch(function(e) {
+        updateStatus(false);
+        toast('无法连接GM服务器: ' + e.message, 'error');
+    });
+}
+
+function updateStatus(online) {
+    var el = document.getElementById('serverStatus');
+    if (online) {
+        el.className = 'status-badge online';
+        el.innerHTML = '<span class="dot"></span> 运行中';
+    } else {
+        el.className = 'status-badge offline';
+        el.innerHTML = '<span class="dot"></span> 离线';
+    }
+}
+
+// ============================================================
+// 角色管理
+// ============================================================
+function loadUsers() {
+    api('/users').then(function(data) {
+        allUsers = data.data || [];
+        renderUsers(allUsers);
+        document.getElementById('userBadge').textContent = allUsers.length;
+    }).catch(function(e) {
+        toast('加载角色失败: ' + e.message, 'error');
+    });
+}
+
+function renderUsers(users) {
+    var tbody = document.getElementById('userTableBody');
+    if (!users || !users.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="loading">暂无角色</td></tr>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
+        html += '<tr>' +
+            '<td style="font-size:11px;color:#8b949e;font-family:monospace;">' + (u.id || '') + '</td>' +
+            '<td><strong>' + (u.name || '') + '</strong></td>' +
+            '<td>' + (u.level || 0) + '</td>' +
+            '<td>' + (u.user_level >= 9 ? '👑 GM' : u.user_level >= 5 ? '⭐ 管理员' : '普通') + '</td>' +
+            '<td>' + (u.online ? '🟢 在线' : '⚫ 离线') + '</td>' +
+            '<td>' +
+            '<button class="btn btn-primary btn-xs" onclick="selectTarget(\'' + u.id + '\',\'' + u.name + '\')">🎯 控制</button>' +
+            '<button class="btn btn-danger btn-xs" onclick="deleteUser(\'' + u.id + '\')">删除</button>' +
+            '</td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function filterUsers() {
+    var kw = document.getElementById('userSearch').value.toLowerCase();
+    var filter = document.getElementById('userFilter').value;
+    var filtered = allUsers.filter(function(u) { return u.name.toLowerCase().indexOf(kw) !== -1; });
+    if (filter === 'online') filtered = filtered.filter(function(u) { return u.online; });
+    if (filter === 'offline') filtered = filtered.filter(function(u) { return !u.online; });
+    if (filter === 'gm') filtered = filtered.filter(function(u) { return u.user_level >= 9; });
+    renderUsers(filtered);
+}
+
+function selectTarget(id, name) {
+    var menuItems = document.querySelectorAll('.menu-item');
+    for (var i = 0; i < menuItems.length; i++) {
+        if (menuItems[i].dataset.panel === 'console') {
+            menuItems[i].click();
+            break;
+        }
+    }
+    var sel = document.getElementById('gmTarget');
+    for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === id) {
+            sel.value = id;
+            break;
+        }
+    }
+    updateTargetDisplay();
+    addConsole('🎯 已选择目标: ' + name, 'info');
+    loadTargets();
+    loadAttrs();
+}
+
+function showCreateUser() {
+    document.getElementById('createModal').classList.add('active');
+    document.getElementById('newUserName').value = 'test_' + Date.now().toString().slice(-6);
+    document.getElementById('newUserName').focus();
+}
+
+function confirmCreateUser() {
+    var name = document.getElementById('newUserName').value.trim();
+    var level = parseInt(document.getElementById('newUserLevel').value) || 1;
+    if (!name) { toast('请输入角色名', 'error'); return; }
+    api('/user/create', { method: 'POST', body: JSON.stringify({ name: name, level: level }) })
+        .then(function() {
+            toast('✅ 角色 ' + name + ' 创建成功', 'success');
+            closeModal();
+            loadUsers();
+            refreshStats();
+        }).catch(function(e) {
+            toast('创建失败: ' + e.message, 'error');
+        });
+}
+
+function deleteUser(id) {
+    if (!confirm('⚠️ 确定删除该角色吗？')) return;
+    api('/user/' + id, { method: 'DELETE' })
+        .then(function() {
+            toast('✅ 角色已删除', 'success');
+            loadUsers();
+            refreshStats();
+        }).catch(function(e) {
+            toast('删除失败: ' + e.message, 'error');
+        });
+}
+// ============================================================
+// 账号管理
+// ============================================================
+let allAccounts = [];
+
+function loadAccounts() {
+    api('/accounts').then(function(data) {
+        allAccounts = data.data || [];
+        renderAccounts(allAccounts);
+        document.getElementById('accountBadge').textContent = allAccounts.length;
+        document.getElementById('accountSubCount').textContent = '(' + allAccounts.length + ')';
+    }).catch(function(e) {
+        toast('加载账号失败: ' + e.message, 'error');
+    });
+}
+
+function renderAccounts(accounts) {
+    var tbody = document.getElementById('accountTableBody');
+    if (!accounts || !accounts.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">暂无账号</td></tr>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < accounts.length; i++) {
+        var a = accounts[i];
+        var levelName = a.level >= 9 ? '👑 GM' : a.level >= 5 ? '⭐ 管理员' : '普通';
+        html += '<tr>' +
+            '<td style="font-size:11px;color:#8b949e;font-family:monospace;">' + (a.id || '') + '</td>' +
+            '<td><strong>' + (a.name || '') + '</strong></td>' +
+            '<td>' + levelName + ' (' + (a.level || 0) + ')</td>' +
+            '<td>' + (a.phone || '-') + '</td>' +
+            '<td>' + (a.role_count || 0) + '</td>' +
+            '<td style="font-size:12px;color:#8b949e;">' + formatTime(a.create_time) + '</td>' +
+            '<td>' +
+            '<button class="btn btn-primary btn-xs" onclick="editAccount(\'' + a.id + '\')">✏️ 编辑</button>' +
+            '<button class="btn btn-danger btn-xs" onclick="deleteAccount(\'' + a.id + '\')">🗑️</button>' +
+            '</td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function filterAccounts() {
+    var kw = document.getElementById('accountSearch').value.toLowerCase();
+    var filter = document.getElementById('accountFilter').value;
+    var filtered = allAccounts.filter(function(a) { return a.name.toLowerCase().indexOf(kw) !== -1; });
+    if (filter === 'admin') filtered = filtered.filter(function(a) { return a.level >= 5; });
+    if (filter === 'normal') filtered = filtered.filter(function(a) { return a.level < 5; });
+    renderAccounts(filtered);
+}
+
+function showCreateAccount() {
+    document.getElementById('createAccountModal').classList.add('active');
+    document.getElementById('newAccountName').value = '';
+    document.getElementById('newAccountPwd').value = '';
+    document.getElementById('newAccountPhone').value = '';
+    document.getElementById('newAccountLevel').value = '0';
+    document.getElementById('newAccountName').focus();
+}
+
+function closeAccountModal() {
+    document.getElementById('createAccountModal').classList.remove('active');
+}
+
+function confirmCreateAccount() {
+    var name = document.getElementById('newAccountName').value.trim();
+    var pwd = document.getElementById('newAccountPwd').value;
+    var phone = document.getElementById('newAccountPhone').value.trim();
+    var level = parseInt(document.getElementById('newAccountLevel').value) || 0;
+    
+    if (!name) { toast('请输入用户名', 'error'); return; }
+    if (!/^[a-z0-9]{5,15}$/.test(name)) { toast('用户名需要5-15位字母或数字', 'error'); return; }
+    if (!pwd || pwd.length < 6) { toast('密码至少6位', 'error'); return; }
+    
+    api('/account/create', {
+        method: 'POST',
+        body: JSON.stringify({ name: name, pwd: pwd, phone: phone, level: level })
+    }).then(function() {
+        toast('✅ 账号 ' + name + ' 创建成功', 'success');
+        closeAccountModal();
+        loadAccounts();
+    }).catch(function(e) {
+        toast('创建失败: ' + e.message, 'error');
+    });
+}
+
+function editAccount(id) {
+    var account = allAccounts.find(function(a) { return a.id == id; });
+    if (!account) { toast('账号不存在', 'error'); return; }
+    // 简单编辑：修改密码和权限
+    var newPwd = prompt('修改密码 (留空则不修改):', '');
+    if (newPwd === null) return;
+    if (newPwd && newPwd.length < 6) { toast('密码至少6位', 'error'); return; }
+    
+    var newLevel = prompt('修改权限等级 (0-9):', account.level);
+    if (newLevel === null) return;
+    if (isNaN(newLevel) || newLevel < 0 || newLevel > 9) { toast('权限等级请输入0-9', 'error'); return; }
+    
+    api('/account/update', {
+        method: 'PUT',
+        body: JSON.stringify({ id: id, pwd: newPwd || undefined, level: parseInt(newLevel) || 0 })
+    }).then(function() {
+        toast('✅ 账号已更新', 'success');
+        loadAccounts();
+    }).catch(function(e) {
+        toast('更新失败: ' + e.message, 'error');
+    });
+}
+
+function deleteAccount(id) {
+    if (!confirm('⚠️ 确定删除此账号吗？该账号下所有角色也会被删除！')) return;
+    api('/account/' + id, { method: 'DELETE' })
+        .then(function() {
+            toast('✅ 账号已删除', 'success');
+            loadAccounts();
+            loadUsers();
+        }).catch(function(e) {
+            toast('删除失败: ' + e.message, 'error');
+        });
+}
+// ============================================================
+// 在线玩家
+// ============================================================
+function loadOnline() {
+    api('/online').then(function(data) {
+        var users = data.data || [];
+        document.getElementById('onlineSubCount').textContent = '(' + users.length + ')';
+        document.getElementById('onlineBadge').textContent = users.length;
+        document.getElementById('onlineCount').textContent = users.length;
+        var tbody = document.getElementById('onlineTableBody');
+        if (!users.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">暂无在线玩家</td></tr>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            html += '<tr>' +
+                '<td style="font-size:11px;color:#8b949e;font-family:monospace;">' + (u.id || '') + '</td>' +
+                '<td><strong>' + (u.name || '') + '</strong></td>' +
+                '<td>' + (u.level || 0) + '</td>' +
+                '<td style="font-size:12px;color:#58a6ff;">' + (u.family || '无') + '</td>' +
+                '<td style="font-size:12px;color:#8b949e;">' + (u.room_name || u.room || '-') + '</td>' +
+                '<td style="font-size:12px;">' + (u.hp || 0) + '/' + (u.max_hp || 0) + '</td>' +
+                '<td>' +
+                '<button class="btn btn-primary btn-xs" onclick="selectTarget(\'' + u.id + '\',\'' + u.name + '\')">🎯 控制</button>' +
+                '<button class="btn btn-warning btn-xs" onclick="teleportUser(\'' + u.id + '\')">🚀 传送</button>' +
+                '<button class="btn btn-danger btn-xs" onclick="kickUser(\'' + u.id + '\')">👢 踢出</button>' +
+                '</td></tr>';
+        }
+        tbody.innerHTML = html;
+        loadTargets();
+    }).catch(function(e) {
+        toast('加载在线玩家失败: ' + e.message, 'error');
+    });
+}
+
+function kickUser(id) {
+    if (!confirm('确定踢出该玩家吗？')) return;
+    api('/kick', { method: 'POST', body: JSON.stringify({ userId: id }) })
+        .then(function() {
+            toast('✅ 玩家已踢出', 'success');
+            loadOnline();
+        }).catch(function(e) {
+            toast('踢出失败: ' + e.message, 'error');
+        });
+}
+
+function teleportUser(id) {
+    var room = prompt('🎯 目标房间路径:', 'yz/wumiao');
+    if (!room) return;
+    api('/teleport', { method: 'POST', body: JSON.stringify({ userId: id, roomPath: room }) })
+        .then(function() {
+            toast('✅ 已传送到 ' + room, 'success');
+        }).catch(function(e) {
+            toast('传送失败: ' + e.message, 'error');
+        });
+}
+
+function confirmBroadcast() {
+    var msg = document.getElementById('broadcastMessage').value.trim();
+    if (!msg) { toast('请输入消息内容', 'error'); return; }
+    api('/broadcast', { method: 'POST', body: JSON.stringify({ message: msg }) })
+        .then(function() {
+            toast('📢 广播发送成功', 'success');
+            closeBroadcast();
+        }).catch(function(e) {
+            toast('广播失败: ' + e.message, 'error');
+        });
+}
+
+// ============================================================
+// GM控制台
+// ============================================================
+function gmAction(command) {
+    var target = document.getElementById('gmTarget').value;
+    if (!target) { toast('⚠️ 请先选择目标角色', 'error'); return; }
+    addConsole('▶ ' + command, 'cmd');
+    api('/command', {
+        method: 'POST',
+        body: JSON.stringify({ userId: target, command: command })
+    }).then(function(data) {
+        if (data.result) {
+            addConsole(data.result, 'success');
+        } else {
+            addConsole('✅ 执行成功', 'success');
+        }
+    }).catch(function(e) {
+        addConsole('❌ 错误: ' + e.message, 'error');
+    });
+}
+
+function gmActionWithReward(cmd) {
+    var amount = getRewardAmount();
+    gmAction(cmd + ' ' + amount);
+}
+
+function execCustomGM() {
+    var cmd = document.getElementById('gmCustomCommand').value.trim();
+    if (!cmd) return;
+    document.getElementById('gmCustomCommand').value = '';
+    gmAction(cmd);
+}
+
+function addConsole(text, type) {
+    type = type || 'info';
+    var out = document.getElementById('consoleOutput');
+    var line = document.createElement('div');
+    line.className = type;
+    line.textContent = text;
+    out.appendChild(line);
+    out.scrollTop = out.scrollHeight;
+}
+
+function clearConsole() {
+    document.getElementById('consoleOutput').innerHTML = '<span class="info">📋 控制台已清空</span>';
+}
+
+function loadTargets() {
+    api('/online').then(function(data) {
+        var sel = document.getElementById('gmTarget');
+        var attrSel = document.getElementById('attrTarget');
+        var cur = sel.value;
+        var users = data.data || [];
+        var options = '<option value="">-- 请选择 --</option>';
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            options += '<option value="' + u.id + '">' + u.name + ' (Lv.' + u.level + ')' + (u.user_level >= 9 ? ' 👑' : '') + '</option>';
+        }
+        sel.innerHTML = options;
+        attrSel.innerHTML = options;
+        if (cur) {
+            sel.value = cur;
+            attrSel.value = cur;
+        }
+        updateTargetDisplay();
+    }).catch(function() {});
+}
+
+// ============================================================
+// 物品管理 - 目标选择
+// ============================================================
+function loadItemTargets() {
+    api('/online').then(function(data) {
+        var sel = document.getElementById('itemTarget');
+        if (!sel) return;
+        var cur = sel.value;
+        var users = data.data || [];
+        var options = '<option value="">-- 请选择 --</option>';
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            options += '<option value="' + u.id + '">' + u.name + ' (Lv.' + u.level + ')' + (u.user_level >= 9 ? ' 👑' : '') + '</option>';
+        }
+        sel.innerHTML = options;
+        if (cur) sel.value = cur;
+        updateItemTargetDisplay();
+    }).catch(function() {});
+}
+
+function updateItemTargetDisplay() {
+    var sel = document.getElementById('itemTarget');
+    var display = document.getElementById('itemTargetDisplay');
+    if (!sel || !display) return;
+    if (sel.value) {
+        var text = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value;
+        display.textContent = '✅ ' + text;
+        display.style.color = '#3fb950';
+    } else {
+        display.textContent = '❌ 未选择';
+        display.style.color = '#f85149';
+    }
+}
+
+function getItemTarget() {
+    var sel = document.getElementById('itemTarget');
+    return sel ? sel.value : '';
+}
+
+// ============================================================
+// 房间列表 - 目标选择
+// ============================================================
+function loadRoomTargets() {
+    api('/online').then(function(data) {
+        var sel = document.getElementById('roomTarget');
+        if (!sel) return;
+        var cur = sel.value;
+        var users = data.data || [];
+        var options = '<option value="">-- 请选择 --</option>';
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            options += '<option value="' + u.id + '">' + u.name + ' (Lv.' + u.level + ')' + (u.user_level >= 9 ? ' 👑' : '') + '</option>';
+        }
+        sel.innerHTML = options;
+        if (cur) sel.value = cur;
+        updateRoomTargetDisplay();
+    }).catch(function() {});
+}
+
+function updateRoomTargetDisplay() {
+    var sel = document.getElementById('roomTarget');
+    var display = document.getElementById('roomTargetDisplay');
+    if (!sel || !display) return;
+    if (sel.value) {
+        var text = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value;
+        display.textContent = '✅ ' + text;
+        display.style.color = '#3fb950';
+    } else {
+        display.textContent = '❌ 未选择';
+        display.style.color = '#f85149';
+    }
+}
+
+function getRoomTarget() {
+    var sel = document.getElementById('roomTarget');
+    return sel ? sel.value : '';
+}
+
+// ============================================================
+// 属性修改
+// ============================================================
+function loadAttrs() {
+    var target = document.getElementById('attrTarget').value;
+    if (!target) {
+        document.getElementById('attrPanel').style.display = 'none';
+        document.getElementById('attrTargetInfo').textContent = '请选择目标';
+        return;
+    }
+    api('/player/' + target + '/full').then(function(data) {
+        if (!data.success || !data.data) {
+            toast('获取属性失败', 'error');
+            return;
+        }
+        var user = data.data;
+        document.getElementById('attrPanel').style.display = 'block';
+        document.getElementById('attrTargetInfo').textContent = '已选择: ' + user.name;
+        document.getElementById('attrPlayerName').textContent = user.name || '未知';
+        document.getElementById('attrLevel').textContent = user.level || 0;
+        document.getElementById('attrFamily').textContent = user.family || '无';
+
+        setVal('a_hp', user.hp);
+        setVal('a_maxHp', user.max_hp);
+        setVal('a_mp', user.mp);
+        setVal('a_limitMp', user.limit_mp);
+        setVal('a_level', user.level);
+        setVal('a_userLevel', user.user_level);
+        setVal('a_str', user.str);
+        setVal('a_con', user.con);
+        setVal('a_dex', user.dex);
+        setVal('a_int', user.int);
+        setVal('a_per', user.per);
+        setVal('a_kar', user.kar);
+        setVal('a_gender', user.gender);
+        setVal('a_exp', user.exp);
+        setVal('a_pot', user.pot);
+        setVal('a_money', user.money);
+
+        if (user.prop) {
+            var p = user.prop;
+            setVal('p_str', p.str);
+            setVal('p_con', p.con);
+            setVal('p_dex', p.dex);
+            setVal('p_int', p.int);
+            setVal('p_per', p.per);
+            setVal('p_kar', p.kar);
+            setVal('p_gj', p.gj);
+            setVal('p_fy', p.fy);
+            setVal('p_mz', p.mz);
+            setVal('p_ds', p.ds);
+            setVal('p_zj', p.zj);
+            setVal('p_bj', p.bj);
+            setVal('p_gjsd', p.gjsd);
+            setVal('p_add_sh_per', p.add_sh_per);
+            setVal('p_diff_fy_per', p.diff_fy_per);
+            setVal('p_add_bjsh_per', p.add_bjsh_per);
+            setVal('p_diff_bj', p.diff_bj);
+            setVal('p_diff_downside_per', p.diff_downside_per);
+            setVal('p_diff_sh', p.diff_sh);
+            setVal('p_releasetime', p.releasetime);
+            setVal('p_busy', p.busy);
+            setVal('p_diff_busy', p.diff_busy);
+            setVal('p_distime', p.distime);
+            setVal('p_expend_mp', p.expend_mp);
+            setVal('p_diff_sh_per', p.diff_sh_per);
+            setVal('p_releasetime_per', p.releasetime_per);
+            setVal('p_busy_per', p.busy_per);
+            setVal('p_diff_busy_per', p.diff_busy_per);
+            setVal('p_distime_per', p.distime_per);
+            setVal('p_expend_mp_per', p.expend_mp_per);
+            setVal('p_dazuo_per', p.dazuo_per);
+            setVal('p_study_per', p.study_per);
+            setVal('p_lianxi_per', p.lianxi_per);
+        }
+
+        var rewardIds = ['r_exp', 'r_pot', 'r_gold', 'r_silver', 'r_copper', 'r_cash'];
+        for (var i = 0; i < rewardIds.length; i++) {
+            document.getElementById(rewardIds[i]).value = 0;
+        }
+
+        document.getElementById('a_family').value = user.family || 'NONE';
+
+        var gmSel = document.getElementById('gmTarget');
+        if (gmSel) gmSel.value = target;
+        updateTargetDisplay();
+        toast('📊 已读取 ' + user.name + ' 的完整属性', 'success');
+    }).catch(function(e) {
+        toast('读取属性失败: ' + e.message, 'error');
+    });
+}
+
+function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.value = val !== undefined && val !== null ? val : 0;
+}
+
+function applyAttrs() {
+    var target = document.getElementById('attrTarget').value;
+    if (!target) { toast('请先选择目标', 'error'); return; }
+
+    var commands = [];
+
+    var attrMap = {
+        'hp': 'a_hp', 'max_hp': 'a_maxHp', 'mp': 'a_mp', 'limit_mp': 'a_limitMp',
+        'level': 'a_level', 'user_level': 'a_userLevel',
+        'str': 'a_str', 'con': 'a_con', 'dex': 'a_dex', 'int': 'a_int',
+        'per': 'a_per', 'kar': 'a_kar', 'gender': 'a_gender',
+        'exp': 'a_exp', 'pot': 'a_pot', 'money': 'a_money'
+    };
+    for (var attr in attrMap) {
+        var val = document.getElementById(attrMap[attr]).value;
+        if (val !== '' && val !== '0') {
+            commands.push('set ' + attr + ' ' + val);
+        }
+    }
+
+    var propMap = {
+        'str': 'p_str', 'con': 'p_con', 'dex': 'p_dex', 'int': 'p_int',
+        'per': 'p_per', 'kar': 'p_kar',
+        'gj': 'p_gj', 'fy': 'p_fy', 'mz': 'p_mz', 'ds': 'p_ds',
+        'zj': 'p_zj', 'bj': 'p_bj', 'gjsd': 'p_gjsd',
+        'diff_sh': 'p_diff_sh', 'releasetime': 'p_releasetime',
+        'busy': 'p_busy', 'diff_busy': 'p_diff_busy',
+        'distime': 'p_distime', 'expend_mp': 'p_expend_mp',
+        'add_sh_per': 'p_add_sh_per', 'diff_fy_per': 'p_diff_fy_per',
+        'add_bjsh_per': 'p_add_bjsh_per', 'diff_sh_per': 'p_diff_sh_per',
+        'diff_bj': 'p_diff_bj', 'releasetime_per': 'p_releasetime_per',
+        'busy_per': 'p_busy_per', 'diff_busy_per': 'p_diff_busy_per',
+        'distime_per': 'p_distime_per', 'expend_mp_per': 'p_expend_mp_per',
+        'diff_downside_per': 'p_diff_downside_per',
+        'dazuo_per': 'p_dazuo_per', 'study_per': 'p_study_per',
+        'lianxi_per': 'p_lianxi_per'
+    };
+    for (var prop in propMap) {
+        var val = document.getElementById(propMap[prop]).value;
+        if (val !== '' && val !== '0') {
+            commands.push('setprop ' + prop + ' ' + val);
+        }
+    }
+
+    var rExp = document.getElementById('r_exp').value;
+    var rPot = document.getElementById('r_pot').value;
+    if (rExp !== '' && rExp !== '0') commands.push('exp ' + rExp);
+    if (rPot !== '' && rPot !== '0') commands.push('pot ' + rPot);
+
+    var gold = parseInt(document.getElementById('r_gold').value) || 0;
+    var silver = parseInt(document.getElementById('r_silver').value) || 0;
+    var copper = parseInt(document.getElementById('r_copper').value) || 0;
+    var totalMoney = gold * 10000 + silver * 100 + copper;
+    if (totalMoney !== 0) commands.push('money ' + totalMoney);
+
+    var cash = document.getElementById('r_cash').value;
+    if (cash !== '' && cash !== '0') commands.push('set cash_money ' + cash);
+
+    if (commands.length === 0) { toast('没有可应用的修改', 'warn'); return; }
+
+    var successCount = 0;
+    var totalCmds = commands.length;
+    var promises = [];
+    for (var i = 0; i < commands.length; i++) {
+        (function(cmd) {
+            promises.push(
+                api('/command', {
+                    method: 'POST',
+                    body: JSON.stringify({ userId: target, command: cmd })
+                }).then(function() {
+                    successCount++;
+                    addConsole('✅ ' + cmd, 'success');
+                }).catch(function(e) {
+                    addConsole('❌ ' + cmd + ' (失败: ' + e.message + ')', 'error');
+                })
+            );
+        })(commands[i]);
+    }
+
+    Promise.all(promises).then(function() {
+        var combatProps = ['p_gj', 'p_fy', 'p_mz', 'p_ds', 'p_zj', 'p_bj', 'p_gjsd'];
+        var hasCombat = false;
+        for (var j = 0; j < combatProps.length; j++) {
+            var val = document.getElementById(combatProps[j]).value;
+            if (val !== '' && val !== '0') { hasCombat = true; break; }
+        }
+        if (hasCombat) {
+            api('/command', {
+                method: 'POST',
+                body: JSON.stringify({ userId: target, command: 'recount' })
+            }).then(function() {
+                addConsole('✅ recount (重算属性)', 'success');
+            }).catch(function(e) {
+                addConsole('❌ recount 失败: ' + e.message, 'error');
+            });
+        }
+        toast('✅ 已应用 ' + successCount + '/' + totalCmds + ' 条修改', 'success');
+        setTimeout(loadAttrs, 800);
+    });
+}
+
+function resetAttrs() {
+    var inputs = document.querySelectorAll('#attrPanel input[type="number"]');
+    for (var i = 0; i < inputs.length; i++) {
+        inputs[i].value = 0;
+    }
+    toast('🔄 已重置所有数值', 'info');
+}
+
+function applyFamily() {
+    var target = document.getElementById('attrTarget').value;
+    if (!target) { toast('请先选择目标', 'error'); return; }
+    var family = document.getElementById('a_family').value;
+
+    api('/online').then(function(data) {
+        var users = data.data || [];
+        var found = false;
+        for (var i = 0; i < users.length; i++) {
+            if (users[i].id === target) { found = true; break; }
+        }
+        if (!found) {
+            toast('❌ 目标玩家不在线，无法转换门派', 'error');
+            return;
+        }
+        return api('/command', {
+            method: 'POST',
+            body: JSON.stringify({ userId: target, command: 'set family ' + family })
+        });
+    }).then(function() {
+        toast('✅ 门派已转换: ' + (family === 'NONE' ? '无门派' : family), 'success');
+        addConsole('✅ 门派已转换: ' + (family === 'NONE' ? '无门派' : family), 'success');
+        addConsole('📌 提示: 需要重新登录才能看到称号变化', 'warn');
+        loadAttrs();
+    }).catch(function(e) {
+        if (e && e.message) toast('转换失败: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// 物品管理 - 完整版
+// ============================================================
+function loadItems() {
+    // ★ 加载目标列表
+    loadItemTargets();
+    
+    var limit = parseInt(document.getElementById('itemLimit').value) || 100;
+    var search = document.getElementById('itemSearch').value || '';
+
+    document.getElementById('itemTableBody').innerHTML = '<tr><td colspan="5" class="loading">⏳ 加载中...</td></tr>';
+
+    api('/items?limit=' + limit + '&search=' + encodeURIComponent(search))
+        .then(function(data) {
+            var items = [];
+            var total = 0;
+
+            if (data.success && data.data) {
+                items = data.data || [];
+                total = data.total || items.length;
+            } else if (Array.isArray(data)) {
+                items = data;
+                total = data.length;
+            } else if (data.data && Array.isArray(data.data)) {
+                items = data.data;
+                total = data.total || items.length;
+            }
+
+            allItems = items;
+            document.getElementById('itemBadge').textContent = total;
+            document.getElementById('itemSubCount').textContent = '(' + total + ')';
+            document.getElementById('itemCountInfo').textContent = '显示 ' + items.length + '/' + total + ' 件';
+
+            renderItems(items);
+        }).catch(function(e) {
+            toast('加载物品失败: ' + e.message, 'error');
+            document.getElementById('itemTableBody').innerHTML = '<tr><td colspan="5" class="loading">❌ 加载失败</td></tr>';
+        });
+}
+
+function renderItems(items) {
+    var tbody = document.getElementById('itemTableBody');
+    if (!items || !items.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">📭 暂无物品</td></tr>';
+        return;
+    }
+    var html = '';
+    // ★ 获取当前选中的目标名称
+    var targetName = '';
+    var targetSel = document.getElementById('itemTarget');
+    if (targetSel && targetSel.value) {
+        var opt = targetSel.options[targetSel.selectedIndex];
+        targetName = opt ? opt.text : '';
+    }
+    if (!targetName) targetName = '目标';
+    
+    for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var stars = '';
+        var grade = it.grade || 0;
+        for (var s = 0; s < Math.min(grade, 5); s++) stars += '⭐';
+        if (!stars) stars = '无';
+        html += '<tr>' +
+            '<td style="font-size:11px;color:#8b949e;font-family:monospace;">' + (it.path || '未知') + '</td>' +
+            '<td><strong>' + (it.name || '未知') + '</strong></td>' +
+            '<td><span style="color:' + getTypeColor(it.type) + ';">' + (it.type || '普通') + '</span></td>' +
+            '<td>' + stars + '</td>' +
+            '<td><button class="btn btn-success btn-xs" onclick="giveItem(\'' + (it.path || '') + '\')">📤 发给 ' + targetName + '</button></td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function getTypeColor(type) {
+    var colors = {
+        '武器': '#f0883e', '防具': '#58a6ff', '药品': '#3fb950',
+        '食物': '#d29922', '书籍': '#bc8cff', '材料': '#8b949e',
+        '任务': '#f85149'
+    };
+    return colors[type] || '#8b949e';
+}
+
+function giveItem(path) {
+    // ★ 优先从物品管理面板获取目标
+    var target = document.getElementById('itemTarget') ? document.getElementById('itemTarget').value : '';
+    if (!target) {
+        target = document.getElementById('gmTarget') ? document.getElementById('gmTarget').value : '';
+    }
+    if (!target) {
+        toast('⚠️ 请在物品管理面板选择目标玩家', 'error');
+        return;
+    }
+    // ★ 使用数量输入框的值，不再弹窗询问
+    var countInput = document.getElementById('itemGiveCount');
+    var count = countInput ? parseInt(countInput.value) : 1;
+    if (isNaN(count) || count < 1) {
+        toast('⚠️ 请输入有效的数量（≥1）', 'error');
+        return;
+    }
+    api('/give', {
+        method: 'POST',
+        body: JSON.stringify({ userId: target, itemPath: path, count: count })
+    }).then(function() {
+        toast('✅ 已发放 ' + count + ' 个 ' + path + ' 给目标玩家', 'success');
+    }).catch(function(e) {
+        toast('发放失败: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// 房间列表 - 完整版
+// ============================================================
+function loadRooms() {
+    // ★ 加载目标列表
+    loadRoomTargets();
+    
+    var limit = parseInt(document.getElementById('roomLimit').value) || 100;
+    var search = document.getElementById('roomSearch').value || '';
+    var area = document.getElementById('roomAreaFilter').value || 'all';
+
+    document.getElementById('roomTableBody').innerHTML = '<tr><td colspan="4" class="loading">⏳ 加载中...</td></tr>';
+
+    api('/rooms?limit=' + limit + '&search=' + encodeURIComponent(search) + '&area=' + area)
+        .then(function(data) {
+            var rooms = [];
+            var total = 0;
+            var areas = [];
+
+            if (data.success && data.data) {
+                rooms = data.data || [];
+                total = data.total || rooms.length;
+                areas = data.areas || [];
+            } else if (Array.isArray(data)) {
+                rooms = data;
+                total = data.length;
+            } else if (data.data && Array.isArray(data.data)) {
+                rooms = data.data;
+                total = data.total || rooms.length;
+                areas = data.areas || [];
+            }
+
+            allRooms = rooms;
+            document.getElementById('roomBadge').textContent = total;
+            document.getElementById('roomSubCount').textContent = '(' + total + ')';
+            document.getElementById('roomCountInfo').textContent = '显示 ' + rooms.length + '/' + total + ' 间';
+
+            if (areas && areas.length) {
+                var filter = document.getElementById('roomAreaFilter');
+                var cur = filter.value;
+                var existing = {};
+                for (var k = 0; k < filter.options.length; k++) {
+                    existing[filter.options[k].value] = true;
+                }
+                for (var a = 0; a < areas.length; a++) {
+                    if (!existing[areas[a]]) {
+                        var opt = document.createElement('option');
+                        opt.value = areas[a];
+                        opt.textContent = areas[a];
+                        filter.appendChild(opt);
+                    }
+                }
+                if (cur && areas.indexOf(cur) !== -1) filter.value = cur;
+            }
+
+            renderRooms(rooms);
+        }).catch(function(e) {
+            toast('加载房间失败: ' + e.message, 'error');
+            document.getElementById('roomTableBody').innerHTML = '<tr><td colspan="4" class="loading">❌ 加载失败</td></tr>';
+        });
+}
+
+function renderRooms(rooms) {
+    var tbody = document.getElementById('roomTableBody');
+    if (!rooms || !rooms.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="loading">🏠 暂无房间</td></tr>';
+        return;
+    }
+    var html = '';
+    // ★ 获取当前选中的目标名称
+    var targetName = '';
+    var targetSel = document.getElementById('roomTarget');
+    if (targetSel && targetSel.value) {
+        var opt = targetSel.options[targetSel.selectedIndex];
+        targetName = opt ? opt.text : '';
+    }
+    if (!targetName) targetName = '目标';
+    
+    for (var i = 0; i < rooms.length; i++) {
+        var r = rooms[i];
+        html += '<tr>' +
+            '<td style="font-size:11px;color:#8b949e;font-family:monospace;">' + (r.path || '未知') + '</td>' +
+            '<td><strong>' + (r.name || '未知') + '</strong></td>' +
+            '<td><span style="color:#58a6ff;">' + (r.area || '无') + '</span></td>' +
+            '<td><button class="btn btn-warning btn-xs" onclick="goRoom(\'' + (r.path || '') + '\')">🚀 传送 ' + targetName + '</button></td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function goRoom(path) {
+    // ★ 优先从房间列表面板获取目标
+    var target = document.getElementById('roomTarget') ? document.getElementById('roomTarget').value : '';
+    if (!target) {
+        target = document.getElementById('gmTarget') ? document.getElementById('gmTarget').value : '';
+    }
+    if (!target) {
+        toast('⚠️ 请在房间列表面板选择目标玩家', 'error');
+        return;
+    }
+    api('/teleport', { method: 'POST', body: JSON.stringify({ userId: target, roomPath: path }) })
+        .then(function() { toast('✅ 已传送到 ' + path, 'success'); })
+        .catch(function(e) { toast('传送失败: ' + e.message, 'error'); });
+}
+
+// ============================================================
+// 操作日志
+// ============================================================
+function loadLogs(limit) {
+    if (limit) logLimit = limit;
+    api('/logs?limit=' + logLimit).then(function(data) {
+        var logs = [];
+        if (data.success && data.data) {
+            logs = data.data;
+        } else if (Array.isArray(data)) {
+            logs = data;
+        } else if (data.data && Array.isArray(data.data)) {
+            logs = data.data;
+        }
+        var tbody = document.getElementById('logTableBody');
+        if (!logs || !logs.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="loading">暂无日志</td></tr>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < logs.length; i++) {
+            var l = logs[i];
+            html += '<tr>' +
+                '<td style="font-size:12px;color:#8b949e;">' + formatTime(l.time) + '</td>' +
+                '<td>' + (l.userName || '系统') + '</td>' +
+                '<td style="font-family:monospace;font-size:12px;color:#58a6ff;">' + (l.command || '') + '</td></tr>';
+        }
+        tbody.innerHTML = html;
+    }).catch(function(e) {
+        toast('加载日志失败: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// 存档回档
+// ============================================================
+function createBackup() {
+    var target = document.getElementById('gmTarget').value;
+    if (!target) { toast('请先选择目标', 'error'); return; }
+    api('/online').then(function(data) {
+        var users = data.data || [];
+        var user = null;
+        for (var i = 0; i < users.length; i++) {
+            if (users[i].id === target) { user = users[i]; break; }
+        }
+        if (!user) { toast('无法获取角色数据', 'error'); return; }
+        var backups = JSON.parse(localStorage.getItem('gm_backups') || '[]');
+        backups.push({ id: target, name: user.name, time: Date.now(), data: JSON.stringify(user) });
+        if (backups.length > 50) backups.shift();
+        localStorage.setItem('gm_backups', JSON.stringify(backups));
+        toast('💾 存档创建成功', 'success');
+        loadBackups();
+    }).catch(function(e) {
+        toast('存档失败: ' + e.message, 'error');
+    });
+}
+
+function loadBackups() {
+    var backups = JSON.parse(localStorage.getItem('gm_backups') || '[]');
+    var container = document.getElementById('backupList');
+    if (!backups || !backups.length) {
+        container.innerHTML = '<div class="loading">暂无存档</div>';
+        return;
+    }
+    var html = '';
+    for (var i = backups.length - 1; i >= 0; i--) {
+        var b = backups[i];
+        var idx = i;
+        html += '<div class="backup-item">' +
+            '<span><strong>' + (b.name || '未知') + '</strong> <span class="time">' + formatTime(b.time) + '</span></span>' +
+            '<span>' +
+            '<button class="btn btn-success btn-xs" onclick="restoreBackup(' + idx + ')">↩️ 回档</button>' +
+            '<button class="btn btn-danger btn-xs" onclick="deleteBackup(' + idx + ')">🗑️</button>' +
+            '</span></div>';
+    }
+    container.innerHTML = html;
+}
+
+function restoreBackup(index) {
+    var backups = JSON.parse(localStorage.getItem('gm_backups') || '[]');
+    if (index >= backups.length) return;
+    var backup = backups[index];
+    if (!confirm('确定回档到 ' + backup.name + ' (' + formatTime(backup.time) + ') 吗？')) return;
+    try {
+        var data = JSON.parse(backup.data);
+        var target = backup.id;
+        var commands = [];
+        var attrs = ['hp', 'max_hp', 'mp', 'limit_mp', 'level', 'str', 'con', 'dex', 'int', 'user_level'];
+        for (var i = 0; i < attrs.length; i++) {
+            var a = attrs[i];
+            if (data[a] !== undefined && data[a] !== null) {
+                commands.push('set ' + a + ' ' + data[a]);
+            }
+        }
+        var chain = Promise.resolve();
+        for (var j = 0; j < commands.length; j++) {
+            (function(cmd) {
+                chain = chain.then(function() {
+                    return api('/command', {
+                        method: 'POST',
+                        body: JSON.stringify({ userId: target, command: cmd })
+                    });
+                });
+            })(commands[j]);
+        }
+        chain.then(function() {
+            toast('✅ 回档成功', 'success');
+            loadAttrs();
+        }).catch(function(e) {
+            toast('回档失败: ' + e.message, 'error');
+        });
+    } catch (e) {
+        toast('回档失败: ' + e.message, 'error');
+    }
+}
+
+function deleteBackup(index) {
+    if (!confirm('确定删除此存档吗？')) return;
+    var backups = JSON.parse(localStorage.getItem('gm_backups') || '[]');
+    backups.splice(index, 1);
+    localStorage.setItem('gm_backups', JSON.stringify(backups));
+    loadBackups();
+}
+
+// ============================================================
+// 自动刷新 & 初始化
+// ============================================================
+function refreshAll() {
+    refreshStats();
+    if (currentPanel === 'users') loadUsers();
+    if (currentPanel === 'online') loadOnline();
+    if (currentPanel === 'items') loadItems();
+    if (currentPanel === 'rooms') loadRooms();
+    if (currentPanel === 'logs') loadLogs();
+    loadTargets();
+    if (currentPanel === 'attrs') loadAttrs();
+    toast('🔄 已刷新所有数据', 'info');
+}
+
+setInterval(function() {
+    if (currentPanel === 'dashboard') refreshStats();
+    if (currentPanel === 'online') loadOnline();
+    loadTargets();
+    loadItemTargets();
+    loadRoomTargets();
+}, 15000);
+
+// 初始化
+refreshStats();
+loadUsers();
+loadAccounts();  // ← 添加这一行
+loadOnline();
+loadItems();
+loadRooms();
+loadLogs();
+loadTargets();
+loadItemTargets();
+loadRoomTargets();
+
+console.log('🚀 GM后台 v9.0 已加载 (完整功能版)');
+console.log('📡 API地址:', GM_API);
+console.log('📌 支持: 全部属性修改 | 后天属性 | 门派转换 | 存档回档');
+console.log('📱 已适配移动端响应式');
+console.log('🎯 物品管理和房间列表支持独立选择目标玩家');
+console.log('📦 物品管理支持自定义发放数量');
+</script>
+</body>
+</html>

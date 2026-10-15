@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#000000" />
+<title>江湖 · 文字武侠</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+<!--
+  骨架来源：wushen `src/game/main.js` 的 `.container`（逐块对应，**顺序照抄**：
+  .content-room → .channel → .content-message → .tool-bar.bottom-bar → .content-bottom）
+  + `styles/main.css` 的配色与块定义。形状照搬，皮肤换成一套变量化的深色。
+
+  ★ 顺序是**工具条在上、动作栏在下**：wushen 的 `.content-bottom`（房间动作 /
+    招式）排在 `.tool-bar.bottom-bar`（环顾 / 指令 / 聊天）**之后**，虽然它叫
+    "bottom"。曾经按名字直觉把动作栏放到工具条前面，屏幕最下一行就成了功能键，
+    与 wushen 正好相反 —— 自己看着不别扭，但对齐 wushen 的老玩家一眼就不对。
+
+  与 wushen 的四处**刻意**差别（都是现代化或结构收口，不是另起炉灶）：
+    ① 输入框**不在**游戏界面里 —— 指令与聊天各走一个浮层（`#layers` 下），
+       由底部工具条唤起。wushen 只有聊天浮层，指令只能点按钮；
+       这里给指令也开一个，纯键盘玩家不至于无处下手。
+    ② 消息流的**回收粒度**更细：wushen 按**页**回收（`wushen/src/message.js:41-57`，
+       已有 ≥3 页时丢最旧一页，界约 `3×666≈2000` 行），这里改成**逐行**丢最旧
+       （`MAX_LINES`，见 `ui/stream.ts`）。★ 注意"贴底才跟随"**不是**差别 —— wushen
+       同样条件滚（`scroll2end()` 的 `!allow_scroll` 分支）；F11 订正见 26 册 §31.6。
+    ③ 颜色标签（`<hir>` 那套）由 `ui/markup.ts` 解析成**真实 DOM 节点**，
+       不拼 HTML 字符串 —— wushen 是 `$(html)`，服务端回显带标签即注入面。
+    ④ 小地图（`#mapPanel`）**不**放进 `.content-room` —— wushen 把它当房间区的
+       第一个子元素（跟着房间区一起滚）。这里让它独占一行：`.content-room` 自带
+       `max-height` 上限，地图塞进去要**从房间区里分走 133px**，房间描述与物件
+       列表的可见高度反而缩水。外观与 wushen 一致（都在房名上方、都占满宽度），
+       只是"谁负责滚"不同。
+
+  ★ 浮层一律挂在 `#layers`（`#app` **之外**）：这样"游戏界面里没有输入框"
+    这条可以被机械断言（`#app input` 必为空），而不是靠人记得。
+-->
+
+<!-- ════════ 认证界面（与 #app 互斥，切屏见 ui/screens.ts） ════════ -->
+<main id="auth" class="login">
+  <div class="login-wrap">
+    <h1 class="login-title">江 湖</h1>
+    <p class="login-sub">文字武侠 · 网页版</p>
+
+    <div class="login-tabs" role="tablist" aria-label="进入方式">
+      <button class="ltab on" id="tabLogin" data-auth="login" role="tab" aria-selected="true">登 入</button>
+      <button class="ltab" id="tabRegister" data-auth="register" role="tab" aria-selected="false">新 建 名 号</button>
+    </div>
+
+    <section class="login-panel" id="panelLogin" role="tabpanel">
+      <label class="lb" for="loginName">名　号</label>
+      <input class="tb" id="loginName" type="text" autocomplete="off" autocapitalize="off"
+             spellcheck="false" enterkeyhint="go" placeholder="你行走江湖用的名号" />
+      <button class="btn" id="loginBtn">进 入 江 湖</button>
+    </section>
+
+    <section class="login-panel" id="panelRegister" role="tabpanel" hidden>
+      <label class="lb" for="regName">新的名号</label>
+      <input class="tb" id="regName" type="text" autocomplete="off" autocapitalize="off"
+             spellcheck="false" enterkeyhint="go" placeholder="取一个还没人用过的名号" />
+      <button class="btn" id="regBtn">创 建 角 色</button>
+      <p class="fhint">尚无账号与密码体系，名号只记在本机。</p>
+    </section>
+
+    <p class="login-status" id="authStatus">尚未连接</p>
+    <p class="login-server">服务器 · <b id="serverLabel">…</b></p>
+  </div>
+</main>
+
+<!-- ════════ 游戏界面（wushen 的 .container） ════════ -->
+<div id="app" class="container" hidden>
+
+  <!-- 小地图：房名右侧「地图」唤起，点格子即走 -->
+  <div class="map-panel" id="mapPanel" hidden>
+    <svg id="mapSvg" viewBox="0 0 216 96" aria-label="附近地图"></svg>
+    <!-- ★ `viewBox` 在这里只是**首帧之前的占位**（让 SVG 有内在比例，不至于塌成 0 高）：
+         真值由 `ui/map.ts` 的 `renderMap()` 每次按"画了哪些格子"重算 —— 方向少的房间
+         框就矮（wushen 的 `height`/`t` 也是算出来的），宽度恒为 216 以保住比例。 -->
+  </div>
+
+  <!-- ① 房间区：房名 / 描述 / 出口 / 此处有 -->
+  <section class="content-room" id="roomPanel">
+    <div class="room-title">
+      <span class="room-name" id="roomName">未入江湖</span>
+      <span class="map-icon glyphicon glyphicon-map-marker" id="mapBtn" role="button" tabindex="0"
+            aria-label="展开或收起地图"></span>
+    </div>
+    <div class="room_desc" id="roomDesc"></div>
+    <div class="room_exits" id="roomExits"></div>
+    <div class="room_items" id="roomItems"></div>
+  </section>
+
+  <!-- ② 聊天预览（wushen 的 .channel：最近几条，点它开聊天浮层）-->
+  <div class="channel" id="channel" role="button" tabindex="0" aria-label="打开聊天"></div>
+
+  <!-- ③ 消息流（主体，flex:1）-->
+  <div class="content-message" id="output" aria-live="polite" aria-label="消息"></div>
+
+  <!-- ④ 底部工具条（状态条 + 按钮）
+       ★ 只有**服务端真的认**的指令才配按钮。内容层当前是 look / go / say / shout / tell
+         这一组（world/command/），于是这里就这几格 —— 摆一排点下去只会回"什么？"
+         的按钮，比少几个按钮更伤（玩家会以为功能坏了）。 -->
+  <div class="tool-bar bottom-bar" id="bottomBar">
+    <div class="state-bar" id="stateBar">
+      <span class="who" id="pName">—</span>
+      <span class="lv" id="pLevel"></span>
+      <span class="vital"><i class="lb">气血</i><i class="track"><i class="fill hp" id="hpFill"></i></i><i class="num" id="hpTx">—</i></span>
+      <span class="vital"><i class="lb">内力</i><i class="track"><i class="fill mp" id="mpFill"></i></i><i class="num" id="mpTx">—</i></span>
+    </div>
+    <span class="tool-item" data-act="look"><span class="glyphicon glyphicon-search tool-icon"></span><span class="tool-text">环顾</span></span>
+    <span class="tool-item" data-act="cmd"><span class="glyphicon glyphicon-edit tool-icon"></span><span class="tool-text">指令</span></span>
+    <span class="tool-item" data-act="chat"><span class="glyphicon glyphicon-volume-down tool-icon"></span><span class="tool-text">聊天</span><span class="tag" id="chatTag" hidden>0</span></span>
+  </div>
+
+  <!-- ⑤ 动作栏：房间动作 + 目标动作 + 招式
+       ★ 排在工具条**之后**（= 屏幕最下一行）—— 见文件头对 wushen 顺序的说明。 -->
+  <div class="content-bottom">
+    <div class="room-commands" id="verbs"></div>
+    <div class="combat-commands" id="pfms"></div>
+  </div>
+</div>
+
+<!-- ════════ 浮层（在 #app 之外：游戏界面里没有输入框） ════════ -->
+<div id="layers">
+  <div class="mask" id="mask" hidden></div>
+
+  <!-- 指令浮层（wushen 的 .chat-panel 形状：一条输入带 + 上面的快捷指令） -->
+  <div class="pop" id="cmdPop" hidden>
+    <div class="pop-card">
+      <div class="chips" id="cmdChips"></div>
+      <div class="chat-input">
+        <input class="sender-box" id="cmdInput" type="text" autocomplete="off" autocapitalize="off"
+               spellcheck="false" enterkeyhint="send" placeholder="看 / 北 / go north / say 你好 ……" />
+        <button class="sender-btn" id="cmdSend" aria-label="执行">
+          <span class="glyphicon glyphicon-send"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 聊天浮层（wushen 的 .chat-panel：频道 tab + 输入行）
+       ★ 每个页签的 `data-ch` **就是命令名**（`ui/input.ts#composeChat` 拼 `${ch} ${正文}`），
+         所以只许出现服务端真认的词 —— 写一个不存在的词就是一个假页签。
+         「组队」（`tm`）**暂时去掉**：队伍系统还没做，`tm` 指令不存在，
+         点了只会回"什么？"。等队伍批次落地再加回来（26 册 §24.3、§21.6 末条）。 -->
+  <div class="pop" id="chatPop" hidden>
+    <div class="pop-card">
+      <div class="channel-box" id="channelBox">
+        <span class="sel" data-ch="say">房间</span>
+        <span data-ch="chat">世界</span>
+        <span data-ch="tell">私语</span>
+      </div>
+      <div class="chat-input">
+        <input class="sender-box" id="chatInput" type="text" autocomplete="off" autocapitalize="off"
+               spellcheck="false" enterkeyhint="send" placeholder="对本房说话……" />
+        <button class="sender-btn" id="chatSend" aria-label="发送">
+          <span class="glyphicon glyphicon-send"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 面板（属性 / 背包 / 武学 / 任务 / 设置 …）—— wushen 的 .dialog -->
+  <div class="dialog" id="dialog" hidden>
+    <div class="dialog-header">
+      <span class="dialog-icon glyphicon glyphicon-map-marker"></span>
+      <span class="dialog-title" id="dlgTitle">面 板</span>
+      <span class="dialog-close glyphicon glyphicon-remove-circle" id="dlgClose" role="button" tabindex="0"
+            aria-label="关闭"></span>
+    </div>
+    <div class="dialog-content" id="dlgBody"></div>
+  </div>
+
+  <!-- 服务端弹出的确认 / 提示（wushen 的 .warn-dialog）-->
+  <div class="warn-dialog" id="warnBox" hidden>
+    <div class="warn-content" id="warnText"></div>
+    <div class="item-commands" id="warnCmds"></div>
+  </div>
+</div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

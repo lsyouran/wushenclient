@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "outDir": "dist/web",
+    "rootDir": ".",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["shared/**/*.ts", "src/**/*.ts"],
+  // `__mut*` 是变异测试的**保留命名空间**（见 .gitignore）。闸门侧 `lib.mjs` 的 walk() 会跳过
+  // 零字节文件，所以那些空壳"在闸门眼里不存在"；但 tsc 不这么看 —— 一个空 .ts 模块在 strict
+  // 下仍会被编译成一个含 `"use strict";` 的产物，落进 `dist/web/`（**实际对外服务的目录**）。
+  // 产物里的这个文件既不可达也无副作用，但"保留命名空间不进产物"这条不该靠运气，故显式排除。
+  // 注意：这里只过滤 include 范围（shared/ src/），不动 node_modules 默认排除；T23 若补出
+  // 服务端构建（tsc 产出 dist/server），同一排除也要跟着加上。
+  "exclude": ["**/__mut*"]
+}

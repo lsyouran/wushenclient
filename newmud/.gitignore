@@ -1,0 +1,33 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 运行时数据
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/data/
+
+# 配置与日志
+.env
+.env.*
+!.env.example
+/logs/
+log/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 变异测试夹具 / 旁挂备份
+# `__mut*` 是**保留命名空间**：变异测试的临时文件一律以此开头。
+# 受限环境禁止批量删除文件（宿主策略 SAFE_DELETE_BULK_CONFIRM_REQUIRED），
+# 因此夹具的"还原"是**把内容写成空**而不是删掉文件 —— 这些 0 字节空壳会长期存在。
+# lib.mjs 的 walk() 会跳过零字节文件（空文件没有任何声明，语义上等价于不存在），
+# 所以它们不会干扰任何闸门；不入库即可。
+__mut*
+*.mutbak
