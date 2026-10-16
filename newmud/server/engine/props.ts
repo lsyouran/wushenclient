@@ -227,6 +227,38 @@ export function snapshotProps(holder: PropHolder): PropSnapshot {
 const SNAPSHOT_FIELDS = new Set(['prop', 'ext']);
 
 /**
+ * 属性值的**绝对值上界**（E11，2026-10-16 审查）。
+ *
+ * ★ 读档是**数据入口**：一个手改的存档能把 `gj:1e300` 塞进来，之后一切涉及它的算术
+ *   都失真（`Infinity` / 精度丢失），而且**不报错**。任何合法属性都是"字面量级"的数
+ *   —— 1e8 已远超合理范围（`gjsd` 以 ms 计、`max_hp` 以点计、`gj` 以点计）。
+ * ★ 与 `temp.ts` 的取向一致：入口拒绝，而不是指望下游钳制。
+ */
+export const MAX_PROP_MAGNITUDE = 1e8;
+
+/**
+ * **语义上不允许为负**的属性键（E11）。
+ *
+ * ★ 为什么不给所有键都加"非负"约束：**减益是合法内容**（`fy: -3` 表示被削弱、
+ *   `gj` 也可能被诅咒类效果压成负），统一禁负会误伤真实数据。
+ *   这里只约束那些**物理上**不可能是负的量 —— 上限类、时长类、年龄。
+ */
+const NON_NEGATIVE_PROPS: ReadonlySet<string> = new Set([
+  'max_hp',
+  'max_mp',
+  'limit_mp',
+  'age',
+  'busy',
+  'gjsd',
+  'distime',
+  'releasetime',
+  'expend_mp',
+  'distime_per',
+  'releasetime_per',
+  'expend_mp_per',
+]);
+
+/**
  * 从**不可信**数据装载属性（存档 / 协议 / 热更）。
  *
  * 语义：**合并**（不先清空）；需要整体替换时先 `clearAllProps()`。
@@ -276,6 +308,23 @@ export function loadProps(holder: PropHolder, raw: unknown): LoadReport {
       }
       if (typeof v !== 'number' || !Number.isFinite(v)) {
         rejected.push({ key: `${field}.${key}`, reason: `值不是有限数值（${describeValue(v)}）` });
+        continue;
+      }
+      // ★ 范围闸门（E11）：先看**大小**，再看**符号**。
+      //   两道都只作用于读档入口 —— 运行期中 `addProp` 的累加不受这里约束
+      //   （那是引擎自己的算术，减益/诅咒都可能把值压到负数）。
+      if (Math.abs(v) > MAX_PROP_MAGNITUDE) {
+        rejected.push({
+          key: `${field}.${key}`,
+          reason: `值超出上界（|${String(v)}| > ${String(MAX_PROP_MAGNITUDE)}）`,
+        });
+        continue;
+      }
+      if (v < 0 && NON_NEGATIVE_PROPS.has(key)) {
+        rejected.push({
+          key: `${field}.${key}`,
+          reason: `${key} 不允许为负（收到 ${String(v)}）`,
+        });
         continue;
       }
       target.set(key, v);

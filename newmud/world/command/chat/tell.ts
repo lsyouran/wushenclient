@@ -1,4 +1,6 @@
 import { defineCommand } from '@engine/world/define.js';
+import { CHAT_MAX_LENGTH, CHAT_TOO_LONG } from '@shared/constants.js';
+import { neutralizePlayerText } from '@shared/player-text.js';
 
 /**
  * `tell` / `whisper` —— 定向私聊（频道 `tell`）。
@@ -33,6 +35,15 @@ defineCommand('chat/tell', {
       me.notify('自言自语就不用私聊了。');
       return;
     }
-    me.sendChannel('tell', content, target);
+    // ★ 长度上限（S10，2026-10-16 审查）：`say` / `shout` 都有，唯独 `tell` 漏了 ——
+    //   后果不是崩溃，而是"报错说不到点上"：长私聊一路走到入站明文上限（256）才被拒，
+    //   而那条拒绝走 `loginerror` 通道把玩家甩回登录页，界面上也看不出"太长"。
+    //   这里补上与 `say`/`shout` **同一条** `CHAT_MAX_LENGTH` 与**同一句**提示。
+    if (content.length > CHAT_MAX_LENGTH) {
+      me.notify(CHAT_TOO_LONG);
+      return;
+    }
+    // ★ 同上（S1）：正文是玩家写的，产出 `<CMD>` 就是在对方屏幕上植一个可执行按钮
+    me.sendChannel('tell', neutralizePlayerText(content), target);
   },
 });

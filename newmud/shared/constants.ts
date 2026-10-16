@@ -737,6 +737,14 @@ export const DIALOG_NAMES = [
 
 export type DialogName = (typeof DIALOG_NAMES)[number];
 
+/**
+ * `dialog` 帧的**控制字段**（与"内容字段"相对）：它们改的是**面板本身**，不是面板里的行。
+ *
+ * ★ 单源（F4，2026-10-16 审查）：`protocol.ts` 的 `DialogControlShape`（zod schema）
+ *   与前端 handler 的分流逻辑都读这份列表 —— 各写一份就会出现"协议声明了、前端不认"
+ *   （原先正是如此：`{dialog:'pack', close:true}` 被当成普通字段列成一行 `close: true`）。
+ *   `tests/protocol.test.ts` 有一条断言把"schema 认这四个字段"钉住（改了一边会红）。
+ */
 export const DIALOG_CONTROL_FIELDS = [
   'close',
   'refresh',
@@ -769,6 +777,18 @@ export const RATE_LIMIT_WINDOW_MS = 5_000; // ★ 与上面配套的窗口长度
 // ---- 网络层（本批落地；消费者见 server/net/**，不是"声明未实现"）----
 /** 同时在线连接数上限。超出即拒绝新连接（T1 的三项缺失上限之一） */
 export const MAX_CONNECTIONS = 200;
+/**
+ * **单个来源地址**的连接数上限（2026-10-13 体检 N4）。
+ *
+ * ★ 为什么全局上限不够：`MAX_CONNECTIONS` 是**全服**名额。一个地址开 50 条连接
+ *   赖在起始房，就把房间容量与全局名额一起吃掉 —— 之后所有人登不上，
+ *   而服务端没有踢人手段。全局上限越大，这个代价越高。
+ * ★ 取 8 的依据：正常玩家一条连接就够；同址多开是"多客户端 / 脚本"的味道。
+ *   8 给同一 NAT 后的宿舍 / 家庭留余地，又不至于让一个人吃掉房间容量。
+ * ★ **没有来源地址的连接不参与**这项判定（见 `NetConnection.peerAddress`）：
+ *   量不到的东西不拿来当判据。
+ */
+export const MAX_CONNECTIONS_PER_IP = 8;
 /**
  * 单连接的**出站队列**上限（条数）。超过即判定"发不出去"，直接断连。
  *
@@ -835,6 +855,19 @@ export const WS_MAX_PAYLOAD_BYTES = MAX_MESSAGE_BYTES * 2;
  * 明文只承载**一条指令**，不是自由文本；超过这个长度只能是攻击或异常客户端。
  */
 export const MAX_PLAINTEXT_CHARS = 256;
+
+/**
+ * 出/入站分诊的**唯一**判据：一帧是不是"看起来像 JSON"。
+ *
+ * ★ 这是**两端共用**的一份（S10，2026-10-16 审查）：服务端 `protocol.ts#routeFrame`
+ *   用它决定走 JSON 分支还是明文分支；前端 `net/client.ts#sendCommand` 用它决定
+ *   一条指令发明文还是发 `command` 包。两边一旦分叉，表现是"偶尔有一行指令
+ *   被当成坏包解析失败并断连"—— 所以放在**双方都能 import 的共享层**，
+ *   而不是在 protocol（前端只许 `import type`）与 client 里各写一份。
+ *
+ * ★ 无 `g` 标志（否则 `test()` 会带 `lastIndex` 状态，跨调用互相污染）。
+ */
+export const LOOKS_LIKE_JSON_RE = /^\s*[[{]/;
 
 // ---------------------------------------------------------------------------
 // 12. 创角四维（★ docs/26 L5：原先只活在报错文案与注释里）

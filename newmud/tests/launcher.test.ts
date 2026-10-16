@@ -26,6 +26,18 @@ import { PROJECT_ROOT } from '../server/paths.js';
 
 const ENTRY = join(PROJECT_ROOT, 'tools', 'start.mjs');
 
+/**
+ * 本文件每条用例的显式超时（D10，2026-10-16）。
+ *
+ * ★ 为什么不靠 vitest 缺省的 5s：这里的用例**真 spawn 一个 node 子进程**，
+ *   它要走 TS 直跑钩子、装配世界、绑端口、打印 READY —— 在负载高的机器上
+ *   （或与其它测试文件并发时）几秒是常态。缺省 5s 会让"绿"取决于机器当时忙不忙，
+ *   也就是审查里那条"5s 超时 flake"。
+ * ★ 必须**大于** `waitReady` 的 20s —— 否则子进程还没就绪，用例先被计时器毙掉，
+ *   报错会指向"超时"而不是真正的原因。
+ */
+const SPAWN_TEST_TIMEOUT_MS = 30_000;
+
 interface Launched {
   readonly child: ChildProcess;
   readonly port: number;
@@ -37,11 +49,16 @@ let running: ChildProcess | null = null;
 afterEach(async () => {
   const child = running;
   running = null;
-  if (child === null || child.exitCode !== null) return;
+  // ★ 判定"还在跑"必须同时看 `signalCode`（D10，2026-10-16）：
+  //   Windows 上 `kill('SIGTERM')` 是被**信号**终止的 ⇒ `exitCode === null`
+  //   而 `signalCode !== null`。只看 `exitCode` 会以为它还活着，
+  //   于是**再挂一次 `once('exit')`** —— 可那个事件早就触发过了，
+  //   这个 Promise 永不 resolve ⇒ 白等满 5s 才 SIGKILL（实测单条用例 5978ms）。
+  if (child === null || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   child.kill('SIGTERM');
   await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
-  if (child.exitCode === null) child.kill('SIGKILL');
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
 });
 
 function spawnEntry(args: readonly string[]): { child: ChildProcess; lines: string[] } {
@@ -105,10 +122,12 @@ function runToExit(args: readonly string[]): Promise<{ code: number | null; line
 function firstFrame(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    // 15s（原 5s，D10）：这里只是"连一下、发一帧、收一帧"，
+    // 但整机负载高时握手 + 登录回包也可能超过 5s ⇒ 与缺省 testTimeout 一样是 flake 源。
     const timer = setTimeout(() => {
       ws.terminate();
-      reject(new Error('WebSocket 5s 内没有收到任何帧'));
-    }, 5_000);
+      reject(new Error('WebSocket 15s 内没有收到任何帧'));
+    }, 15_000);
     ws.on('open', () => {
       ws.send(
         JSON.stringify({ v: 1, type: 'login', token: 'abcdefghijklmnop', role_id: 'launcher-test' }),
@@ -134,14 +153,14 @@ describe('命令行入口（不起服务的那几条）', () => {
     const { code, lines } = await runToExit(['--help']);
     expect(code).toBe(0);
     expect(lines.join('\n')).toContain('用法');
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 
   it('★ 无法识别的参数 → 退出码 1 且打印用法（不许静默吞掉）', async () => {
     const { code, lines } = await runToExit(['--port', '8123', '--typo']);
     expect(code).toBe(1);
     expect(lines.join('\n')).toContain('--typo');
     expect(lines.join('\n')).toContain('用法');
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 });
 
 describe('★ 真启动（`npm start` 等价路径）', () => {
@@ -164,7 +183,7 @@ describe('★ 真启动（`npm start` 等价路径）', () => {
     expect(frame.type).toBe('login');
 
     expect(child.exitCode).toBeNull(); // 跑完这些它应该还活着
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 
   it('被要求停止后会退出（不挂住）', async () => {
     // ⚠️ 在 Windows 上 `kill('SIGTERM')` **不会**投递真的信号（node 直接终止进程），
@@ -184,7 +203,7 @@ describe('★ 真启动（`npm start` 等价路径）', () => {
       new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 10_000)),
     ]);
     expect(outcome).not.toBe('timeout');
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 
   it('--no-web：只跑 WebSocket，页面不存在', async () => {
     const { port } = await launch(['--port', '0', '--no-web']);
@@ -195,5 +214,5 @@ describe('★ 真启动（`npm start` 等价路径）', () => {
     // 但 /ws 是活的
     const frame = JSON.parse(await firstFrame(port)) as { type: string };
     expect(frame.type).toBe('login');
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 });

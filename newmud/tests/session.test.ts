@@ -15,7 +15,9 @@ import type { World } from '../server/engine/world.js';
 import { OBJ_KINDS } from '../server/engine/base.js';
 import { RecordingOutput } from '../server/engine/character.js';
 import { Player, PlayerError } from '../server/engine/player.js';
-import { GameSessions, logOutboundDrop } from '../server/session.js';
+import { Room } from '../server/engine/room.js';
+import { asWorldId } from '../shared/ids.js';
+import { GameSessions, logOutboundDrop, roomSignatureOf } from '../server/session.js';
 import { ConnectionHub } from '../server/net/hub.js';
 import type { NetConnection } from '../server/net/hub.js';
 import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, MAX_OUTBOUND_QUEUE } from '@shared/constants.js';
@@ -479,5 +481,91 @@ describe('★ 角色名收口：字符集与全局唯一', () => {
     hub.accept(b);
     expect(sessions.login(b, 't'.repeat(20), '阿飞').ok).toBe(true);
     expect(sessions.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N5 / E13（2026-10-13 体检）：房间签名必须是**房间级**的
+// ---------------------------------------------------------------------------
+//
+// ★ 症状：`#reconcileRooms()` 在**每条指令**之后跑，原先对**每个在线玩家**各算一次
+//   签名（`filter` 掉自己 + `sort` + `join`）⇒ O(玩家数) 的排序/拼串 × 每条指令
+//   = O(N²) 放大（E13 说的就是这一半）。
+//
+// ★ 修法不是"少扫一点"（那要引入"哪些房间脏了"的新账，反而会引入陈旧索引），
+//   而是**让同一房间的玩家共用一份签名** —— 前提是签名必须与"我是谁"无关。
+//   下面第一条就是那条前提：**同房两个玩家的签名必须相同**。
+//   它一旦不成立，共用一份签名的实现会开始推错帧（漏推或狂推），
+//   而"推错帧"在别的测试里看不出来 —— 所以这条判据本身必须被钉死。
+describe('N5 · 房间签名是房间级的（同房共用一份）', () => {
+  function makeRoom(path: string): Room {
+    return new Room({
+      oid: `room-${path}`,
+      path: asWorldId(path, 'session.test:n5'),
+      name: '签名测试房',
+      desc: '用于签名回归的房间。',
+      def: { name: '签名测试房', desc: '用于签名回归的房间。' },
+    });
+  }
+
+  function makePlayer(oid: string, name: string): Player {
+    return new Player({ oid, path: null, roleId: name, name, output: new RecordingOutput() });
+  }
+
+  it('★ 同房两个玩家的签名**相同**（"每房算一次"能成立的前提）', () => {
+    const room = makeRoom('n5/a');
+    const a = makePlayer('oid-n5-a', '甲');
+    const b = makePlayer('oid-n5-b', '乙');
+    room.addItem(a);
+    room.addItem(b);
+
+    expect(roomSignatureOf(a)).toBe(roomSignatureOf(b));
+    // 对照组：签名不是空串（"两边都是空串"也会相等，那是另一种实现）
+    expect(roomSignatureOf(a)).not.toBe('');
+  });
+
+  it('★ 房里多一个人 / 少一个人 ⇒ 签名变（判据落在真正有区分性的字段上）', () => {
+    const room = makeRoom('n5/b');
+    const a = makePlayer('oid-n5-c', '甲');
+    room.addItem(a);
+    const alone = roomSignatureOf(a);
+
+    const b = makePlayer('oid-n5-d', '乙');
+    room.addItem(b);
+    const withB = roomSignatureOf(a);
+    expect(withB).not.toBe(alone);
+
+    b.moveTo(null);
+    expect(roomSignatureOf(a)).toBe(alone);
+  });
+
+  it('★ 换了房间 ⇒ 签名变（path 变了）', () => {
+    const here = makeRoom('n5/c1');
+    const there = makeRoom('n5/c2');
+    const a = makePlayer('oid-n5-e', '甲');
+    here.addItem(a);
+    const before = roomSignatureOf(a);
+    a.moveTo(there);
+    expect(roomSignatureOf(a)).not.toBe(before);
+  });
+
+  it('不在任何房间 ⇒ 空串（此时无话可说，对账跳过）', () => {
+    const a = makePlayer('oid-n5-f', '甲');
+    expect(roomSignatureOf(a)).toBe('');
+  });
+
+  it('【反向锚点】房内物品顺序变了但集合没变 ⇒ 签名不变（排序生效，别让判据噪声太大）', () => {
+    const room = makeRoom('n5/d');
+    const a = makePlayer('oid-n5-g', '甲');
+    const b = makePlayer('oid-n5-h', '乙');
+    const c = makePlayer('oid-n5-i', '丙');
+    room.addItem(a);
+    room.addItem(b);
+    room.addItem(c);
+    const before = roomSignatureOf(a);
+    // 把 B 摘了再挂回去 —— `items` 顺序变了，集合没变
+    b.moveTo(null);
+    b.moveTo(room);
+    expect(roomSignatureOf(a)).toBe(before);
   });
 });

@@ -635,12 +635,18 @@ export class SkillBook {
   }
 
   /**
-   * 记账式重算：**先减旧账、再加新账**，然后 `recount()`。
+   * 记账式重算：**先算 → 再减旧账 → 再加新账**，然后 `recount()`。
    * **幂等** —— 连调 N 次，`props` 完全一致（`tests/engine-skill.test.ts` 钉住）。
+   *
+   * ★ **为什么"先算"不能省**（S8，2026-10-16 审查）：`contributedProps()` 会因
+   *   非法属性键抛错（见 `mergeInto`）。若顺序是"先减旧账、再算新账"，异常会留下
+   *   **旧账已减、新账未加**的半账态 —— 而 `recount()` 永远到不了，派生属性永久停在旧值，
+   *   且每次变更都重复这一遍（不可自愈）。先把新账算出来 ⇒ 非法键在**旧账被碰之前**就抛。
    */
   public recompute(): void {
+    const contributed = this.contributedProps();
     this.#releaseLedger();
-    this.#absorb(this.contributedProps());
+    this.#absorb(contributed);
     this.#owner.recount();
   }
 
@@ -699,17 +705,24 @@ export class SkillBook {
         continue;
       }
 
+      // ★ 重复 id（S7，2026-10-16 审查）：丢**后一条** + 记账。
+      //   若照单全收，两条都进 `#states`（后者覆盖），而 `#enabledBySlot` 只按
+      //   先被处理的那条挂 —— 于是"装配表说有、属性账说没有"，两边都不报错。
+      //   与"未知 id / 非法等级"同属**条目级坏**（分级契约②：丢该条 + 记账）。
+      if (this.#states.has(id)) {
+        rejected.push({ key: id, reason: '同一技能 id 在存档里出现多次，已忽略后一条' });
+        continue;
+      }
+
       const level = readLoadedLevel(id, tpl, rec['level'], rejected);
       const exp = readLoadedExp(id, rec['exp'], rejected);
       const enabled = readLoadedEnabled(id, tpl, rec['enabled'], rejected);
 
-      // ★ 往 `#attachSlot()` 收口（2026-10-13 体检 E2）：`load` / `loadFromDef` / `enable`
-      //   三处此前各写一遍"槽占用变更"，其中 `loadFromDef` 那一份漏了"两条不同技能
-      //   抢同一槽"。现在这条规则只有一个实现，三处不可能再分家。
+      // ★ 往 `#setSkillState()` 收口（2026-10-13 体检 E2 + 2026-10-16 审查 S7）：
+      //   `load` / `loadFromDef` 的"槽占用变更"只有一个实现，不可能再分家。
       //   触发条件见 `tests/engine-audit.test.ts` 的 A3 与 `tests/engine-skill.test.ts`
       //   的「两条**不同**技能抢同一槽」。
-      if (enabled !== null) this.#attachSlot(enabled, id);
-      this.#states.set(id, { id, level, exp, enabled });
+      this.#setSkillState(id, level, exp, enabled);
     }
     this.recompute();
     return { loaded: this.#states.size, rejected };
@@ -750,6 +763,25 @@ export class SkillBook {
     this.#enabledBySlot.set(slot, id);
     if (st !== undefined) st.enabled = slot;
     return displaced;
+  }
+
+  /**
+   * 写入/覆盖一条技能状态 —— **`load` / `loadFromDef` 共用的唯一写入口**（S7，2026-10-16 审查）。
+   *
+   * ★ 要害：`enabled === null` 时**也要腾空本技能原先占的槽**。
+   *   原先两处都写成 `if (enabled !== null) #attachSlot(...)` —— 于是"同一 id 后一条
+   *   不装配"会留下"`#enabledBySlot` 还指着它、而 `st.enabled` 已经是 null"的分家状态：
+   *   `contributedProps()`（按 `st.enabled !== null` 记账）不算它，而 `activeTemplate(slot)`
+   *   仍返回它 ⇒ 属性账与装配表各说各话，且没有任何报错。
+   */
+  #setSkillState(id: string, level: number, exp: number, enabled: EnableSlot | null): void {
+    if (enabled === null) {
+      const prev = this.#states.get(id);
+      if (prev !== undefined && prev.enabled !== null) this.#enabledBySlot.delete(prev.enabled);
+    } else {
+      this.#attachSlot(enabled, id);
+    }
+    this.#states.set(id, { id, level, exp, enabled });
   }
 
   /**
@@ -834,16 +866,16 @@ export class SkillBook {
   }
 
   #absorb(map: PropMap): void {
-    for (const key of Object.keys(map.prop ?? {}) as PropKey[]) {
+    for (const key of Object.keys(map.prop ?? {})) {
+      assertPropKey(key);
       const value = map.prop?.[key];
       if (value === undefined || value === 0) continue;
-      if (!isPropKey(key)) throw new SkillError(`技能属性出现非法核心键：${String(key)}`);
       addProp(this.#owner, key, value);
       this.#coreLedger.set(key, value);
     }
     for (const [key, value] of map.extProp ?? []) {
+      assertExtProp(key);
       if (value === 0) continue;
-      if (!isExtProp(key)) throw new SkillError(`技能属性出现未登记扩展键：${String(key)}`);
       addExtProp(this.#owner, key, value);
       this.#extLedger.set(key, value);
     }
@@ -869,12 +901,12 @@ export class SkillBook {
             `NPC 技能 ${e.skill} 不能启用为 ${enabled}（can_enables = [${tpl.canEnables.join(', ')}]）`,
           );
         }
-        // 同一个技能在 def 里被写了两次（不同槽）→ 先前那个槽的映射必须腾空；
-        // 两条**不同**技能抢同一槽 → 先者被挤下。两条语义与 `enable()` 完全一致，
-        // 由 `#attachSlot()` 单点实现（2026-10-13 体检 E2：此前这里漏了后一条）。
-        this.#attachSlot(enabled, e.skill);
       }
-      this.#states.set(e.skill, { id: e.skill, level: clampLevel(e.level, tpl), exp: 0, enabled });
+      // ★ 单一写入口（S7，2026-10-16 审查）：`#setSkillState` 同时覆盖"同一技能写两次"
+      //   的两种形态 —— ① 换到别的槽（先前那个槽腾空）；② 后一条**不装配**（也要腾空）。
+      //   原先只在 `enabled !== null` 时调 `#attachSlot`，形态②会留下"槽映射还指着它、
+      //   而它说自己没装"的分家状态。语义与 `enable()` / `load()` 完全一致。
+      this.#setSkillState(e.skill, clampLevel(e.level, tpl), 0, enabled);
     }
     this.recompute();
   }
@@ -972,13 +1004,33 @@ function readLoadedEnabled(
   return raw;
 }
 
+/**
+ * 属性键的**唯一**校验入口（S8，2026-10-16 审查）。
+ *
+ * `mergeInto()`（算账）与 `#absorb()`（记账）**必须用同一份**校验 ——
+ * 原先只有 `#absorb` 校验、`mergeInto` 只做 `as PropKey[]` 强转，
+ * 于是非法键一路走到"记账"阶段才炸：那时 `recompute()` 已经减过旧账，留下不可自愈的半账。
+ * 把校验提到"算账"阶段（即 `mergeInto`），异常就发生在旧账被碰之前。
+ */
+function assertPropKey(key: string): asserts key is PropKey {
+  if (!isPropKey(key)) throw new SkillError(`技能属性出现非法核心键：${String(key)}`);
+}
+
+/** 扩展键的同一份校验（与 `assertPropKey` 对偶） */
+function assertExtProp(key: string): asserts key is ExtProp {
+  if (!isExtProp(key)) throw new SkillError(`技能属性出现未登记扩展键：${String(key)}`);
+}
+
 function mergeInto(
   prop: Partial<Record<PropKey, number>>,
   ext: Map<ExtProp, number>,
   map: PropMap | undefined,
 ): void {
   if (map === undefined) return;
-  for (const key of Object.keys(map.prop ?? {}) as PropKey[]) {
+  for (const key of Object.keys(map.prop ?? {})) {
+    // ★ 与 `#absorb` **同一份**校验（S8）：非法键在"算账"阶段就抛，
+    //   而不是等 `recompute()` 减完旧账、走到"记账"才炸。
+    assertPropKey(key);
     const value = map.prop?.[key];
     if (value === undefined) continue;
     // ★ 0 不记账。技能写 0（如 `base/force` 在 lv<10 时 `con += 0`）是常见写法，
@@ -989,6 +1041,7 @@ function mergeInto(
     prop[key] = (prop[key] ?? 0) + value;
   }
   for (const [key, value] of map.extProp ?? []) {
+    assertExtProp(key);
     if (value === 0) continue;
     ext.set(key, (ext.get(key) ?? 0) + value);
   }

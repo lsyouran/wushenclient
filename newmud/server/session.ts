@@ -155,23 +155,37 @@ const CHANNEL_SCOPE: Readonly<Record<Channel, 'world' | 'self' | 'target'>> = {
 };
 
 /**
- * "客户端看到的房间"的签名：房间 path + 同房其它对象的 id（排序）。
+ * "客户端看到的房间"的签名：房间 path + 房内**全部**对象 id（排序）。
  *
  * ★ 排序后再拼接：`items` 的顺序会随进出变化，不排序的话"两个人交换了位置"
  *   也会被当成变化 —— 那会让判据噪声大到没人敢用（见 FG-11：判据要落在
  *   真正有区分性的字段上，而不是"任何风吹草动都算"）。
  *
+ * ★★ **含自己**（N5/E13，2026-10-16）：旧版是 `o !== player` 把**自己排掉**，
+ *   于是同房两个玩家拿到**两个不同**的签名，`#reconcileRooms()` 只能按
+ *   **玩家数**各算一遍（filter + sort + join），而它被**每条指令**触发一次
+ *   ⇒ O(N²) 放大。签名是"**房间这个事实**"（房里有多少人多少物），
+ *   对房里每个人是**同一个**事实 ⇒ 去掉"我是谁"这一层，就能每房只算一次。
+ *
+ * ★ 排除自己**不是**正确性需要？—— 逐条查过，含自己**不会漏掉任何一次该推的更新**：
+ *   - 自己换了房间 ⇒ `path` 变 ⇒ 签名变；
+ *   - 房里有人进/出 ⇒ id 集合变 ⇒ 签名变（房内每个人都会收到新 `items`）。
+ *   反过来，含自己也不会**多推**：签名变 ⟺ 房间里的人员/物件集合变了
+ *   ⟺ 房里每个玩家的视图都变了。
+ *   `tests/session.test.ts` 的『同房两玩家签名相同 / 多一人少一人签名变』
+ *   与 `tests/login-e2e.test.ts` 的『同房的人走了 → 我这边收到新的 items』
+ *   一起把这条钉住（前者是同房共用的**前提**，后者是端到端的行为）。
+ *
  * ★ 不在房间 / 房间没有模板 path → 空串（此时无话可说，`#reconcileRooms` 跳过）。
  */
-function roomSignatureOf(player: Player): string {
+export function roomSignatureOf(player: Player): string {
   const env = player.environment;
   if (env === null || env.path === null) return '';
-  const others = env.items
-    .filter((o) => o !== player)
+  const ids = env.items
     .map((o) => o.id)
     .sort()
     .join(',');
-  return `${env.path}|${others}`;
+  return `${env.path}|${ids}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -518,8 +532,21 @@ export class GameSessions {
    *   表现是"他明明站在我面前，我这边看不到他"。
    */
   #reconcileRooms(): void {
+    // ★ 每个房间**只算一次**签名（N5/E13）：签名是"房间这个事实"，同房的人共享一份。
+    //   旧实现在循环里对每个玩家各算一次 ⇒ 每条指令 O(玩家数) 次排序+拼串 = O(N²)。
+    //   这里先把"path → 签名"建好（`roomSignatureOf` 现在含自己，所以同房必相同 ——
+    //   那正是这份 memo 合法的前提，由 `tests/session.test.ts` 的 N5 组钉住）。
+    const sigByRoom = new Map<string, string>();
+    for (const player of this.#players.values()) {
+      const env = player.environment;
+      if (env === null || env.path === null) continue;
+      if (!sigByRoom.has(env.path)) sigByRoom.set(env.path, roomSignatureOf(player));
+    }
+
     for (const [cid, player] of this.#players) {
-      const signature = roomSignatureOf(player);
+      const env = player.environment;
+      if (env === null || env.path === null) continue;
+      const signature = sigByRoom.get(env.path) ?? '';
       if (signature === '' || this.#sentRooms.get(cid) === signature) continue;
       const conn = this.#conns.get(cid);
       if (conn !== undefined) this.#sendRoom(conn, player);

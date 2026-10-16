@@ -59,6 +59,56 @@ const MIME: Readonly<Record<string, string>> = {
 
 const OCTET_STREAM = 'application/octet-stream';
 
+/** 每个响应都要带的公共头：安全头（L1）+ 不缓存（开发期"改完刷新就看到"） */
+function commonHeaders(): Record<string, string> {
+  return { 'cache-control': 'no-store', ...SECURITY_HEADERS };
+}
+
+/**
+ * 安全响应头（L1，2026-10-16 审查）。
+ *
+ * ★ 为什么补（而不是"开发期无所谓"）：对外暴露那条路径（`--host <对外地址>`）
+ *   **今天就在**。缺 `frame-ancestors` / `X-Frame-Options` ⇒ 任意站点能把我嵌进
+ *   iframe 做点击劫持（玩家以为在点别的页面，实际在点"进入江湖"）；
+ *   缺 CSP ⇒ 文本渲染一旦漏成 HTML（`markup.ts` 白名单是唯一防线），
+ *   就直接变成可执行的 XSS；缺 `Referrer-Policy` ⇒ 页面 URL 随外链泄漏。
+ *
+ * ★ 这套 CSP 与前端**逐条对齐**过（不是抄来的通用模板）：
+ *   - 无 `<style>` 块、无 `style="…"`、无内联事件处理器（`index.html` 实测为 0）
+ *     ⇒ `style-src 'self'` / `script-src 'self'` 够用，**不需要** `unsafe-inline`。
+ *   - `element.style.width = …`（`ui/status.ts` / `ui/room.ts`）走的是 **CSSOM**，
+ *     CSP 不拦 CSSOM（只拦 HTML 里的内联样式），所以血条照样能动。
+ *   - 无 `eval` / `new Function` / `innerHTML` ⇒ **不需要** `unsafe-eval`。
+ *   - 前端连的是**同源** WebSocket（`ws://${location.host}/ws`）⇒ `connect-src 'self'`。
+ *   ★ 这几条不靠"我读过代码"保证，由 `tests/static-web.test.ts` 的
+ *     『前端不写会被这条 CSP 拦下的内联写法』通扫钉住 —— 谁哪天加了 `style="…"`，那里红。
+ *
+ * ★ `x-frame-options` 与 CSP 的 `frame-ancestors` 是**同一件事的新旧两版**，
+ *   刻意都发：老浏览器只认前者，现代浏览器只认后者。这不是"两份真相"，
+ *   是同一策略的两个语法版本（值必须一致：都表示"不许任何页面嵌我"）。
+ */
+export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  // 浏览器不许再猜类型（与严格的 MIME 表配套）
+  'x-content-type-options': 'nosniff',
+  // 外链请求不带 Referer（页面 URL 不泄漏）
+  'referrer-policy': 'no-referrer',
+  // 点击劫持：旧语法
+  'x-frame-options': 'DENY',
+  'content-security-policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    // 同源 WebSocket（页面从哪个端口来就连哪个端口）
+    "connect-src 'self'",
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+};
+
 export function guessContentType(filePath: string): string {
   return MIME[extname(filePath).toLowerCase()] ?? OCTET_STREAM;
 }
@@ -127,7 +177,7 @@ function handleRequest(
 
   // ① 首页走重定向，而不是"内容挂在 /"——否则相对引用错位（见文件头）
   if (pathOnly === '/') {
-    res.writeHead(302, { location: `/${indexPath}`, 'cache-control': 'no-store' });
+    res.writeHead(302, { location: `/${indexPath}`, ...commonHeaders() });
     res.end();
     return;
   }
@@ -141,7 +191,7 @@ function handleRequest(
   if (stat === null) {
     // favicon 缺失很常见，回 204 而不是 404：它是浏览器自动请求的，不是页面需求
     if (pathOnly === FAVICON_PATH) {
-      res.writeHead(204, { 'cache-control': 'no-store' });
+      res.writeHead(204, commonHeaders());
       res.end();
       return;
     }
@@ -152,10 +202,7 @@ function handleRequest(
   res.writeHead(200, {
     'content-type': guessContentType(target),
     'content-length': stat.size,
-    // 开发期优先"改完刷新就看到"，不缓存
-    'cache-control': 'no-store',
-    // 浏览器不许再猜类型（与上面严格的 MIME 表配套）
-    'x-content-type-options': 'nosniff',
+    ...commonHeaders(),
   });
   if (req.method === 'HEAD') {
     res.end();
@@ -182,7 +229,7 @@ function statFile(target: string): { size: number } | null {
 function sendText(res: ServerResponse, status: number, body: string): void {
   res.writeHead(status, {
     'content-type': `text/plain${CHARSET}`,
-    'cache-control': 'no-store',
+    ...commonHeaders(),
   });
   res.end(body);
 }

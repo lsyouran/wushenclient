@@ -814,6 +814,24 @@ describe('engine/skill · 存档边界（snapshot / load）', () => {
     expect(npc.skills.has('ghost/skill')).toBe(false);
   });
 
+  it('★ S7：同一技能 id 出现两条 ⇒ 丢后一条并记账（不许让装配表与状态分家）', () => {
+    // 修复前：两条都写进 `#states`（后者覆盖），但 `#enabledBySlot` 只在**第一条**
+    // 被 `#attachSlot` 时挂上 —— 第二条 `enabled: null` 既不挂、也不摘旧槽。
+    // ⇒ `enabledOf('sword') === 'wd/a'` 而 `entryOf('wd/a').enabled === null`：
+    //   装配表说有、属性账说没有，两边都不报错（S7 描述的那种"分家"）。
+    const npc = makeNpc();
+    const report = npc.skills.load([
+      { id: 'wd/a', level: 10, exp: 0, enabled: 'sword' },
+      { id: 'wd/a', level: 20, exp: 0, enabled: null },
+    ]);
+    expect(report.loaded).toBe(1);
+    expect(report.rejected.map((r) => r.key)).toEqual(['wd/a']);
+    // ★ 判据落在**两表一致**上，而不是"某个数是多少"
+    expect(npc.skills.enabledOf('sword')).toBe('wd/a');
+    expect(npc.skills.entryOf('wd/a')?.enabled).toBe('sword');
+    expect(coreOf(npc)).toEqual({ gj: 10 }); // ② 档按保留下来的那条算
+  });
+
   it('load 时非法槽名被降级成"未装配"（脏存档不炸整本簿）', () => {
     const npc = makeNpc();
     const report = npc.skills.load([
@@ -988,6 +1006,19 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     expect(getProp(npc, 'gj')).toBe(30); // 只按 blade 算一次（10*3），不是 20+30
   });
 
+  it('★ S7：同一技能写两次且**后一条不装配** → 旧槽必须腾空（不留挂着的幽灵）', () => {
+    // 与上一条互补：上面是"换到别的槽"（`#attachSlot` 已覆盖），
+    // 这条是"后一条根本不装配" —— 修复前 `enabled === null` 时不调 `#attachSlot`，
+    // 于是第一条挂上的槽映射留着不清，而状态已被覆盖成 `enabled: null`。
+    const npc = npcWith([
+      { skill: 'wd/a', level: 10, enableAs: 'sword' },
+      { skill: 'wd/a', level: 10 },
+    ]);
+    expect(npc.skills.enabledOf('sword')).toBeUndefined();
+    expect(npc.skills.entryOf('wd/a')?.enabled).toBeNull();
+    expect(getProp(npc, 'gj')).toBe(0);
+  });
+
   it('★★ def 里**两条不同技能**抢同一槽 → 先者被挤下（与 enable()/load() 同一口径）', () => {
     // `wd/a` 的 sword 档给 gj=10、`wd/b` 的 sword 档给 gj=20。
     // 修复前：两条记录 `enabled` 都是 'sword'，而 `#enabledBySlot` 只有后者 ⇒
@@ -1057,5 +1088,101 @@ describe('engine/skill · 数值参数表（★ docs/27 D4：可调数值集中�
         SKILL_FORMULA.limitRealmFactor[i - 1]!,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S8（2026-10-16 审查）：非法属性键不许留下**不可自愈的半账**
+// ---------------------------------------------------------------------------
+//
+// `recompute()` 的顺序是「先减旧账（`#releaseLedger`）→ 再加新账（`#absorb`）→ `recount`」。
+// 若"加新账"中途抛错，旧账已经减掉、新账没加上 ⇒ 派生属性永久停在旧值，
+// 而每次变更（learn/forget/setLevel/addExp/enable/disable/load）都会重复这一遍。
+//
+// 缺口在 `mergeInto()` 只做 `as PropKey[]` 强转、**不校验**，而 `#absorb()` 才校验。
+// 修法两条**缺一不可**：
+//   ① `mergeInto()` 与 `#absorb()` 用**同一份**键校验（单源）⇒ 非法键在"算账"时就抛；
+//   ② `recompute()` 改成**先算后动**（`contributedProps()` 在 `#releaseLedger()` 之前求值）
+//      ⇒ 异常发生在旧账被减之前，账本保持一致。
+describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
+  // ★ 造法：内容层强转（GM 热更 / 测试夹具）—— 正是 `validate.ts` 自己声明的威胁模型
+  //   （"注册表可被程序化填充，编译期护栏失效"）。
+  const BAD_REG = new SkillRegistry([
+    {
+      id: 'ok/skill',
+      def: {
+        name: '好技能',
+        type: SKILL_TYPES.SKILL,
+        can_enables: ['sword'],
+        enableProp: () => ({ sword: { prop: { gj: 10 } } }),
+      },
+    },
+    {
+      id: 'bad/key',
+      def: {
+        name: '坏核心键',
+        type: SKILL_TYPES.SKILL,
+        // ★ 故意带一个**合法**键 `mz` 排在非法键**前面**：
+        //   这样"半吸收"会真的把新值写进 props（只放非法键的话，
+        //   release 减掉旧账、absorb 又加回同一个数 ⇒ 净零 ⇒ 判据假绿）。
+        passiveProp: (() =>
+          ({ prop: { mz: 7, not_a_prop: 5 } })) as unknown as NonNullable<SkillDef['passiveProp']>,
+      },
+    },
+    {
+      id: 'bad/ext',
+      def: {
+        name: '坏扩展键',
+        type: SKILL_TYPES.SKILL,
+        passiveProp: (() =>
+          ({ prop: { mz: 7 }, extProp: [['not_an_ext', 3]] })) as unknown as NonNullable<SkillDef['passiveProp']>,
+      },
+    },
+  ]);
+
+  function npcWithReg(reg: SkillRegistry): Npc {
+    return new Npc({
+      oid: 'dddddddddd',
+      path: asWorldId('zz/npc7', 'engine-skill.test:s8'),
+      name: 'S8',
+      def: { name: 'S8', desc: 'd' },
+      skillRegistry: reg,
+    });
+  }
+
+  /** 先把账算好：学一个合法技能并装配，props 里稳定有一个非零项 */
+  function seeded(): Npc {
+    const npc = npcWithReg(BAD_REG);
+    npc.skills.learn('ok/skill', 10);
+    npc.skills.enable('sword', 'ok/skill');
+    return npc;
+  }
+
+  it('★ 非法**核心**键 ⇒ 抛 SkillError，且既有属性账原样保留（不是先清空再抛）', () => {
+    const npc = seeded();
+    const before = { ...snapshotProps(npc).prop };
+    expect(before).toEqual({ gj: 10 });
+
+    expect(() => npc.skills.learn('bad/key', 1)).toThrow(SkillError);
+
+    // ★ 判据钉在"**部分吸收的痕迹**"上：只断言 `props == before` 会**假绿** ——
+    //   旧实现 release 减掉旧账、`#absorb` 在抛错前又把同一个数加回去，净零。
+    //   坏技能带一个合法键 `mz`，半账会把它留在 props 里 ⇒ 咬得住。
+    expect(snapshotProps(npc).prop).not.toHaveProperty('mz');
+    expect({ ...snapshotProps(npc).prop }).toEqual(before);
+  });
+
+  it('★ 非法**扩展**键同样在算账阶段就被拦（同一份校验覆盖两张表）', () => {
+    const npc = seeded();
+    const before = { ...snapshotProps(npc).prop };
+    expect(() => npc.skills.learn('bad/ext', 1)).toThrow(SkillError);
+    expect(snapshotProps(npc).prop).not.toHaveProperty('mz');
+    expect({ ...snapshotProps(npc).prop }).toEqual(before);
+  });
+
+  it('【反向锚点】合法属性键照常记账（新校验不误伤正常路径）', () => {
+    const npc = seeded();
+    expect({ ...snapshotProps(npc).prop }).toEqual({ gj: 10 });
+    expect(npc.skills.entryOf('ok/skill')?.enabled).toBe('sword');
   });
 });

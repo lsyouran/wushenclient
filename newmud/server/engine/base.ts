@@ -147,7 +147,7 @@ export abstract class GameObject {
       envOf(this)?.removeItem(this);
       return true;
     }
-    // 自环检查在 `Container.addItem` 里（`child === this`）——
+    // 自环 / 成环检查在 `Container.addItem` 里（`child === this` 与"child 恰是祖先"）——
     // 那里两边都是 `Container`，类型上才说得通。
     dest.addItem(this);
     return true;
@@ -200,6 +200,21 @@ export abstract class Container extends GameObject {
     if (envOf(child) === this) return;
     if (child === this) {
       throw new ContainerError(`不能把 ${this.oid} 放进它自己里面`);
+    }
+    // ★ 环判定（S6，2026-10-16 审查）：`child` 若是**本容器的祖先**，收进来就成环
+    //   （`a.moveTo(b); b.moveTo(a)` 两次调用即可，零报错）。
+    //   读取侧（`room` getter）有 `seen` 兜住不死循环，但那是"兜" ——
+    //   写入侧必须直接拒，别让损坏结构进得去。
+    //   `seen` 同样带在这里：结构若**已经**坏了，这个上溯也不能变成死循环。
+    const seen = new Set<GameObject>();
+    for (let cur: GameObject | null = envOf(this); cur !== null; cur = envOf(cur)) {
+      if (cur === child) {
+        throw new ContainerError(
+          `不能把 ${child.oid} 放进它的后代 ${this.oid}(${this.name}) 里面（会成环）`,
+        );
+      }
+      if (seen.has(cur)) break; // 链已损坏（历史遗留的环）：交给读取侧兜，这里不追
+      seen.add(cur);
     }
     if (this.isFull()) {
       throw new ContainerError(

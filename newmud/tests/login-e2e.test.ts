@@ -27,8 +27,8 @@ interface Client {
   closed: Promise<number>;
 }
 
-async function start(): Promise<number> {
-  running = await createGameServer({ port: 0, timers: false });
+async function start(opts: { maxConnectionsPerIp?: number } = {}): Promise<number> {
+  running = await createGameServer({ port: 0, timers: false, ...opts });
   return running.port;
 }
 
@@ -276,6 +276,69 @@ describe('登录全流程（真 WebSocket）', () => {
     a.ws.close();
     b.ws.close();
   });
+
+  /**
+   * ★★ N4（2026-10-13 体检）：**起始房满之后不许把连接赖着**。
+   *
+   * 症状（修复前）：满员时服务端只回一个 `loginerror: LOGIN_TOO_MANY`，
+   * **连接照样留着**。于是攻击者用几十条"登录失败"的连接就能把起始房名额
+   * （`DEFAULT_ROOM_CAPACITY`）永远占住 —— 之后所有正常玩家都登不上，
+   * 而服务端没有踢人手段。代价极低、收益极高。
+   *
+   * ★ 判据落在"连接**被服务端关掉**"上，而不是"回了 LOGIN_TOO_MANY"：
+   *   后者在修复前就成立（这正是它没被发现的原因）。
+   */
+  it(
+    '★★ 起始房满 ⇒ LOGIN_TOO_MANY **且服务端主动关连接**',
+    async () => {
+      // ★ per-IP 上限调大：本机测试里所有连接都同源，不调大第 9 条就被
+      //   `MAX_CONNECTIONS_PER_IP` 挡在门外 —— 那是**另一条**防线，
+      //   这里要让"房间容量"这条成为先触发的那个。
+      const port = await start({ maxConnectionsPerIp: 200 });
+      const held: Client[] = [];
+      let rejected: Client | null = null;
+      let code = '';
+
+      for (let i = 0; i < 80 && rejected === null; i += 1) {
+        const c = await connect(port);
+        send(c.ws, { type: 'login', token: 't'.repeat(20), role_id: `占座${String(i)}` });
+        const outcome = await until(
+          () =>
+            ofType(c, 'loginerror').length > 0
+              ? ('rejected' as const)
+              : ofType(c, 'room').length > 0
+                ? ('joined' as const)
+                : undefined,
+          5_000,
+        );
+        if (outcome === 'rejected') {
+          rejected = c;
+          code = String(ofType(c, 'loginerror')[0]?.['code']);
+        } else {
+          held.push(c);
+        }
+      }
+
+      // ★ 对照组：真的坐满了（不是因为别的原因失败、也不是一直没满）
+      expect(rejected, '起始房该在 80 条以内坐满 —— 否则本用例没有区分力').not.toBeNull();
+      expect(held.length, '至少得有人真的进去了').toBeGreaterThan(0);
+      expect(code).toBe('LOGIN_TOO_MANY');
+
+      // ★ 本次修复的判据：被拒的那条由**服务端关闭**
+      const outcome = await Promise.race([
+        rejected?.closed,
+        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 5_000)),
+      ]);
+      expect(outcome, '满员之后连接还挂着 = 房间名额可以被赖住').not.toBe('timeout');
+
+      // ★ 对照组②：服务端侧也没留下会话（不是"关了包但角色还在册"）
+      expect(running?.sessions.size).toBe(held.length);
+
+      for (const c of held) c.ws.close();
+      rejected?.ws.close();
+    },
+    30_000,
+  );
 });
 
 // ---------------------------------------------------------------------------

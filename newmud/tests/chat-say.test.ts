@@ -151,6 +151,37 @@ describe('say · 长度上限（wushen `say.js:11`）', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// S10（2026-10-16 审查）：`tell` 漏了 `CHAT_MAX_LENGTH`
+// ---------------------------------------------------------------------------
+//
+// `say` / `shout` 都有 200 字上限，唯独 `tell` 没有 —— 于是长私聊一路走到入站明文
+// 上限（`MAX_PLAINTEXT_CHARS = 256`）才被拒，而**那条拒绝走的是 `loginerror` 通道**：
+// 玩家在游戏中被甩回登录页，还看不到"你说的话太长"这个真实原因。
+// ⇒ 补上与 `say`/`shout` **同一条** `CHAT_MAX_LENGTH` 与**同一句**提示。
+describe('tell · 长度上限（★ S10：与 say/shout 共用 CHAT_MAX_LENGTH）', () => {
+  it('★ 超一个字被拒：只剩自己听到提示，**不产生任何频道消息**', () => {
+    const a = playerIn('甲');
+    const body = '啊'.repeat(CHAT_MAX_LENGTH + 1);
+
+    const r = dispatch(world.commands, a.player, `tell 乙 ${body}`);
+
+    expect(r.kind).toBe('executed');
+    expect(a.out.messages).toEqual([CHAT_TOO_LONG]);
+    expect(a.out.channelMessages).toEqual([]);
+  });
+
+  it('【反向锚点】正好 CHAT_MAX_LENGTH 放行（界线与 say/shout 同口径）', () => {
+    const a = playerIn('甲');
+    const body = '啊'.repeat(CHAT_MAX_LENGTH);
+
+    dispatch(world.commands, a.player, `tell 乙 ${body}`);
+
+    expect(a.out.messages).toEqual([]);
+    expect(a.out.channelMessages).toEqual([{ ch: 'tell', content: body, to: '乙' }]);
+  });
+});
+
 describe('频道闭集（`msg` 帧的 `ch`）里不该有的两档', () => {
   it('`say` 不在闭集里 —— 它走 `sendRoom`，走了频道才是这次的缺陷', () => {
     expect(CHANNELS as readonly string[]).not.toContain('say');

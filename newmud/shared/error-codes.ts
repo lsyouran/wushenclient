@@ -58,6 +58,27 @@ export type ErrorCode = keyof typeof ERROR_CODES;
 /** 服务端不认识的错误码兜底文案（版本不一致 / 未来新增码） */
 export const UNKNOWN_ERROR_TEXT = '发生了一个错误';
 
+/**
+ * 登录失败里，**必须连连接一起收掉**的那几个（N4，2026-10-16）。
+ *
+ * ★ 为什么不能"回个错误包、连接留着"：只回错误包的话，攻击者可以用几十条
+ *   **不登录**的连接把起始房名额（`DEFAULT_ROOM_CAPACITY`）赖住 ——
+ *   之后所有人永远登不上，而服务端没有任何回收手段。代价极低，是典型的低成本 DoS。
+ *   （配合 `MAX_CONNECTIONS_PER_IP` 一起用：那条管"一次能开多少"，
+ *     这条管"失败之后不许占着不动"。）
+ *
+ * ★ 为什么只列这一个：其余失败（名字被占 / 名字非法 / 已登录）都是**用户可当场改**
+ *   的问题，留着连接让他换个名字重试才是对的 —— 一律断开会把正常流程也变成
+ *   "每次改名字都要重连"。名单**收成闭集**（而不是在代码里写 `if (code === …)`），
+ *   是为了让"哪些失败要断连"有一个可被测试钉住的答案。
+ */
+export const LOGIN_FATAL_CODES: ReadonlySet<ErrorCode> = new Set(['LOGIN_TOO_MANY']);
+
+/** 该登录失败是否要顺手关闭连接（见 `LOGIN_FATAL_CODES`） */
+export function isFatalLoginFailure(code: ErrorCode): boolean {
+  return LOGIN_FATAL_CODES.has(code);
+}
+
 export function errorTextOf(code: string): string {
   return (ERROR_CODES as Record<string, string>)[code] ?? UNKNOWN_ERROR_TEXT;
 }

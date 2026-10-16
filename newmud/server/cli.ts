@@ -104,6 +104,8 @@ export interface CliOptions {
   /** 前端产物根目录（绝对路径） */
   readonly webRoot: string;
   readonly maxConnections: number | undefined;
+  /** 单个来源地址的连接上限（N4） */
+  readonly maxConnectionsPerIp: number | undefined;
   readonly help: boolean;
 }
 
@@ -119,6 +121,9 @@ export function usage(): string {
     '  --web-root <dir>       前端产物目录（缺省在项目根下的 dist/web）',
     '  --no-web               只提供 WebSocket，不发前端',
     '  --max-connections <n>  同时在线人数上限（缺省取常量表里的 MAX_CONNECTIONS）',
+    '  --max-connections-per-ip <n>',
+    '                         单个来源地址的连接上限（缺省 MAX_CONNECTIONS_PER_IP）',
+    '                         ★ 同一 NAT 后多人玩 / 压测时把它调大',
     '  -h, --help             显示这段说明',
     '',
     '起来之后：',
@@ -163,6 +168,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
   let serveWeb = true;
   let rawWebRoot: string | null = null;
   let maxConnections: number | undefined;
+  let maxConnectionsPerIp: number | undefined;
   let help = false;
 
   const rest = [...argv];
@@ -187,6 +193,9 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         break;
       case '--max-connections':
         maxConnections = readInt('--max-connections', takeValue(), 1, 100_000);
+        break;
+      case '--max-connections-per-ip':
+        maxConnectionsPerIp = readInt('--max-connections-per-ip', takeValue(), 1, 100_000);
         break;
       case '--web-root':
         rawWebRoot = takeValue();
@@ -215,6 +224,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
           ? resolve(rawWebRoot)
           : resolve(PROJECT_ROOT, rawWebRoot),
     maxConnections,
+    maxConnectionsPerIp,
     help,
   };
 }
@@ -256,6 +266,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     ...(options.maxConnections === undefined
       ? {}
       : { maxConnections: options.maxConnections }),
+    ...(options.maxConnectionsPerIp === undefined
+      ? {}
+      : { maxConnectionsPerIp: options.maxConnectionsPerIp }),
   });
 
   const host = options.host;

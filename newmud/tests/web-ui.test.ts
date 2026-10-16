@@ -219,8 +219,8 @@ beforeAll(async () => {
   mod.bindStream();
   const { setPanelRunner } = await import('../src/ui/panel.js');
   setPanelRunner(run);
-  const { setCmdRunner } = await import('../src/ui/markup.js');
-  setCmdRunner(run);
+  // ★ 这里原先有一句 `setCmdRunner(run)` —— 随 `<CMD>` 标签一并删除（审查 S1）：
+  //   服务端自由文本里的按钮不再存在，可点指令只走 `CmdItem`。
   const { setStreamRunner } = await import('../src/ui/stream.js');
   setStreamRunner(run);
   mod.bindAuth({ onSubmit: (mode, name) => submitted.push({ mode, name }) });
@@ -786,6 +786,20 @@ describe('小地图（点着走）', () => {
     expect(mod.mapOpen()).toBe(false);
   });
 
+  // ★ L2（2026-10-16 审查）：`#mapBtn` 同样声明了 `role="button" tabindex="0"`，
+  //   却只绑 click —— 键盘不可达。见「面板」组里 `#dlgClose` 的同类判据。
+  it('★ 地图开关可用键盘展开 / 收起（role="button" 的可访问性承诺）', () => {
+    const btn = document.getElementById('mapBtn');
+    expect(btn?.getAttribute('role'), '这条判据只对 role="button" 成立').toBe('button');
+
+    const before = mod.mapOpen();
+    btn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(mod.mapOpen(), '按 Enter 没切换地图').toBe(!before);
+
+    btn?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    expect(mod.mapOpen(), '按 Space 没切回来').toBe(before);
+  });
+
   // ---- 方向重叠（wushen 用 `north_2` 这类"退化"处理的，不退化就两个格子叠死）----
 
   /** 读出画在地图上的格子（坐标是 viewBox 单位） */
@@ -1004,6 +1018,58 @@ describe('面板（服务端驱动）', () => {
     mod.closePanel();
   });
 
+  // -------------------------------------------------------------------------
+  // F4（2026-10-16 审查）：`dialog` 的四个**控制字段**原先一个都没消费
+  // -------------------------------------------------------------------------
+  //
+  // 协议（`protocol.ts` 的 `DialogControlShape`）声明了 `close` / `refresh` / `clear` / `remove`，
+  // 而 handler 把它们当**普通字段**列成文本行：服务端发 `{dialog:'pack', close:true}`
+  // 得到的是一行 `close: true`，面板**不关**。
+  // ⇒ 契约不一致（声明了却不消费）+ 行为错（该关的没关）。
+  describe('F4 · dialog 的控制字段', () => {
+    it('★ `close: true` → 关面板，而不是把它列成一行文本', () => {
+      mod.openPanel('包', ['一些东西']);
+      mod.dispatchPacket('dialog', { dialog: 'pack', close: true });
+
+      expect(mod.isPanelOpen()).toBe(false);
+      expect(mod.panelRows()).toEqual([]);
+    });
+
+    it('★ `remove: <行>` → 从当前面板移除**那一行**', () => {
+      mod.openPanel('包', ['铁剑', '布衣']);
+      mod.dispatchPacket('dialog', { dialog: 'pack', remove: '铁剑' });
+
+      expect(mod.panelRows()).toEqual(['布衣']);
+      mod.closePanel();
+    });
+
+    it('★ `clear: true` → 清空行（面板仍开着），不是关掉面板', () => {
+      mod.openPanel('包', ['铁剑', '布衣']);
+      mod.dispatchPacket('dialog', { dialog: 'pack', clear: true });
+
+      expect(mod.isPanelOpen()).toBe(true);
+      expect(mod.panelRows()).toEqual([]);
+      mod.closePanel();
+    });
+
+    it('★ 控制字段本身**绝不出现在内容行**里（修复前会显示 "remove: 不存在"）', () => {
+      mod.openPanel('包', ['铁剑']);
+      mod.dispatchPacket('dialog', { dialog: 'pack', remove: '不存在那把' });
+      mod.dispatchPacket('dialog', { dialog: 'pack', refresh: 123 });
+
+      expect(mod.panelRows().join('|')).not.toContain('remove:');
+      expect(mod.panelRows().join('|')).not.toContain('refresh:');
+      mod.closePanel();
+    });
+
+    it('【反向锚点】普通字段仍落成内容行（别把 handler 改成只认控制字段）', () => {
+      mod.dispatchPacket('dialog', { dialog: 'pack', foo: 'bar' });
+      expect(mod.isPanelOpen()).toBe(true);
+      expect(mod.panelRows()).toContain('foo: bar');
+      mod.closePanel();
+    });
+  });
+
   it('★ 面板开着时 `warn` 回显同时进面板（wushen 的 dialog 模型）', () => {
     mod.openPanel('店小二', ['一个跑堂的。']);
     mod.dispatchPacket('warn', { content: '店小二打量了你一眼。' });
@@ -1027,6 +1093,21 @@ describe('面板（服务端驱动）', () => {
     mod.openPanel('某处', ['一行字。']);
     click(document.getElementById('mask'));
     expect(mod.isPanelOpen()).toBe(false);
+  });
+
+  // ★ L2（2026-10-16 审查）：`#dlgClose` 声明了 `role="button" tabindex="0"`，
+  //   却只绑了 click —— 键盘用户 Tab 到它、按 Enter/Space 毫无反应。
+  //   项目自己在 `ui/input.ts` 为 `#channel` 立过这条规矩（"声明了能点却不绑事件，
+  //   比不声明更糟：读屏器会播报'按钮'，键盘用户按下去毫无反应"），这两处恰好违反。
+  it('★ 关闭按钮可用键盘操作（role="button" 的可访问性承诺）', () => {
+    const close = document.getElementById('dlgClose');
+    expect(close?.getAttribute('role'), '这条判据只对 role="button" 成立').toBe('button');
+
+    for (const key of ['Enter', ' ']) {
+      mod.openPanel('某处', ['一行字。']);
+      close?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      expect(mod.isPanelOpen(), `按 ${key} 没能收起面板`).toBe(false);
+    }
   });
 
   it('面板底部的命令按钮点了就执行', () => {
@@ -1293,14 +1374,38 @@ describe('XSS 防线', () => {
     expect(line?.textContent).toBe('旁注白底红底选项');
   });
 
-  it('`<CMD>` 标签可点，点了就发它的指令', () => {
+  /**
+   * ★ 这条原先断言的是"`CMD` 可点、点了发它的指令" —— 2026-10-16 审查 S1 之后
+   *   反过来了：自由文本里的按钮被**删除**，因为 `<CMD>` 在白名单内、语义是"点一下
+   *   发一条指令"，于是任何玩家可控文本都能在别人屏幕上植一颗按钮（最强的一条是
+   *   角色名 —— 不用开口，站在房间里就生效）。可点指令只剩 `CmdItem` 那条结构化通道。
+   *   ⇒ 现在的判据：`<CMD>` 与 `<script>` 同等，**原样显示为字符**，点了什么都不发。
+   */
+  it('`<CMD>` 不可点 —— 自由文本里没有可执行按钮（S1）', () => {
     fired.length = 0;
     mod.clearStream();
     mod.dispatchPacket('warn', { content: "<cmd cmd='dazuo'>打坐</cmd>" });
-    const tag = lastLine()?.querySelector('CMD');
-    expect(tag?.textContent).toBe('打坐');
-    click(tag);
+    const line = lastLine();
+
+    expect(line?.querySelector('CMD')).toBeNull();
+    // ★ 与 `<script>` 同等处置：白名单外 ⇒ 原样可见（不是被吃掉、也不是可执行）
+    expect(line?.textContent ?? '').toContain('<cmd');
+    click(line);
+    expect(fired).toEqual([]);
+  });
+
+  it('【反向锚点】可点按钮仍在，但只走 `CmdItem` 通道（S1 不能把按钮一起误删）', () => {
+    fired.length = 0;
+    mod.openPanel('蒲团', ['面前有个蒲团'], [{ cmd: 'dazuo', name: '打坐' }]);
+
+    // ★ 判据落在"按钮确实存在且可执行"上：这是删掉 `<CMD>` 之后**唯一**的按钮来源
+    const btn = document.querySelector('[data-cmd="dazuo"]');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toBe('打坐');
+    click(btn);
     expect(fired).toEqual(['dazuo']);
+
+    mod.closePanel();
   });
 });
 
@@ -1364,8 +1469,14 @@ const TAG_STYLE: ReadonlyArray<readonly [tag: string, prop: string, value: strin
   ['HBWHT', 'background-color', '#ffffff'],
 ];
 
-/** 只被"认下来"、没有颜色可言的标签（wushen 里同样不带色） */
-const TAG_PLAIN: readonly string[] = ['DEL', 'MEM', 'OPT', 'FLA', 'LINE', 'CMD'];
+/**
+ * 只被"认下来"、没有颜色可言的标签（wushen 里同样不带色）。
+ *
+ * ★ `CMD` 已**不在**这份清单里（2026-10-16 审查 S1）：它原是白名单内唯一"可点"的标签，
+ *   语义是"点一下发一条指令" ⇒ 玩家可控文本（尤其是角色名）能在别人屏幕上植按钮。
+ *   可点指令现在只有 `CmdItem` 一条结构化通道，详见 `src/ui/markup.ts` 的 `§CMD`。
+ */
+const TAG_PLAIN: readonly string[] = ['DEL', 'MEM', 'OPT', 'FLA', 'LINE'];
 
 /** 从 `src/ui/markup.ts` 的源码里取出白名单（`const KNOWN = new Set([...])`） */
 function knownTags(): string[] {

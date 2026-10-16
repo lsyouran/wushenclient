@@ -15,10 +15,12 @@
 import { z } from 'zod';
 import { ERROR_CODES } from './error-codes.js';
 import type { ErrorCode } from './error-codes.js';
-import type { Channel, DialogName } from './constants.js';
+import type { Channel, DialogName, Direction } from './constants.js';
 import {
   CHANNELS,
   DIALOG_NAMES,
+  DIRECTIONS,
+  LOOKS_LIKE_JSON_RE,
   MAX_MESSAGE_BYTES,
   MAX_PLAINTEXT_CHARS,
   PROTOCOL_VERSION,
@@ -610,11 +612,25 @@ export const ChannelSchema = z.enum([...CHANNELS] as [Channel, ...Channel[]]);
 export const DialogNameSchema = z.enum([...DIALOG_NAMES] as [DialogName, ...DialogName[]]);
 export const StatusActionSchema = z.enum(STATUS_ACTIONS);
 
+/**
+ * 方向闭集（S9，2026-10-16 审查）。
+ *
+ * `exits` 帧的方向键用它 —— 与内容层 `validate.ts` 的方向校验**同一份** `DIRECTIONS`。
+ * ★ 为什么协议层也必须校验（原先只有内容层有，是双口径）：
+ *   前端把 key **原样**存进 `state.exits`、点击即 `runner(dir)` ——
+ *   一个非法键会在中文方向列表里显示成裸串，点它等于把裸串当命令发出去。
+ */
+export const DirectionSchema = z.enum([...DIRECTIONS] as [Direction, ...Direction[]]);
+
+/** 地图出口编码（`MapRoom.exits` 每一项）：字母 + 可选序号 + 可选 d/l 标记 */
+const EXIT_CODE_RE = /^([a-z]{1,2})(\d)?([d|l])?$/;
+
 const MapRoomSchema = z.object({
   n: z.string(),
   id: WorldIdSchema,
   p: z.tuple([z.number(), z.number()]),
-  exits: z.array(z.string()),
+  // ★ S9：注释一直要求匹配 `EXIT_CODE_RE`，schema 却是裸 `z.string()` —— 注释没落成校验
+  exits: z.array(z.string().regex(EXIT_CODE_RE, '非法出口编码')),
 });
 
 const CooldownShape = {
@@ -650,12 +666,24 @@ export const ROLE_NAME_MAX_LENGTH = 64;
  *      名字里带空格会让"私聊谁"产生歧义；
  *   ② 换行 / `\t` / NUL 这类字符会污染服务端日志与前端叙事流的排版。
  *   这两件事都发生在**渲染之前**，所以要在入口挡住，而不是在展示层打补丁。
+ *
+ * ★ 为什么还要挡住 `<`（**2026-10-16 审查 S1**）：
+ *   角色名会被 `$N` 替换进**每一句**涉及该角色的播报（`$N说：…`、`$N走了进来`），
+ *   而 `<CMD>` 在前端 `markup.ts` 的白名单**之内**、语义是"点一下发一条指令"。
+ *   ⇒ 一个名字里带 `<CMD cmd="…">` 的角色，**不用开口**，只要站在房间里就在给
+ *      全房间的人植一个按钮 —— 这比"在聊天里注入"更强（不需要说话这个动作）。
+ *   ⇒ 名字是**持久标识**，本来就不该含标签字符；从源头拒掉比到渲染层打补丁干净。
+ *   ※ 这里是三道防线里的**第一道**；另两道见 `server/engine/view-text.ts`
+ *     `neutralizePlayerText` 的注释（`view-text` 层 + 聊天指令出口）。
  */
 export function isRoleName(raw: unknown): raw is string {
   if (typeof raw !== 'string') return false;
   if (raw.length === 0 || raw.length > ROLE_NAME_MAX_LENGTH) return false;
   // `\s` 覆盖空白与换行；`\u0000-\u001f` / `\u007f-\u009f` 覆盖 C0/C1 控制字符
-  return !/[\s\u0000-\u001f\u007f-\u009f]/u.test(raw);
+  if (/[\s\u0000-\u001f\u007f-\u009f]/u.test(raw)) return false;
+  // ★ 标签起始符：见上方注释（S1）。※ 只禁 `<`，不禁 `>` —— 没有 `<` 就不成标签；
+  //   全角书名号 `《》`（U+300A / U+300B）与本条无关，照常允许（别忘了它们是常见中文标点）。
+  return !raw.includes('<');
 }
 
 export const ClientCommandSchema = EnvelopeSchema.extend({
@@ -727,7 +755,8 @@ export const SERVER_PACKET_SCHEMAS: Record<ServerPacketType, z.ZodTypeAny> = {
     desc: z.string(),
     commands: z.array(CmdItemSchema),
   }),
-  exits: EnvelopeSchema.extend({ type: z.literal('exits'), items: z.record(z.string()) }),
+  // ★ S9：方向键必须是闭集（原先 `z.record(z.string())` 收任何键）
+  exits: EnvelopeSchema.extend({ type: z.literal('exits'), items: z.record(DirectionSchema, z.string()) }),
   items: EnvelopeSchema.extend({ type: z.literal('items'), items: z.array(ItemBriefSchema) }),
   itemadd: EnvelopeSchema.extend({ type: z.literal('itemadd'), ...ItemBriefSchema.shape }),
   itemremove: EnvelopeSchema.extend({ type: z.literal('itemremove'), id: z.string() }),
@@ -889,8 +918,10 @@ export function checkPayloadSize(raw: string | Uint8Array): PayloadCheck {
  */
 const PLAINTEXT_FORBIDDEN_RE = /[\u0000-\u001f\u007f-\u009f]/;
 
-/** 看起来像 JSON 的开头 → 必须走 JSON 分支，不得当明文 */
-const LOOKS_LIKE_JSON_RE = /^\s*[[{]/;
+// ★ `LOOKS_LIKE_JSON_RE` 已上移到 `constants.ts`（S10，2026-10-16 审查）：
+//   前端 `net/client.ts` 也要用**同一份**判据（决定一条指令发明文还是发 `command` 包），
+//   而前端只许 `import type` 本文件 ⇒ 放在双方都能 import 的共享层。
+//   原先各写一份，注释自己都警告"两边一旦分叉会偶尔断连"。
 
 // ---- 帧分流：S1 + L8 的合并落点 -------------------------------------------
 

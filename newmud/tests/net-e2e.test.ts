@@ -17,6 +17,7 @@ import { MAX_MESSAGE_BYTES, RATE_LIMIT_PER_5S } from '../shared/constants.js';
 import { PROTOCOL_VERSION } from '../shared/constants.js';
 import { ConnectionHub } from '../server/net/hub.js';
 import { startWsServer } from '../server/net/ws-server.js';
+import { normalizePeerAddress } from '../server/net/ws-server.js';
 import type { MudServer } from '../server/net/ws-server.js';
 import type { ErrorCode } from '@shared/protocol.js';
 
@@ -32,10 +33,15 @@ interface Echo {
   rejects: Array<[ErrorCode, boolean]>;
 }
 
-async function start(opts: { maxConnections?: number } = {}): Promise<{ port: number; echo: Echo }> {
+async function start(
+  opts: { maxConnections?: number; maxConnectionsPerIp?: number } = {},
+): Promise<{ port: number; echo: Echo }> {
   const echo: Echo = { commands: [], rejects: [] };
   const hub = new ConnectionHub({
     ...(opts.maxConnections === undefined ? {} : { maxConnections: opts.maxConnections }),
+    ...(opts.maxConnectionsPerIp === undefined
+      ? {}
+      : { maxConnectionsPerIp: opts.maxConnectionsPerIp }),
     hooks: {
       onCommand: (conn, command) => {
         echo.commands.push(command);
@@ -58,22 +64,28 @@ async function start(opts: { maxConnections?: number } = {}): Promise<{ port: nu
   return { port: server.port, echo };
 }
 
-/** 连上一个客户端，收集它收到的消息与关闭码 */
+/** 连上一个客户端，收集它收到的消息、关闭码与关闭原因 */
 function connect(port: number): Promise<{
   ws: WebSocket;
   received: string[];
   closed: Promise<number>;
+  /** 服务端给的关闭原因（N4 用它区分"服务器满"与"同址过多"） */
+  closeReason: () => string;
 }> {
   const received: string[] = [];
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  let reason = '';
   let resolveClosed: (code: number) => void;
   const closed = new Promise<number>((r) => {
     resolveClosed = r;
   });
   ws.on('message', (data) => received.push(String(data)));
-  ws.on('close', (code) => resolveClosed(code));
+  ws.on('close', (code, buf) => {
+    reason = buf.toString();
+    resolveClosed(code);
+  });
   return new Promise((resolve, reject) => {
-    ws.on('open', () => resolve({ ws, received, closed }));
+    ws.on('open', () => resolve({ ws, received, closed, closeReason: () => reason }));
     ws.on('error', reject);
   });
 }
@@ -143,6 +155,51 @@ describe('端到端（真 WebSocket）', () => {
       expect(await second.closed).toBe(1013);
     }
     first.ws.close();
+  });
+
+  /**
+   * ★ N4：**同一个来源地址**开太多连接 ⇒ 后来者被拒（1013 + "同一地址连接过多"）。
+   *
+   * ★ 这条用例天然成立：本机测试里所有连接都来自 `127.0.0.1`，
+   *   于是"同址过多"这条判据**真的够得着**（不需要伪造来源地址）。
+   * ★ 它同时是"归一化"的回归：`normalizePeerAddress` 若不把 `::ffff:127.0.0.1`
+   *   与 `127.0.0.1` 合成一个地址，下面的计数就会分散到两个键上、上限永不触发。
+   */
+  it('★ 同一地址超过 per-IP 上限：后一条被拒，且**原因与"服务器满"可区分**', async () => {
+    const { port } = await start({ maxConnectionsPerIp: 2 });
+    const a = await connect(port);
+    const b = await connect(port);
+    const c = await connect(port).catch(() => null);
+    expect(c, '第三条同址连接不该被静默接受').not.toBeNull();
+    expect(await c?.closed).toBe(1013);
+    expect(c?.closeReason()).toBe('同一地址连接过多');
+
+    // ★ 对照组：前两条**没被误伤**（否则"一律拒绝"也能让上面绿）
+    expect(a.ws.readyState).toBe(WebSocket.OPEN);
+    expect(b.ws.readyState).toBe(WebSocket.OPEN);
+    a.ws.close();
+    b.ws.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N4 · 来源地址归一（per-IP 上限的前提）
+// ---------------------------------------------------------------------------
+describe('normalizePeerAddress', () => {
+  it('IPv4-mapped IPv6 归一成 IPv4（否则同一台机器算两个地址，上限被绕过）', () => {
+    expect(normalizePeerAddress('::ffff:127.0.0.1')).toBe('127.0.0.1');
+    expect(normalizePeerAddress('::FFFF:10.0.0.7')).toBe('10.0.0.7');
+  });
+
+  it('普通 IPv4 / IPv6 原样保留（别把真 IPv6 也改写掉）', () => {
+    expect(normalizePeerAddress('192.168.1.9')).toBe('192.168.1.9');
+    expect(normalizePeerAddress('::1')).toBe('::1');
+    expect(normalizePeerAddress('2001:db8::1')).toBe('2001:db8::1');
+  });
+
+  it('缺地址 ⇒ undefined（"量不到就不判"，交给 hub 跳过 per-IP）', () => {
+    expect(normalizePeerAddress(undefined)).toBeUndefined();
+    expect(normalizePeerAddress('')).toBeUndefined();
   });
 });
 

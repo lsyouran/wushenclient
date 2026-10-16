@@ -14,7 +14,7 @@
  *   都在面板里"，不用来回翻消息流。
  */
 
-import { clear, el, need } from './dom.js';
+import { clear, el, need, onActivate } from './dom.js';
 import { renderMarkup } from './markup.js';
 import type { CmdItem } from '../../shared/protocol.js';
 
@@ -62,6 +62,33 @@ export function closePanel(): void {
 
 export function isPanelOpen(): boolean {
   return !need('dialog').hidden;
+}
+
+/**
+ * 移除面板里**文本等于** `line` 的那一行（对应 `dialog` 帧的 `remove` 控制字段，F4）。
+ *
+ * @returns 是否确实移除了 —— 调用方可据此判断"服务端要移除的行不在面板里"
+ *
+ * ★ 行匹配是**整行相等**：面板行就是服务端给的原文（`renderMarkup` 只影响显示层，
+ *   `rows` 里存的是原文），所以这里不需要任何解析。
+ */
+export function removePanelRow(line: string): boolean {
+  if (rows === null) return false;
+  const idx = rows.indexOf(line);
+  if (idx === -1) return false;
+  rows.splice(idx, 1);
+  render();
+  return true;
+}
+
+/**
+ * 清空面板里的行，**面板保持开着**（对应 `dialog` 帧的 `clear` 控制字段，F4）。
+ * ★ 与 `closePanel()` 的差别是这条判据本身：`clear` 是"内容没了"，`close` 才是"面板收起来"。
+ */
+export function clearPanelRows(): void {
+  if (rows === null) return;
+  rows = [];
+  render();
 }
 
 /** 面板里当前显示了几行（测试与调试用） */
@@ -125,7 +152,9 @@ export function resetPanels(): void {
 }
 
 export function bindPanel(): void {
-  need('dlgClose').addEventListener('click', closePanel);
+  // ★ 用 `onActivate`（click + Enter/Space）而不是裸 click（L2）：`#dlgClose` 声明了
+  //   `role="button" tabindex="0"`，只绑 click 就是"读屏器说它是按钮、键盘按下去没反应"。
+  onActivate(need('dlgClose'), closePanel);
   need('mask').addEventListener('click', () => {
     if (isPanelOpen()) closePanel();
   });

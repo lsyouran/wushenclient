@@ -52,14 +52,17 @@
 
     <section class="login-panel" id="panelLogin" role="tabpanel">
       <label class="lb" for="loginName">名　号</label>
-      <input class="tb" id="loginName" type="text" autocomplete="off" autocapitalize="off"
+      <!-- ★ maxlength 必须与 `ROLE_NAME_MAX_LENGTH`(protocol.ts = 64) 同源。
+           HTML 里 import 不了常量，所以靠 `tests/static-web.test.ts` 的 S10 组钉住：
+           "改了常量却忘了改这里"会红（2026-10-16 审查 S10：四个输入框原先都没有上限）。 -->
+      <input class="tb" id="loginName" type="text" maxlength="64" autocomplete="off" autocapitalize="off"
              spellcheck="false" enterkeyhint="go" placeholder="你行走江湖用的名号" />
       <button class="btn" id="loginBtn">进 入 江 湖</button>
     </section>
 
     <section class="login-panel" id="panelRegister" role="tabpanel" hidden>
       <label class="lb" for="regName">新的名号</label>
-      <input class="tb" id="regName" type="text" autocomplete="off" autocapitalize="off"
+      <input class="tb" id="regName" type="text" maxlength="64" autocomplete="off" autocapitalize="off"
              spellcheck="false" enterkeyhint="go" placeholder="取一个还没人用过的名号" />
       <button class="btn" id="regBtn">创 建 角 色</button>
       <p class="fhint">尚无账号与密码体系，名号只记在本机。</p>
@@ -132,7 +135,7 @@
     <div class="pop-card">
       <div class="chips" id="cmdChips"></div>
       <div class="chat-input">
-        <input class="sender-box" id="cmdInput" type="text" autocomplete="off" autocapitalize="off"
+        <input class="sender-box" id="cmdInput" type="text" maxlength="256" autocomplete="off" autocapitalize="off"
                spellcheck="false" enterkeyhint="send" placeholder="看 / 北 / go north / say 你好 ……" />
         <button class="sender-btn" id="cmdSend" aria-label="执行">
           <span class="glyphicon glyphicon-send"></span>
@@ -154,7 +157,7 @@
         <span data-ch="tell">私语</span>
       </div>
       <div class="chat-input">
-        <input class="sender-box" id="chatInput" type="text" autocomplete="off" autocapitalize="off"
+        <input class="sender-box" id="chatInput" type="text" maxlength="256" autocomplete="off" autocapitalize="off"
                spellcheck="false" enterkeyhint="send" placeholder="对本房说话……" />
         <button class="sender-btn" id="chatSend" aria-label="发送">
           <span class="glyphicon glyphicon-send"></span>

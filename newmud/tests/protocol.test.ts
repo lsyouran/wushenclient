@@ -13,6 +13,7 @@
  * ★ 回归锚点：本文件里凡标 `★` 的断言，都是首轮审查实测缺陷的守护。
  */
 import {
+  DIALOG_CONTROL_FIELDS,
   MAX_MESSAGE_BYTES,
   MAX_PLAINTEXT_CHARS,
   REG_ATTR_RANGE_MAX,
@@ -35,6 +36,7 @@ import {
   routeFrame,
 } from '@shared/protocol.js';
 import { describe, expect, it } from 'vitest';
+import { LOGIN_FATAL_CODES, isFatalLoginFailure } from '@shared/error-codes.js';
 import { z } from 'zod';
 
 /** 用真实不可信数据路径构造信封（JSON.parse 才生成自有属性，见 tests/props.test.ts 的同款坑） */
@@ -187,6 +189,63 @@ describe('G2.7 出站 schema 与声明类型一致（★ docs/26 M9：schema 不
     const uBase = { v: PROTOCOL_VERSION, type: 'updatemap', map: 'yz', n: '甲', pos: [0, 0] };
     expect(upd.safeParse({ ...uBase, id: 'yz/a' }).success).toBe(true);
     expect(upd.safeParse({ ...uBase, id: 'Bad/Id' }).success).toBe(false);
+  });
+
+  // ★ S9（2026-10-16 审查）：两处"内容层校验了、协议层没校验"的双口径缺口。
+  //   前端把 `exits` 的 key 原样存进 `state.exits`，点击即 `runner(dir)` ——
+  //   一个非法方向键会在中文方向列表里显示成裸串，点它等于把裸串当指令发出去。
+  it('★ S9：`exits.items` 的键必须是**方向闭集**（原来是裸 z.record(z.string())）', () => {
+    const schema = SERVER_PACKET_SCHEMAS['exits'];
+    const base = { v: PROTOCOL_VERSION, type: 'exits', items: { north: '广场', up: '楼上' } };
+    expect(schema.safeParse(base).success).toBe(true);
+
+    // 裸串 / 大小写错 / 方向短写（`n`）/ 空串都不该通过：
+    //   短写是**输入别名**（`normalizeDirection` 认），不是下行协议里的键
+    for (const bad of ['nope', 'North', 'n', 'up2', '']) {
+      expect(
+        schema.safeParse({ ...base, items: { [bad]: '广场' } }).success,
+        `方向键 ${JSON.stringify(bad)} 不应通过`,
+      ).toBe(false);
+    }
+  });
+
+  it('★ S9：`map` 里的 `MapRoom.exits` 受出口编码正则约束（注释要求过、schema 没落成校验）', () => {
+    const schema = SERVER_PACKET_SCHEMAS['map'];
+    const room = { n: '广场', id: 'yz/a', p: [0, 0], exits: ['n1', 's', 'e2l'] };
+    const base = { v: PROTOCOL_VERSION, type: 'map', path: 'yz', map: [room] };
+    expect(schema.safeParse(base).success).toBe(true);
+
+    expect(
+      schema.safeParse({ ...base, map: [{ ...room, exits: ['NOPE'] }] }).success,
+      '大写 / 超长 / 带空格的出口编码不该通过',
+    ).toBe(false);
+  });
+
+  // ★ F4（2026-10-16 审查）：`dialog` 的四个**控制字段**。
+  //   schema 一直认它们、前端 handler 却全部不消费（当普通字段列成文本行）——
+  //   本组把"两边都认同一份名单"钉住：名单在 `constants.ts#DIALOG_CONTROL_FIELDS`，
+  //   前端按它分流，schema 必须认它的每一项（改了一边这里就红）。
+  it('★ F4：`dialog` schema 认 `DIALOG_CONTROL_FIELDS` 的每一个控制字段', () => {
+    const schema = SERVER_PACKET_SCHEMAS['dialog'];
+    const samples: Record<string, unknown> = {
+      close: true,
+      refresh: 123,
+      clear: true,
+      remove: '一行字',
+    };
+    const base = { v: PROTOCOL_VERSION, type: 'dialog', dialog: 'pack' };
+
+    expect(DIALOG_CONTROL_FIELDS.length, '名单不该是空的（死提取守卫）').toBeGreaterThan(0);
+    for (const f of DIALOG_CONTROL_FIELDS) {
+      expect(
+        Object.prototype.hasOwnProperty.call(samples, f),
+        `名单里的 ${f} 在样本表里没有取值 —— 加了字段请同步本测试`,
+      ).toBe(true);
+      expect(
+        schema.safeParse({ ...base, [f]: samples[f] }).success,
+        `schema 不认控制字段 ${f}（而前端按它分流 ⇒ 名单漂了）`,
+      ).toBe(true);
+    }
   });
 
   it('★ `itemadd` 复用 ItemBrief 字段（L1：旧接口注释说"有字段"、类型里却没有）', () => {
@@ -363,5 +422,31 @@ describe('L5 报错文案里的设计数值必须来自常量（★ docs/26 L5 �
       `四维需在 ${REG_ATTR_RANGE_MIN}-${REG_ATTR_RANGE_MAX} 之间`,
     );
     expect(ERROR_CODES.REG_ATTR_SUM).toBe(`属性之和必须等于 ${REG_ATTR_SUM_TOTAL}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N4（2026-10-16）：登录失败里"必须连连接一起收掉"的名单
+// ---------------------------------------------------------------------------
+//
+// ★ 名单是**闭集**，且被两条对向断言夹住：
+//   ① 房间/服务器满 ⇒ 必须断连（否则几十条不登录的连接就能赖住起始房名额）；
+//   ② 用户可当场改的失败 ⇒ **不能**断连（否则"改个名字都要重连"）。
+//   只写①的话，一个 `() => true` 的实现也能过。
+describe('N4 · 登录失败的闭集（哪些要断连）', () => {
+  it('★ 满员在名单里（回包之后必须把连接收掉）', () => {
+    expect(isFatalLoginFailure('LOGIN_TOO_MANY')).toBe(true);
+    expect(LOGIN_FATAL_CODES.has('LOGIN_TOO_MANY')).toBe(true);
+  });
+
+  it('★ 用户可当场改的失败**不在**名单里（留着连接让他换个名字重试）', () => {
+    for (const code of ['REG_NAME_TAKEN', 'ROLE_NAME_INVALID', 'ALREADY_LOGGED_IN'] as const) {
+      expect(isFatalLoginFailure(code), code).toBe(false);
+    }
+  });
+
+  it('【反向锚点】是闭集不是全集（别用"所有错误码"实现它）', () => {
+    expect(LOGIN_FATAL_CODES.size).toBeGreaterThan(0);
+    expect(LOGIN_FATAL_CODES.size).toBeLessThan(Object.keys(ERROR_CODES).length);
   });
 });

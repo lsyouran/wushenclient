@@ -32,6 +32,7 @@ import type { HubHooks, NetConnection } from './net/hub.js';
 import { startWsServer } from './net/ws-server.js';
 import type { MudServer } from './net/ws-server.js';
 import type { ErrorCode } from '@shared/protocol.js';
+import { isFatalLoginFailure } from '@shared/error-codes.js';
 
 export interface GameServerOptions {
   /** 0 = 由系统分配（测试用） */
@@ -44,6 +45,8 @@ export interface GameServerOptions {
   /** 关掉心跳与周期清理（测试用） */
   readonly timers?: boolean;
   readonly maxConnections?: number;
+  /** 覆盖 `MAX_CONNECTIONS_PER_IP`（N4；测试与同址多人场景要调大） */
+  readonly maxConnectionsPerIp?: number;
   /**
    * 把 WebSocket 挂到**已有的** http 服务器上（静态资源与 WS 共用同一端口）。
    *
@@ -75,7 +78,13 @@ export async function createGameServer(options: GameServerOptions): Promise<Game
     onLogin: (conn: NetConnection, token: string, roleId: string) => {
       const r = sessions?.login(conn, token, roleId);
       // 登录失败也要**明确告诉客户端**，而不是让它一直等
-      if (r !== undefined && !r.ok) sessions?.sendError(conn, r.code);
+      if (r !== undefined && !r.ok) {
+        sessions?.sendError(conn, r.code);
+        // ★ 起始房满 / 服务器满这类失败要**连连接一起收掉**（N4）：
+        //   失败却留着连接 = 几十条连接就能把起始房名额赖住，之后谁也登不上。
+        //   什么时候该断、什么时候该留，看 `LOGIN_FATAL_CODES`（闭集 + 有测试）。
+        if (isFatalLoginFailure(r.code)) conn.close(`登录失败：${r.code}`);
+      }
     },
     // 心跳由 ws 层的 ping/pong 处理，业务层无需动作
     onPing: () => undefined,
@@ -92,6 +101,9 @@ export async function createGameServer(options: GameServerOptions): Promise<Game
   const hub = new ConnectionHub({
     hooks,
     ...(options.maxConnections === undefined ? {} : { maxConnections: options.maxConnections }),
+    ...(options.maxConnectionsPerIp === undefined
+      ? {}
+      : { maxConnectionsPerIp: options.maxConnectionsPerIp }),
   });
   sessions = new GameSessions({ world, hub });
 

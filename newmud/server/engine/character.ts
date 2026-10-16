@@ -158,6 +158,18 @@ export interface InnatePatch {
 /** 忙碌标记在 temp 里的键名 */
 const BUSY_KEY = 'busy';
 
+/**
+ * `busy`（忙乱）的**硬上界**。
+ *
+ * ★ 2026-10-16 拍板（E5）：`busy` 是**动作锁**，不是长时状态。
+ *   wushen 里它由技能 / 逃跑 buff 的 `duration` 赋值（`os/char/chara_skill.js:367`、
+ *   `os/char/chara_move.js:117` 的 `add_status({is_busy:true, duration})`），
+ *   另有地图事件直接写（`world/map/wudao/ta.js:98` `me.is_busy = 1000`）。
+ *   量级在数百 ms ~ 数秒 ⇒ 本项目取 **15s** 为上限，任何来源都不超过它。
+ *   ★ 需要"更久不能动"的内容请用 `state`（状态系统）—— 别把 busy 当第二套状态用。
+ */
+export const BUSY_MAX_MS = 15_000;
+
 /** 可写的先天属性键。**收成闭集**：拼错（`st`、`maxMp_`）会当场报错而不是静默新建一个字段 */
 export const INNATE_KEYS = ['str', 'con', 'dex', 'int', 'maxMp'] as const;
 export type InnateKey = (typeof INNATE_KEYS)[number];
@@ -542,20 +554,85 @@ export abstract class Character extends Container implements PropHolder {
 
   // ── 忙碌（`busy`）────────────────────────────────────────────────────────
   // wushen 用 `busy` 做指令门禁（08 册 §8.2.4）。这里用带 TTL 的 TempStore 实现，
-  // 于是**不需要任何清理代码**：到点自然失效，`pruneTemp` 顺手回收。
+  // 于是**不需要任何清理代码**：到点自然失效，读路径顺手删除。
+  // ★ 订正（S11，2026-10-16 审查）：原注释写"`pruneTemp` 顺手回收"是**假的** ——
+  //   `pruneTemp` 当时全仓零调用点（项目还没有周期性的心跳调度器）。
+  //   真正在清理的是 `TempStore.ttlRemainingMs()` 的"到点即删"（它也是本类
+  //   `busyRemainingMs()` / `isBusy()` 的唯一读路径）。
   // `TTL` 也因此有了真实消费者（此前它只是"存了不用"的装饰）。
+  // ★ 写入口两档（E5，2026-10-16 拍板）：`setBusy` = **赋值**、`addBusy` = **叠加**，
+  //   两条路共用一个硬上界 `BUSY_MAX_MS`（15s）。**别把 busy 当长时状态用** ——
+  //   需要"更久不能动"的内容走 `state`；`busy` 只管短时动作锁。
+  // ★ 别与**属性** `busy` 混淆：`props.ts` 里的 `'busy'` 是 wushen 的"忙乱时间"
+  //   （技能侧加成，影响"该忙多久"），这里的 `BUSY_KEY` 是**当前剩余的忙乱锁**。
 
+  /**
+   * **赋值**：把忙乱剩余时间**设为** `ms`（超出 `BUSY_MAX_MS` 则钳到上限）。
+   *
+   * ★ 与 wushen 对齐（E5，2026-10-16 拍板）：原作就是赋值 ——
+   *   `os/char/chara_skill.js:367` `this.is_busy = buff.duration`、`:382` `= 0`；
+   *   `world/map/wudao/ta.js:98` `me.is_busy = 1000`。
+   *   旧实现是"在剩余时间上叠加"，症状是**重复触发无限延长**：一个每帧都重新赋
+   *   `duration` 的定身 buff，在本项目会一次比一次久（直到撞上 15s 上界），而原作
+   *   每次都回到 `duration`。⇒ "重设"用 `setBusy`、"延长"用 `addBusy`，语义写在调用点上。
+   *
+   * ★ 谁该调它（**当前无生产调用点**，等 Skill / 状态系统落地）：
+   *   ① 技能 / 逃跑的忙乱 buff —— 对应 wushen `add_status({is_busy:true, duration})`；
+   *   ② 地图 / 事件脚本里的定身 —— 对应 wushen `world/map/wudao/ta.js:98` 那种直接赋值。
+   *   ②那种"上一条还没完又触发一次"的场景，若语义是**延长**而不是**重设**，请用 `addBusy`。
+   */
   public setBusy(ms: number, nowMs: number = Date.now()): void {
-    if (!Number.isFinite(ms) || ms <= 0) {
-      throw new CharacterError(`setBusy 需要正的毫秒数，收到 ${String(ms)}`);
-    }
-    // 已在忙 → 在剩余时间上**叠加**（对应"被又打了一下，僵直更长"）
-    const remaining = this.busyRemainingMs(nowMs);
-    this.temp.setTemp(BUSY_KEY, true, remaining + ms, nowMs);
+    this.#assertBusyMs(ms, 'setBusy');
+    this.#armBusy(ms, nowMs);
   }
 
+  /**
+   * **叠加**：在当前**剩余**忙乱之上再加 `ms`（总时长同样受 `BUSY_MAX_MS` 钳制）。
+   *
+   * ★ 没在忙时等价于 `setBusy(ms)` —— "剩余为 0"是正常起点，不是错误。
+   * ★ 与 `setBusy` 的分工：`setBusy` = 从**现在**重新计时；`addBusy` = 在**已有剩余**上延长。
+   */
+  public addBusy(ms: number, nowMs: number = Date.now()): void {
+    this.#assertBusyMs(ms, 'addBusy');
+    this.#armBusy(this.busyRemainingMs(nowMs) + ms, nowMs);
+  }
+
+  /**
+   * 忙乱时长校验 —— **先于任何写入**，非法输入绝不污染既有状态。
+   *
+   * 两个边界分两档（不是一个）：
+   *   - **非法**：非有限（`NaN` / `Infinity`）或 ≤0 ⇒ **抛**。这些不是"多久"，是编程错误。
+   *     （想解除忙乱用 `clearBusy()`；`0` 不是"忙 0 秒"。）
+   *   - **过大**：有限但 > `BUSY_MAX_MS` ⇒ 在 `#armBusy` 里**钳到上限**，不抛。
+   *     忙乱时长常由内容/公式算出（如 `buff.duration`），超大值应当被限制住，
+   *     而不是让整条技能执行崩掉。
+   */
+  #assertBusyMs(ms: number, op: string): void {
+    if (!Number.isFinite(ms) || ms <= 0) {
+      throw new CharacterError(`${op} 需要正的有限毫秒数，收到 ${String(ms)}`);
+    }
+  }
+
+  /**
+   * 忙乱的**唯一写入口** —— `Math.min(…, BUSY_MAX_MS)` 只在这里出现一次，
+   * `setBusy` / `addBusy` 两条路因此不可能各自漏掉上界。
+   */
+  #armBusy(total: number, nowMs: number): void {
+    this.temp.setTemp(BUSY_KEY, true, Math.min(total, BUSY_MAX_MS), nowMs);
+  }
+
+  /**
+   * ★ 判据复用 `busyRemainingMs()`，**不自己去读 `ttlRemainingMs`**（2026-10-16 审查 S4）：
+   *   自己读的那版是 `ttlRemainingMs(...) > 0`，而 `busyRemainingMs()` 把非有限值钳成 0 ——
+   *   于是同一条"永不过期"的 busy 记录会同时得到
+   *   `isBusy() === true`（`Infinity > 0`）与 `busyRemainingMs() === 0`。
+   *   表现是面板显示"还需 0 毫秒"、而指令闸门永远拦着，两边都不报错。
+   *
+   *   ⇒ 同一个概念只许有一个答案。取 `busyRemainingMs()` 那一版还顺带定下了
+   *     "永不过期的 busy 视为**无效**"（僵直总有尽头，没有尽头的那个是脏数据）。
+   */
   public isBusy(nowMs: number = Date.now()): boolean {
-    return this.temp.ttlRemainingMs(BUSY_KEY, nowMs) > 0;
+    return this.busyRemainingMs(nowMs) > 0;
   }
 
   public busyRemainingMs(nowMs: number = Date.now()): number {

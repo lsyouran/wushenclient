@@ -59,6 +59,22 @@ export const DEFAULT_WS_HOST = '127.0.0.1';
 const WS_CLOSE_POLICY_VIOLATION = 1008;
 
 /**
+ * 归一化来源地址（N4）。
+ *
+ * ★ 为什么必须归一：同一台机器经 IPv6 回环连过来时，`remoteAddress` 是
+ *   **IPv4-mapped IPv6** 形态 `::ffff:127.0.0.1`，而它和 `127.0.0.1` 是同一个地址。
+ *   不归一的话，攻击者可以在两种写法之间来回切，**per-IP 上限直接失效**
+ *   （每条连接都算"新地址"）。
+ * ★ 空串 / undefined ⇒ 返回 `undefined`：交给 hub 判"这条连接不参与 per-IP"
+ *   （`NetConnection.peerAddress` 的契约）。
+ */
+export function normalizePeerAddress(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(raw);
+  return mapped === null ? raw : (mapped[1] ?? raw);
+}
+
+/**
  * 同源校验（CSWSH 防线）。
  *
  * ★ 浏览器发起 WebSocket 时**必定**带 `Origin`；且**不会**被页面的 JS 伪造成别的值。
@@ -101,6 +117,8 @@ class WsConnection implements NetConnection {
   public constructor(
     public readonly id: string,
     private readonly socket: WebSocket,
+    /** 来源地址（已归一，`normalizePeerAddress`）—— hub 的 per-IP 上限要用它 */
+    public readonly peerAddress?: string | undefined,
   ) {}
 
   public send(text: string): void {
@@ -124,8 +142,36 @@ class WsConnection implements NetConnection {
 
   public close(reason: string): void {
     // 1011 = 服务端内部原因；客户端只需知道"被要求断开"
-    this.socket.close(1011, reason);
+    // ★ 必须截断（N6，2026-10-16 审查）：>123 字节时 `ws` 的 `close()` 抛 `RangeError` ——
+    //   一旦抛，"关连接"这件事就**失败了**，异常顺着调用栈冒进入站处理，
+    //   落进 N1 那条崩溃路径（一个本该被踢掉的连接反而把进程带走）。
+    //   当前所有 detail 都 ≤87 字节（暂不可触发），但那是**潜伏**状态：多一条长 detail 就成真。
+    this.socket.close(1011, truncateCloseReason(reason));
   }
+}
+
+/**
+ * WS close reason 的**字节上限** —— `ws` 对 >123 字节的 reason 抛 `RangeError`（审查 N6）。
+ * ★ 留 0 字节余量：123 就是协议/库的硬限，取满即可（理由字符串越完整越好诊断）。
+ */
+export const WS_CLOSE_REASON_MAX_BYTES = 123;
+
+/**
+ * 把 close reason 截到字节上限之内（N6）。
+ *
+ * ★ 按**码点**逐步累加，而不是 `Buffer.subarray(...).toString('utf8')`：
+ *   后者会在多字节字符中间切断，产出替换字符（U+FFFD）—— 客户端那边看到一串乱码，
+ *   而且"断在半个汉字上"还会让长度比预期少 1–2 字节。
+ * ★ 必须按**字节**而不是字符数判：reason 里有中文时，123 个字符可能是 369 字节。
+ */
+export function truncateCloseReason(reason: string): string {
+  if (Buffer.byteLength(reason, 'utf8') <= WS_CLOSE_REASON_MAX_BYTES) return reason;
+  let out = '';
+  for (const ch of reason) {
+    if (Buffer.byteLength(out + ch, 'utf8') > WS_CLOSE_REASON_MAX_BYTES) break;
+    out += ch;
+  }
+  return out;
 }
 
 export interface WsServerOptions {
@@ -211,10 +257,12 @@ export function startWsServer(options: WsServerOptions): Promise<MudServer> {
       return;
     }
     const id = connIds.next();
-    const conn = new WsConnection(id, socket);
+    const conn = new WsConnection(id, socket, normalizePeerAddress(req.socket.remoteAddress));
     if (!hub.accept(conn)) {
-      // 服务器已满：给一个明确的关闭码（1013 = Try Again Later）
-      socket.close(1013, '服务器人数已满');
+      // 被拒的原因要**说清楚**（N4）：服务器满 与 同址连接过多 是两件事，
+      // 玩家的处置也不同（过会儿再来 vs 别多开）。两条都用 1013 = Try Again Later。
+      const refusal = hub.admissionRefusal(conn);
+      socket.close(1013, refusal === 'per-ip' ? '同一地址连接过多' : '服务器人数已满');
       connIds.release(id);
       return;
     }

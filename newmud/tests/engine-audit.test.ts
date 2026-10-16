@@ -30,7 +30,7 @@
  *      （第一次实测受害例：8 处把 `24 册 §5.3` 写成 `26 册 §5.3`，见 26 册 §29.3①）。
  *
  * 覆盖：
- *   A1 容器环 → `GameObject.room` 上溯无上界（**挂死**，不是报错）
+ *   A1 容器环 → `Container.addItem` 只挡自环 ⇒ 互环可造（2026-10-16 S6：已改为**写入侧**拒环）
  *   A2 三级分发第 ③ 级在「多词参数」下失效（目标匹配只认整串 args）
  *   A3 `SkillBook.load()` 同槽冲突不清理（与 `enable()` / `loadFromDef()` 行为不一致）
  *   A4 明文通道漏掉 C1 控制字符（U+0080–U+009F）→ 终端/日志注入面
@@ -38,8 +38,11 @@
  *   A6 `RecordingOutput` 无上限 → 长跑进程的内存单调增长
  *   A7 0 级技能仍贡献属性（含"与等级无关的常数型"）→ 记账式重算只看"属性值=0"、不看"等级=0"
  *
- * ⚠️ A1 的"变红"形态是**测试超时**（同步死循环），不是断言失败。
- *    所以修之前跑这条用例会挂到 timeout —— 这正是该缺陷的真实表现。
+ * ★ A1 的形态演进：初版缺陷是 `GameObject.room` 上溯无上界（变红形态 = **测试超时**）；
+ *   随后在 `room` getter 里补了 `seen` 兜底（不死循环了，但环仍能造）。
+ *   2026-10-16（S6）把判环提到**写入侧**（`addItem` 抛 ContainerError）⇒
+ *   现在这条用例断言的是"造环被拒"，而 `room` getter 的 `seen` 退化为
+ *   **纵深**（防历史/外部损坏的结构，不再由公开 API 触发）。
  */
 import { describe, expect, it } from 'vitest';
 
@@ -48,6 +51,7 @@ import type { EnableSlot } from '../shared/constants.js';
 import { checkPlaintext } from '../shared/protocol.js';
 import { asWorldId } from '../shared/ids.js';
 import { RECORDING_OUTPUT_LIMIT, RecordingOutput } from '../server/engine/character.js';
+import { ContainerError } from '../server/engine/base.js';
 import { CommandTable, dispatch } from '../server/engine/command.js';
 import { Npc } from '../server/engine/npc.js';
 import { Room } from '../server/engine/room.js';
@@ -84,28 +88,30 @@ function makeRoom(path: string): Room {
 // A1 · 容器环：A 装 B、B 装 A
 // ---------------------------------------------------------------------------
 
-describe('A1 容器环', () => {
-  it('互相嵌套时 room 不得挂死（返回 null / 抛出，而不是死循环）', () => {
+describe('A1 容器环（★ 2026-10-16 S6 后：**写入侧**拒环，不再靠 room getter 兜）', () => {
+  it('互环在**写入侧**就被拒（损坏结构进不去）', () => {
     const a = makeNpc('oid-a', 'pub/a');
     const b = makeNpc('oid-b', 'pub/b');
     a.addItem(b);
-    b.addItem(a); // 自环已被 addItem 挡住，但**互环**没有
-
-    // 修复前：这里是一个无上界的 while → 同步死循环 → 用例超时。
-    expect(a.room).toBeNull();
+    // 修复前：这一句能过 —— 互环被造出来，靠 `room` getter 的 `seen` 才不至于死循环
+    // （结构已损坏，只是不挂死；`Character.go()` 会看到 `room` 非 Room 而回 'blocked'）。
+    // 修复后（S6）：`Container.addItem` 沿 `envOf` 上溯祖先链，命中即抛。
+    expect(() => b.addItem(a)).toThrow(ContainerError);
+    // 抛错发生在任何可变状态被改**之前** ⇒ 第一次的嵌套保持完好
+    expect(b.environment).toBe(a);
+    expect(a.environment).toBeNull();
   });
 
-  it('三元环（A→B→C→A）同样不挂死', () => {
+  it('三元环（A→B→C→A）同样在写入侧被拒', () => {
     const a = makeNpc('oid-a2', 'pub/a2');
     const b = makeNpc('oid-b2', 'pub/b2');
     const c = makeNpc('oid-c2', 'pub/c2');
     a.addItem(b);
     b.addItem(c);
-    c.addItem(a);
-    expect(a.room).toBeNull();
+    expect(() => c.addItem(a)).toThrow(ContainerError);
   });
 
-  it('正常嵌套链仍然能找到房间（不能被上界误伤）', () => {
+  it('正常嵌套链仍然能找到房间（写入侧判环不误伤正常移动）', () => {
     const room = makeRoom('yz/audit1');
     const a = makeNpc('oid-a3', 'pub/a3');
     const b = makeNpc('oid-b3', 'pub/b3');

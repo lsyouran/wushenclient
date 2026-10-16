@@ -48,7 +48,26 @@ registerHandler('loginerror', (p) => {
   const code = asString(p['code']);
   const msg = asString(p['msg']);
   const text = msg === '' ? errorTextOf(code) : msg;
-  // ★ 被拒≠掉线：人还在认证界面，要看得到原因（连接由下一次提交时统一收回）
+
+  // ★ 这条帧**不止在登录期到达**（2026-10-16 审查 S2）。
+  //   服务端的 `session.ts#errorPacket` 把**所有**错误都包成 `loginerror`
+  //   ——连"限流被拒"这种跟登录毫无关系的拒绝也是它。典型路径是
+  //   「游戏中被限流」：`RATE_LIMIT_PER_5S = 20`，玩家连点地图格子就能在 5 秒内
+  //   打出第 21 帧，服务端回 `RATE_LIMITED` 且 **`close=false`** —— 连接完好、
+  //   角色在线。旧实现无条件 `showScreen('auth')`，于是人被甩回登录页、
+  //   还写着"登录失败"，跟实际发生的事对不上。
+  //
+  //   ⇒ 判据应当是"**此刻是不是在游戏里**"，而不是"这个包叫什么名字"。
+  //     治本修法是别复用 `loginerror` 通道（要动协议 + G2 台账），属下一批；
+  //     本批先把"认证期"与"游戏中"两条路分开。
+  if (state.loggedIn) {
+    // 人还在江湖里 ⇏ 让他留下，把原因说到他正在看的消息流里。
+    //   ★ 不走 `setAuthStatus`：那一栏在 `#auth` 屏上，此刻不可见，
+    //     写了既看不到、又污染下一次回认证界面时的显示。
+    pushLine(`【拒绝】${text}（${code}）`, 'err');
+    return;
+  }
+
   setAuthBusy(false);
   setAuthStatus(`登录失败：${text}（${code}）`, 'error');
   showScreen('auth');

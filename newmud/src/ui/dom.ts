@@ -84,6 +84,28 @@ export function clear(node: Element): void {
   node.replaceChildren();
 }
 
+/**
+ * 给"声明成按钮"的元素（`role="button" tabindex="0"`）绑**完整激活**：`click` + 键盘（Enter/Space）。
+ *
+ * ★ 为什么要有这个助手：项目自己立过规矩（`ui/input.ts` 的 `#channel`）——
+ *   声明了能点却**只绑 `click`**，键盘用户 Tab 过去按 Enter/Space 毫无反应，
+ *   而读屏器会照着 `role="button"` 播报"按钮"。比不声明更糟。
+ *   （2026-10-16 审查 L2：`#mapBtn` / `#dlgClose` 正是这个形态。）
+ *
+ * ★ 把 `click` 也收在这里（而不是让调用方再写一行）：两处漏一处就退回原样，
+ *   收在一处才谈得上"这个元素是可激活的"只有一个定义。
+ *
+ * ★ `Space` 必须 `preventDefault()`：否则页面会跟着滚动。
+ */
+export function onActivate(node: HTMLElement, fn: () => void): void {
+  node.addEventListener('click', () => fn());
+  node.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    ev.preventDefault();
+    fn();
+  });
+}
+
 export function on<K extends keyof HTMLElementEventMap>(
   node: HTMLElement,
   type: K,

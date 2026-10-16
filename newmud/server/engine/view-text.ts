@@ -36,6 +36,8 @@
  * 缺武器时 `"手"` 本来就是这个公式在 wushen 下的正确输出。
  */
 
+import { neutralizePlayerText } from '@shared/player-text.js';
+
 /** 本人视角：`$N` / `$P` 是"你" */
 export const VIEW_SELF = 1;
 /** 目标视角：`$n` / `$p` 是"你" */
@@ -72,6 +74,10 @@ function call3Of(who: ViewSubject | null): string {
   return who.call3?.() ?? who.name;
 }
 
+// ---------------------------------------------------------------------------
+// ★ 每个`$X`替换进去的值都先中和（2026-10-16 审查 S1 的第二道防线）
+// ---------------------------------------------------------------------------
+
 /**
  * 把一条带 `$` 占位符的文案渲染成**某个视角**看到的那一句。
  *
@@ -94,6 +100,12 @@ export function renderViewText(
   if (text.length < 3) return text;
 
   const out: string[] = [];
+  // ★ 每个**替换进去的值**都先中和：名字 / 称谓 / 武器名都来自数据，不是模板的一部分。
+  //   走 `pushValue` 而不是 `out.push` 是有意的 —— 将来新增占位符时少一处记得 './neutralize'。
+  const pushValue = (value: string): void => {
+    out.push(neutralizePlayerText(value));
+  };
+
   let start = 0;
   for (let i = 0; i < text.length; i += 1) {
     if (text[i] !== '$') continue;
@@ -102,29 +114,29 @@ export function renderViewText(
     start = i + 1;
     switch (ch) {
       case 'N':
-        out.push(type === VIEW_SELF ? '你' : me.name);
+        pushValue(type === VIEW_SELF ? '你' : me.name);
         break;
       case 'n':
-        out.push(type === VIEW_TARGET ? '你' : (target?.name ?? ''));
+        pushValue(type === VIEW_TARGET ? '你' : (target?.name ?? ''));
         break;
       case 'P':
-        out.push(type === VIEW_SELF ? '你' : call3Of(me));
+        pushValue(type === VIEW_SELF ? '你' : call3Of(me));
         break;
       case 'p':
-        out.push(type === VIEW_TARGET ? '你' : call3Of(target));
+        pushValue(type === VIEW_TARGET ? '你' : call3Of(target));
         break;
       case 'l':
-        out.push(me.attackPartName?.() ?? '');
+        pushValue(me.attackPartName?.() ?? '');
         break;
       case 'W':
       case 'w':
-        out.push(me.weaponName?.() || '手');
+        pushValue(me.weaponName?.() || '手');
         break;
       case 'i':
-        out.push(target?.weaponName?.() || '手');
+        pushValue(target?.weaponName?.() || '手');
         break;
       case 'T':
-        out.push(me.throwingName?.() ?? '');
+        pushValue(me.throwingName?.() ?? '');
         break;
       default:
         break;

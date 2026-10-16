@@ -1,5 +1,6 @@
 import { CHAT_MAX_LENGTH, CHAT_TOO_LONG } from '@shared/constants.js';
 import { defineCommand } from '@engine/world/define.js';
+import { neutralizePlayerText } from '@shared/player-text.js';
 
 /**
  * `chat` / `shout` / `yell` —— 向**全服**喊话（频道 `chat`）。
@@ -48,6 +49,8 @@ defineCommand('chat/shout', {
       me.notify(CHAT_TOO_LONG);
       return;
     }
-    me.sendChannel('chat', content);
+    // ★ 同上（S1）。`chat` 的受众是**全服**（`CHANNEL_SCOPE.chat === 'world'`），
+    //   所以这里是三处里波及面最大的一处 —— 一次喊话给所有在线的人植一个按钮。
+    me.sendChannel('chat', neutralizePlayerText(content));
   },
 });

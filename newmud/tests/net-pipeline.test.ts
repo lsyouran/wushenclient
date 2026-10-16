@@ -18,6 +18,7 @@ import {
   CONNECTION_IDLE_TIMEOUT_MS,
   MAX_BUFFERED_BYTES,
   MAX_CONNECTIONS,
+  MAX_CONNECTIONS_PER_IP,
   MAX_MESSAGE_BYTES,
   MAX_OUTBOUND_QUEUE,
   RATE_LIMIT_PER_5S,
@@ -170,7 +171,10 @@ class FakeConn implements NetConnection {
    *   假连接把它做成可写字段，于是"积压"这个运行时状态在单测里**够得着**。
    */
   public buffered = 0;
-  public constructor(public readonly id: string) {}
+  public constructor(
+    public readonly id: string,
+    public readonly peerAddress?: string,
+  ) {}
 
   public bufferedBytes(): number {
     return this.buffered;
@@ -184,7 +188,11 @@ class FakeConn implements NetConnection {
   }
 }
 
-function makeHub(overrides: Partial<HubHooks> = {}, maxConnections = MAX_CONNECTIONS) {
+function makeHub(
+  overrides: Partial<HubHooks> = {},
+  maxConnections = MAX_CONNECTIONS,
+  maxConnectionsPerIp = MAX_CONNECTIONS_PER_IP,
+) {
   const calls = {
     commands: [] as string[],
     logins: [] as Array<[string, string]>,
@@ -194,6 +202,7 @@ function makeHub(overrides: Partial<HubHooks> = {}, maxConnections = MAX_CONNECT
   const hub = new ConnectionHub({
     now: () => T0,
     maxConnections,
+    maxConnectionsPerIp,
     hooks: {
       onCommand: (_c, command) => {
         calls.commands.push(command);
@@ -361,5 +370,63 @@ describe('连接上限 / 背压 / 空闲踢线', () => {
     expect(calls.commands).toEqual(['look']);
     expect(calls.pings).toEqual([7]);
     expect(calls.logins).toEqual([['t'.repeat(20), 'r9']]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N4（2026-10-13 体检 / 2026-10-16 审查附录）：按**来源地址**限连接
+// ---------------------------------------------------------------------------
+//
+// ★ 全局上限（`MAX_CONNECTIONS`）拦不住这个：一个地址开 50 条连接赖在起始房，
+//   就把**房间容量**与**全局名额**一起吃掉了 —— 之后所有人都登不上，
+//   而服务端没有任何踢人手段。相对收益极高、代价极低，是典型的低成本 DoS。
+//
+// ★ 没有来源地址的连接（旧适配层 / 本文件的假连接）**不参与**这项判定：
+//   与 `bufferedBytes()` 同一条原则 —— **量不到的东西不拿来当判据**，
+//   否则"实现不全的适配层"会被一律打死（那是拿兼容性换一个假的安全感）。
+describe('N4 · 按来源地址限连接', () => {
+  it('同一地址接满上限后拒绝下一条；换一个地址照常可接', () => {
+    const { hub } = makeHub({}, MAX_CONNECTIONS, 2);
+    expect(hub.accept(new FakeConn('a1', '10.0.0.1'))).toBe(true);
+    expect(hub.accept(new FakeConn('a2', '10.0.0.1'))).toBe(true);
+    // 第 3 条同址 ⇒ 拒
+    expect(hub.accept(new FakeConn('a3', '10.0.0.1'))).toBe(false);
+    // ★ 对照组：别的地址不受影响（证明拒的是"这一条"而不是"一律拒"）
+    expect(hub.accept(new FakeConn('b1', '10.0.0.2'))).toBe(true);
+    expect(hub.size).toBe(3);
+  });
+
+  it('★ 拒绝原因可区分：服务器满 vs 同址过多（调用方要发不同的话）', () => {
+    const perIp = makeHub({}, MAX_CONNECTIONS, 1).hub;
+    perIp.accept(new FakeConn('i1', '10.0.0.9'));
+    const third = new FakeConn('i2', '10.0.0.9');
+    expect(perIp.admissionRefusal(third)).toBe('per-ip');
+
+    const global = makeHub({}, 1, MAX_CONNECTIONS).hub;
+    global.accept(new FakeConn('g1', '10.0.0.10'));
+    expect(global.admissionRefusal(new FakeConn('g2', '10.0.0.11'))).toBe('full');
+  });
+
+  it('forget() 释放地址名额（否则"掉线重连"会被自己的旧账挡住）', () => {
+    const { hub } = makeHub({}, MAX_CONNECTIONS, 1);
+    const a = new FakeConn('r1', '10.0.0.3');
+    expect(hub.accept(a)).toBe(true);
+    expect(hub.accept(new FakeConn('r2', '10.0.0.3'))).toBe(false);
+    hub.forget(a);
+    expect(hub.accept(new FakeConn('r3', '10.0.0.3'))).toBe(true);
+  });
+
+  it('【反向锚点】没有来源地址的连接不被 per-IP 上限挡（量不到就不判）', () => {
+    const { hub } = makeHub({}, MAX_CONNECTIONS, 1);
+    for (let i = 0; i < 5; i += 1) {
+      expect(hub.accept(new FakeConn(`n${String(i)}`)), `第 ${String(i + 1)} 条无地址连接`).toBe(true);
+    }
+  });
+
+  it('【反向锚点】默认上限足够宽：一条地址连 1 条当然通过（别把上限写成 1）', () => {
+    const { hub } = makeHub();
+    expect(hub.maxConnectionsPerIp).toBe(MAX_CONNECTIONS_PER_IP);
+    expect(MAX_CONNECTIONS_PER_IP).toBeGreaterThan(1);
+    expect(hub.accept(new FakeConn('d1', '10.0.0.4'))).toBe(true);
   });
 });

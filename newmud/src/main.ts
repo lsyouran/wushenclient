@@ -14,6 +14,8 @@
  */
 
 import { MudClient } from './net/client.js';
+import { LOGIN_TIMEOUT_MS, LoginWatchdog } from './net/login-watchdog.js';
+import { ReconnectPolicy, decideOnClose } from './net/reconnect.js';
 import { dispatchPacket, setErrorSink } from './process/index.js';
 import { bindStream, clearStream, pushLine, pushRule, setStreamRunner } from './ui/stream.js';
 import { bindRoom, renderActionBar, renderAll, renderScene } from './ui/room.js';
@@ -30,7 +32,6 @@ import {
 } from './ui/input.js';
 import { bindPanel, closePanel, closeWarn, openPanel, resetPanels, setPanelRunner } from './ui/panel.js';
 import { renderStatus } from './ui/status.js';
-import { setCmdRunner } from './ui/markup.js';
 import {
   bindAuth,
   prefillName,
@@ -51,14 +52,44 @@ import { rememberRole, resetWorldFacts, state } from './state.js';
 
 /** 本次要登录的名号；`onOpen` 用它拼 `login` 包 */
 let pendingName: string | null = null;
+
 /**
- * 这一次 `onClose` 是**我们自己**关的（**登出**），不是掉线 —— 别拿它当异常报。
+ * 掉线后的退避重连（F3，2026-10-16 审查）。
  *
- * ⚠️ 旧注释写的是"（重连/登出）"，但**前端目前没有重连**（2026-10-14 复查确认：
- * `src/` 下无任何 reconnect / 退避重试实现，`onClose` 一律 `backToAuth()`）。
- * 重连归账号批次 ⇒ 注释已从"重连/登出"改为"登出"，避免读者以为有这条路。
+ * ★ 策略是纯的（`net/reconnect.ts`，可单测）；**定时器留在这里** —— 它是接线层的事。
+ * ★ 重连成功后 `onOpen` 会拿 `pendingName` 重新发 `login`，所以重连途中**不清**它。
  */
-let ignoreNextClose = false;
+const reconnectPolicy = new ReconnectPolicy();
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer === null) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+/**
+ * 登录看门狗（F2，2026-10-16 审查）。
+ *
+ * 原先 `onOpen` 发出 `login` 之后**没有任何出口**：服务端若握手成功却不回 `login`
+ * （崩了 / 卡了 / 版本不匹配），界面永久停在"正在进入江湖……"，玩家只能刷新页面。
+ */
+const loginWatchdog = new LoginWatchdog(LOGIN_TIMEOUT_MS, () => {
+  client.close();
+  pendingName = null;
+  backToAuth();
+  setAuthStatus('服务器没有响应登录请求，请稍后重试。', 'error');
+});
+
+// ★ 这里原先有一个 `ignoreNextClose` 标记，用来区分"自己关的"与"掉线"
+//   （2026-10-16 审查 S3 已移除）。它的问题是**会被别人消耗掉**：
+//   多条 socket 并存时（而这在 CONNECTING 窗口里很容易发生 —— 见 `beginSession`
+//   的说明），孤儿那条的 `close` 会先把标记吃掉，于是**真正的掉线**反而被当成
+//   自愿关闭、一声不吭；反过来，孤儿迟到的 `close` 也会把正在游戏的玩家带回认证屏。
+//
+//   ⇒ 现在这件事由**socket 身份**判定（`src/net/client.ts` 的 `#isCurrent()`）：
+//     只有"当前被跟踪的那条"的 `close` 才算数。每条连接对自己负责，
+//     不需要一个会被别人抄走的全局标记。
 
 // ---------------------------------------------------------------------------
 // 发指令（唯一出口）
@@ -91,28 +122,55 @@ function hint(text: string): void {
 const client = new MudClient({
   onOpen: () => {
     state.connected = true;
+    // 连上了 ⇒ 取消待触发的重连、退避归零（下一次断线从最短延迟重新开始）
+    clearReconnectTimer();
+    reconnectPolicy.reset();
     if (pendingName === null) return;
     setAuthStatus('已连接，正在进入江湖……', 'busy');
     client.sendPacket({ type: 'login', token: ensureToken(), role_id: pendingName });
+    // ★ 发完 login 就开始盯表（F2）：服务端迟迟不回，到点把玩家放回认证屏并说明原因
+    loginWatchdog.arm();
   },
   onClose: (code, reason) => {
-    if (ignoreNextClose) {
-      ignoreNextClose = false;
+    // ★ 能走到这里的一定是"当前那一条"断了（作废过的 socket 的事件进不来，
+    //   见 `src/net/client.ts` 的身份判定）⇒ 不用再猜是不是自己关的。
+    const wasPlaying = state.loggedIn;
+    const why = reason === '' ? '' : ` ${reason}`;
+    state.connected = false;
+    loginWatchdog.disarm(); // 断线本身就是"登录请求有结果了"的一种：别再报超时
+
+    // ★ 该不该重连只有一个判据（`net/reconnect.ts#decideOnClose`，可单测）
+    const decision = decideOnClose(wasPlaying, reconnectPolicy);
+
+    if (decision.kind === 'report-only') {
+      // 认证期断线（没进过游戏）：多半是没启动服务 ⇒ 如实报错，不浪费重试次数
+      pendingName = null;
+      backToAuth();
+      setAuthStatus(`无法连接服务器（${code}${why}）。请确认服务已启动。`, 'error');
       return;
     }
-    const wasPlaying = state.loggedIn;
-    state.connected = false;
-    pendingName = null;
+
+    if (decision.kind === 'give-up') {
+      pendingName = null;
+      reconnectPolicy.reset();
+      backToAuth();
+      setAuthStatus(`与服务器断开（${code}${why}），重连多次未成功，请重新进入。`, 'error');
+      return;
+    }
+
+    // 曾在游戏里断线 ⇒ 回认证屏等一会儿再连（`pendingName` 留给 `onOpen` 重新发 login）。
+    //   ⚠️ 当前服务端**没有存档**（T12 未落地）⇒ 重连等于开一个新会话，
+    //      角色状态不会恢复（见 26 册 §14.6 缺口 2）。这条提示如实说"重连"，不说"恢复到原处"。
     backToAuth();
-    const why = reason === '' ? '' : ` ${reason}`;
-    setAuthStatus(
-      wasPlaying
-        ? `与服务器断开（${code}${why}），请重新进入。`
-        : `无法连接服务器（${code}${why}）。请确认服务已启动。`,
-      'error',
-    );
+    setAuthStatus(`与服务器断开，${String(Math.round(decision.delayMs / 1000))} 秒后重连……`, 'busy');
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      client.connect(serverUrl());
+    }, decision.delayMs);
   },
   onPacket: (type, payload) => {
+    // ★ 登录请求有结果了（成功 / 失败）⇒ 停表（F2）
+    if (type === 'login' || type === 'loginerror') loginWatchdog.disarm();
     const handled = dispatchPacket(type, payload);
     // ★ 没 handler 的包必须**说出来**：否则协议漂移表现为"某些功能静默失效"
     if (!handled) pushLine(`【未处理的包】${type}`, 'err');
@@ -171,21 +229,32 @@ function beginSession(mode: 'login' | 'register', rawName: string): void {
 
   setAuthBusy(true);
   setAuthStatus(`正在连接 ${serverUrl()} ……`, 'busy');
-  // 旧连接还在就先收回（连一次就是一条 socket，别让它悬着）
-  if (client.connected) {
-    ignoreNextClose = true;
-    client.close();
-  }
+
+  // ★ 正在连接途中 ⇒ **忽略**这次提交（2026-10-16 审查 S3）。
+  //   判据必须是 `occupied`（含 CONNECTING）而不是 `connected`（只认 OPEN）：
+  //   握手未完成的那段时间里旧写法会放行，于是每一条提交都再开一条 socket。
+  //   而输入框的 Enter 通道不受"按钮已 disable"约束（`ui/auth.ts` 只 disable 按钮），
+  //   按住 Enter 几秒就能造出几十条 —— 服务端那边每条都占着一个名额。
+  //   ⇒ 收口的落点选在这里而不是 `ui/auth.ts`：Enter 与按钮两条入口都归到本函数，
+  //     一处拦住，不会出现"按钮挡住了、Enter 没挡住"的口径分家。
+  // ★ 玩家主动重新进入 ⇒ 清掉挂着的重连、退避归零（F3）：他刚才的意思就是"现在就试"
+  clearReconnectTimer();
+  reconnectPolicy.reset();
+
+  if (client.occupied) return;
+
   client.connect(serverUrl());
 }
 
 /** 登出 / 换号：收回连接，回到认证界面 */
 function logout(): void {
   const wasPlaying = state.loggedIn;
-  if (client.connected) {
-    ignoreNextClose = true;
-    client.close();
-  }
+  // ★ 主动登出 ⇒ 取消挂着的重连（F3）：别让"我退出了"过一会儿又被自动连回去
+  clearReconnectTimer();
+  reconnectPolicy.reset();
+  loginWatchdog.disarm();
+  // 收连接不需要判状态：`close()` 对"没连 / 还在握手"都是幂等的（见 `MudClient`）
+  client.close();
   pendingName = null;
   backToAuth();
   setAuthStatus(wasPlaying ? '已退出江湖。' : '尚未连接', 'idle');
@@ -261,8 +330,10 @@ function bind(): void {
   setStreamRunner(run);
   bindStream();
 
-  // ⑦ 服务端文本里的 `<CMD>` 标签点了也要能执行
-  setCmdRunner(run);
+  // ⑦ 这里原先还有一句 `setCmdRunner(run)` —— 已随 `<CMD>` 一并删除（审查 S1）。
+  //    服务端**自由文本**里的按钮已不存在：可点指令只有 `CmdItem` 一条路
+  //    （`cmds` / `actions` 帧、`showWarn`、`openPanel`、消息流的命令行），
+  //    它们是数据与显示分离的，玩家文本掺不进去。见 `src/ui/markup.ts` 的 `§CMD`。
 
   // ⑧ Esc 一键收场（浮层 → 面板 → 提示框）
   document.addEventListener('keydown', (ev) => {

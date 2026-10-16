@@ -39,6 +39,7 @@ import {
   CONNECTION_IDLE_TIMEOUT_MS,
   MAX_BUFFERED_BYTES,
   MAX_CONNECTIONS,
+  MAX_CONNECTIONS_PER_IP,
   MAX_OUTBOUND_QUEUE,
 } from '@shared/constants.js';
 import { SlidingWindowRateLimiter } from './rate-limit.js';
@@ -56,6 +57,15 @@ export class HubError extends Error {
  */
 export interface NetConnection {
   readonly id: string;
+  /**
+   * 来源地址（IP）。**可选**：能报就报（ws 适配层报 `remoteAddress`）。
+   *
+   * ★ 它的唯一用途是 `accept()` 的 **per-IP 连接数上限**（N4）。
+   * ★ 报不出来（旧适配层 / 测试夹具）⇒ 该连接**不参与** per-IP 判定，
+   *   而不是"当作同一个未知地址、一起挤一个名额" —— 后者会拿兼容性换一个假的安全感。
+   *   （与 `bufferedBytes` 同一条原则：判据只建在有读数的地方。）
+   */
+  readonly peerAddress?: string | undefined;
   /** 真正把一帧发出去（hub 已做完大小守卫，适配层不必再判） */
   send(text: string): void;
   /** 关闭。`reason` 用于日志（不发给客户端） */
@@ -109,6 +119,8 @@ export interface HubOptions {
   readonly limiter?: SlidingWindowRateLimiter;
   /** 覆盖 `MAX_CONNECTIONS`（测试用） */
   readonly maxConnections?: number;
+  /** 覆盖 `MAX_CONNECTIONS_PER_IP`（测试用） */
+  readonly maxConnectionsPerIp?: number;
   /** 覆盖 `MAX_BUFFERED_BYTES`（测试用） */
   readonly maxBufferedBytes?: number;
   /** 覆盖 `CONNECTION_IDLE_TIMEOUT_MS`（测试用） */
@@ -118,10 +130,13 @@ export interface HubOptions {
 
 export class ConnectionHub {
   readonly #conns = new Map<string, ConnRecord>();
+  /** 来源地址 → 在册连接数（N4）。只在 `accept()` +1、只在 `forget()` -1 */
+  readonly #perPeer = new Map<string, number>();
   readonly #limiter: SlidingWindowRateLimiter;
   readonly #hooks: HubHooks;
   readonly #now: () => number;
   readonly #maxConnections: number;
+  readonly #maxConnectionsPerIp: number;
   readonly #maxBufferedBytes: number;
   readonly #idleTimeoutMs: number;
 
@@ -130,6 +145,7 @@ export class ConnectionHub {
     this.#now = options.now ?? (() => Date.now());
     this.#limiter = options.limiter ?? new SlidingWindowRateLimiter();
     this.#maxConnections = options.maxConnections ?? MAX_CONNECTIONS;
+    this.#maxConnectionsPerIp = options.maxConnectionsPerIp ?? MAX_CONNECTIONS_PER_IP;
     this.#maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.#idleTimeoutMs = options.idleTimeoutMs ?? CONNECTION_IDLE_TIMEOUT_MS;
   }
@@ -140,6 +156,10 @@ export class ConnectionHub {
 
   public get maxConnections(): number {
     return this.#maxConnections;
+  }
+
+  public get maxConnectionsPerIp(): number {
+    return this.#maxConnectionsPerIp;
   }
 
   /** 空闲判定窗口（测试与运维用；来源是 `CONNECTION_IDLE_TIMEOUT_MS` 或注入值） */
@@ -178,20 +198,44 @@ export class ConnectionHub {
   }
 
   /**
-   * 接入一条连接。已达上限返回 **false**（调用方应当直接关闭它）。
+   * **准入判定**：这条连接现在会被拒吗？拒的话是哪种原因？
+   *
+   * ★ 单独一个方法（而不是让 `accept()` 返回联合类型）：已有调用方与测试都按
+   *   `boolean` 用 `accept()`，改返回类型会打穿一大片；而"为什么被拒"只在
+   *   **真正要关连接**的那一处需要（`ws-server.ts` 要发不同的话给玩家）。
+   * ★ 纯查询、不改状态 ⇒ 可以安全地在 `accept()` 失败**之后**再调一次。
+   */
+  public admissionRefusal(conn: NetConnection): 'full' | 'per-ip' | null {
+    if (this.#conns.size >= this.#maxConnections) return 'full';
+    const peer = conn.peerAddress;
+    if (peer !== undefined && this.#peerCount(peer) >= this.#maxConnectionsPerIp) return 'per-ip';
+    return null;
+  }
+
+  #peerCount(peer: string): number {
+    return this.#perPeer.get(peer) ?? 0;
+  }
+
+  /**
+   * 接入一条连接。已被拒（全服满 / 同址过多）返回 **false**（调用方应直接关闭它）。
    * 重名 id 视为程序错误（连接 id 必须唯一）。
    */
   public accept(conn: NetConnection): boolean {
     if (this.#conns.has(conn.id)) {
       throw new HubError(`连接 id 重复：${conn.id}`);
     }
-    if (this.#conns.size >= this.#maxConnections) return false;
+    if (this.admissionRefusal(conn) !== null) return false;
     this.#conns.set(conn.id, {
       conn,
       outbound: [],
       lastSeenMs: this.#now(),
       closed: false,
     });
+    // ★ 地址计数与连接表**同生共死**：只在这里 +1、只在 `forget()` -1，
+    //   中间没有任何别的写入口 ⇒ 不会出现"表里没人、计数还挂着"（那会让
+    //   某个地址被永久拒之门外）。
+    const peer = conn.peerAddress;
+    if (peer !== undefined) this.#perPeer.set(peer, this.#peerCount(peer) + 1);
     return true;
   }
 
@@ -326,6 +370,15 @@ export class ConnectionHub {
     rec.outbound.length = 0;
     this.#conns.delete(conn.id);
     this.#limiter.forget(conn.id);
+    // 地址计数同步释放（与 `accept()` 配对）。计数归零就删键，
+    // 免得 `#perPeer` 随"曾经来过的地址数"单调增长 —— 那本身就是一条 DoS 路径
+    // （与上面 `limiter.forget` 同一个理由）。
+    const peer = rec.conn.peerAddress;
+    if (peer !== undefined) {
+      const left = this.#peerCount(peer) - 1;
+      if (left <= 0) this.#perPeer.delete(peer);
+      else this.#perPeer.set(peer, left);
+    }
     this.#hooks.onClose?.(conn);
     return true;
   }

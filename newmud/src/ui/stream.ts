@@ -145,7 +145,10 @@ export function pushCommands(cmds: readonly CmdItem[]): void {
 
 /**
  * 点消息流里的命令按钮 → 发指令。
- * 由 `main.ts` 注入（与面板 / `<CMD>` 标签同一个 `run()`，不另开出口）。
+ *
+ * ★ 这些按钮全部由 `CmdItem` 生成（`appendCommands`，文案走 `textContent`、
+ *   指令走 `dataset.cmd`），**不是**解析服务端文本里的标签得到的 ——
+ *   自由文本里的 `<CMD>` 已随 S1 删除，见 `src/ui/markup.ts` 的 `§CMD`。
  */
 let cmdRunner: (cmd: string) => void = () => {
   /* 未接线时静默：按钮最多是点不动，不该抛错 */

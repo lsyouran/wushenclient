@@ -24,13 +24,21 @@ import { parseArgs } from '../server/cli.js';
 import { PROJECT_ROOT } from '../server/paths.js';
 import {
   DEFAULT_INDEX_PATH,
+  SECURITY_HEADERS,
   createWebServer,
   guessContentType,
   resolveRequestPath,
 } from '../server/static.js';
+import { MAX_PLAINTEXT_CHARS } from '../shared/constants.js';
+import { ROLE_NAME_MAX_LENGTH } from '../shared/protocol.js';
 
 const open: Server[] = [];
 let game: GameServer | null = null;
+
+/** 源码树里的首页原文（S10 / L1 都要拿它做静态检查） */
+function indexHtml(): string {
+  return readFileSync(join(PROJECT_ROOT, 'src', 'index.html'), 'utf8');
+}
 
 async function listen(rootDir: string, indexPath?: string): Promise<string> {
   const server = createWebServer({
@@ -260,5 +268,122 @@ describe('产物布局对账', () => {
     expect(DEFAULT_INDEX_PATH).toBe(to.replace(/^dist\/web\//, ''));
     // 缺省产物根（CLI）+ 首页 = 构建真的写到的那条绝对路径
     expect(join(parseArgs([]).webRoot, DEFAULT_INDEX_PATH)).toBe(join(PROJECT_ROOT, to));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S10（2026-10-16 审查）：输入框没有 `maxlength`
+// ---------------------------------------------------------------------------
+//
+// 四个文本输入框原先**都没有** `maxlength` —— 玩家可以粘贴任意长的文本。
+// 后果不是崩溃，而是"报错说不到点上"：超长输入被服务端的明文上限拒掉后，
+// 走 `loginerror` 通道把玩家甩回登录页（见审查 S2/S10），界面上也看不出"太长"。
+//
+// ★ HTML 里写不出 `import { … }`，所以这里必须**抄**一份数字 ——
+//   但"抄"不能没人看着：本组断言把"HTML 的 maxlength == 服务端常量"钉住，
+//   改常量却忘了改 HTML ⇒ 这里红。
+describe('S10 · 输入框 maxlength 必须与服务端常量一致', () => {
+  const html = indexHtml;
+
+  /** 取指定 id 的整个 `<input …>` 标签（属性跨行，所以用 `[^>]*`） */
+  function inputTag(source: string, id: string): string {
+    const m = new RegExp(`<input\\b[^>]*\\bid="${id}"[^>]*>`, 's').exec(source);
+    if (m === null) throw new Error(`找不到 id="${id}" 的 input —— 改了 id 请同步本测试`);
+    return m[0];
+  }
+
+  it('★ 四个输入框的 maxlength 与各自的上限常量一一对应', () => {
+    const src = html();
+    const expected: ReadonlyArray<readonly [string, number]> = [
+      // 名号：创角/登录名 → 与服务端 `isRoleName` 同一上限
+      ['loginName', ROLE_NAME_MAX_LENGTH],
+      ['regName', ROLE_NAME_MAX_LENGTH],
+      // 指令框与聊天框提交的都是"一条指令" → 与明文通道上限同一口径
+      //   （聊天正文另有 CHAT_MAX_LENGTH=200，由服务端在 say/shout/tell 里判）
+      ['cmdInput', MAX_PLAINTEXT_CHARS],
+      ['chatInput', MAX_PLAINTEXT_CHARS],
+    ];
+    for (const [id, limit] of expected) {
+      const tag = inputTag(src, id);
+      const m = /maxlength="(\d+)"/.exec(tag);
+      expect(m, `${id} 缺 maxlength`).not.toBeNull();
+      expect(Number(m?.[1]), `${id} 的 maxlength 与服务端常量不符`).toBe(limit);
+    }
+  });
+
+  it('★ 不存在"没有 maxlength 的文本输入框"（漏一个就回到无限长输入）', () => {
+    const src = html();
+    const inputs = [...src.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
+    expect(inputs.length).toBeGreaterThan(0); // 死提取守卫：一个都没提出来说明正则失效
+
+    const missing = inputs
+      .filter((t) => !/\bmaxlength="/.test(t))
+      .map((t) => /id="([^"]+)"/.exec(t)?.[1] ?? '(无 id)');
+    expect(missing, `这些输入框缺 maxlength：${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// L1（2026-10-16 审查）：静态服务器缺安全响应头
+// ---------------------------------------------------------------------------
+//
+// ★ 为什么"开发期无所谓"仍然要补：`--host 0.0.0.0` 是对外暴露那条路径，
+//   而它今天就存在（N2 修完后默认绑 127.0.0.1，但 `--host` 是个开关）。
+//   缺 `frame-ancestors` / `X-Frame-Options` ⇒ 任意站点可以把我嵌进 iframe
+//   做点击劫持；缺 CSP ⇒ 一旦有任何一处文本渲染漏成 HTML，就直接变成 XSS 执行点；
+//   缺 `Referrer-Policy` ⇒ 页面 URL（可能含信息）随外链请求泄漏出去。
+//   WS 侧的 TLS 是**部署项**（见 `docs/00` 运维册），不是本文件能解决的。
+describe('L1 · 安全响应头', () => {
+  it('HTML 页面带上 CSP / X-Frame-Options / Referrer-Policy / nosniff', async () => {
+    const base = await listen(PROJECT_ROOT);
+    const res = await fetch(`${base}/${DEFAULT_INDEX_PATH}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe(
+      SECURITY_HEADERS['content-security-policy'],
+    );
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('★ 四段响应都带安全头（成功 / 404 / 204 / 302 一视同仁）', async () => {
+    const base = await listen(PROJECT_ROOT);
+    const cases: readonly (readonly [string, number])[] = [
+      [`/${DEFAULT_INDEX_PATH}`, 200],
+      ['/nope-nope-nope.js', 404],
+      ['/favicon.ico', 204],
+      ['/', 302],
+    ];
+    for (const [path, status] of cases) {
+      const res = await fetch(`${base}${path}`, { redirect: 'manual' });
+      expect(res.status, path).toBe(status);
+      expect(res.headers.get('x-frame-options'), path).toBe('DENY');
+      expect(res.headers.get('referrer-policy'), path).toBe('no-referrer');
+      expect(res.headers.get('content-security-policy'), path).not.toBeNull();
+    }
+  });
+
+  it('★ CSP 不放行 unsafe-inline / unsafe-eval（放行就等于没写）', () => {
+    const csp = SECURITY_HEADERS['content-security-policy'] ?? '';
+    expect(csp).not.toContain('unsafe-inline');
+    expect(csp).not.toContain('unsafe-eval');
+    // 同源 WebSocket 必须被允许，否则页面连不上服务端（表现是"点了没反应"）
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+  });
+
+  it('★ 前端不写"会被上面这条 CSP 拦下"的内联写法（否则白屏）', () => {
+    const src = indexHtml();
+    // ① 无 `<style>` 块、无 `style="…"` 属性、无内联事件处理器
+    expect(src, '出现 <style> 块会被 style-src 拦下').not.toMatch(/<style[\s>]/i);
+    expect(src, '出现 style="…" 属性会被 style-src 拦下').not.toMatch(/\sstyle="/i);
+    expect(src, '出现 onclick="…" 之类的内联处理器会被 script-src 拦下').not.toMatch(
+      /\son[a-z]+\s*=/i,
+    );
+    // ② 每个 <script> 都必须有 src（内联脚本体会被 script-src 拦下）
+    const scripts = [...src.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]);
+    expect(scripts.length).toBeGreaterThan(0); // 死提取守卫
+    for (const tag of scripts) expect(tag, `${tag} 是内联脚本`).toMatch(/\ssrc="/i);
   });
 });

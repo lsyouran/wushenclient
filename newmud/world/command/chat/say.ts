@@ -1,5 +1,6 @@
 import { CHAT_MAX_LENGTH, CHAT_TOO_LONG } from '@shared/constants.js';
 import { defineCommand } from '@engine/world/define.js';
+import { neutralizePlayerText } from '@shared/player-text.js';
 
 /**
  * `say` —— 对**本房间**说话。
@@ -72,6 +73,10 @@ defineCommand('chat/say', {
     //   （`renderViewText` 扫的是拼好的**整条**文本，不区分模板段与输入段 ⇒
     //   `say 花$了` 会渲染成「花了」）。这是**与 wushen 一致**的行为，见本文件头部注释 ③。
     //   ⚠️ 旧注释曾写成"玩家输入不参与占位符扫描"，与实现**不符**，2026-10-14 订正。
-    me.sendRoom(`$N说：${content}`);
+    // ★ 正文是玩家写的：`<CMD>` 在前端的白名单**之内**、语义是"点一下发一条指令"，
+    //   不中和的话 `say` 就成了"在别人屏幕上植按钮"（2026-10-16 审查 S1）。
+    //   这一笔对应 wushen 的 `UTIL.htmlEncode(msg)`（`say.js:22`）—— 它转义是为了
+    //   自己的 `innerHTML`，我们不必转义 HTML，但必须把"产出标签"这条路堵死。
+    me.sendRoom(`$N说：${neutralizePlayerText(content)}`);
   },
 });

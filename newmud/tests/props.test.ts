@@ -273,3 +273,41 @@ describe('存档 / 读档边界', () => {
     expect(h.props.size).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// E11（2026-10-16 审查）：`loadProps` 只过 `Number.isFinite` —— **没有范围闸门**
+// ---------------------------------------------------------------------------
+//
+// 于是 `gj:1e300`、`max_hp:-5`、`gjsd:-1e9` 都能进表：前两个会让一切下游算术失真，
+// 后者让攻击速度变成负数（`MIN_ATTACK_INTERVAL_MS` 那条钳制也救不了负数语义）。
+// 与 `temp.ts` 的取向对齐：**读档是数据入口，脏值要在入口拒掉**。
+describe('E11 · 范围闸门（数值大小与符号）', () => {
+  it('★ 超过数值上界的属性被拒收并记账（1e300 不许进表）', () => {
+    const h = createPropHolder();
+    const report = loadProps(h, { prop: { gj: 1e300 } });
+
+    expect(report.loaded).toBe(0);
+    expect(report.rejected.map((r) => r.key)).toEqual(['prop.gj']);
+    expect(getProp(h, 'gj'), '脏值不许进表').toBe(0);
+  });
+
+  it('★ 语义上非负的键（上限 / 时长类）收到负值 ⇒ 拒收', () => {
+    const h = createPropHolder();
+    const report = loadProps(h, { prop: { max_hp: -5, gjsd: -1e9 } });
+
+    expect(report.loaded).toBe(0);
+    expect([...report.rejected.map((r) => r.key)].sort()).toEqual(['prop.gjsd', 'prop.max_hp']);
+    expect(getProp(h, 'max_hp')).toBe(0);
+  });
+
+  it('【反向锚点】合法值照常装载（含"允许为负"的键的负值）', () => {
+    const h = createPropHolder();
+    const report = loadProps(h, { prop: { gj: 40, max_hp: 100, fy: -3 } });
+
+    // `fy` 允许为负（减益是合法内容），只有上界与"非负子集"受限
+    expect(report.rejected).toEqual([]);
+    expect(report.loaded).toBe(3);
+    expect(getProp(h, 'max_hp')).toBe(100);
+    expect(getProp(h, 'fy')).toBe(-3);
+  });
+});

@@ -5,10 +5,17 @@
 import { registerHandler } from '../registry.js';
 import { pushChat } from '../../ui/stream.js';
 import { noteChat } from '../../ui/input.js';
-import { openPanel } from '../../ui/panel.js';
+import { clearPanelRows, closePanel, openPanel, removePanelRow } from '../../ui/panel.js';
 import { state } from '../../state.js';
+import { DIALOG_CONTROL_FIELDS } from '../../../shared/constants.js';
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+const formatField = (v: unknown): string =>
+  typeof v === 'object' ? JSON.stringify(v) : String(v);
+
+/** 是不是 `dialog` 帧的**控制字段**（名单单源 = `DIALOG_CONTROL_FIELDS`） */
+const isControlField = (k: string): boolean => (DIALOG_CONTROL_FIELDS as readonly string[]).includes(k);
 
 /**
  * `msg` 包 —— 聊天消息。
@@ -51,10 +58,24 @@ registerHandler('msg', (p) => {
   noteChat();
 });
 
+/**
+ * `emote` 帧 —— 表情清单。
+ *
+ * ⚠️ **当前面板里的每一项都是纯文本、不可点**（2026-10-16 审查 F5 订正）。
+ *   旧注释写"点开即用"是**假的**：`openPanel` 的第二参是纯文本行，压根没有点击行为
+ *   （可点的只有第三参 `cmds`，那是服务端下发的 `CmdItem`）。
+ *
+ * ★ 为什么这一批**不做**可点：全仓**没有 `emote` 指令**（`world/` 零命中）、
+ *   也**没有 `emote` 包的生产者**（`server/` 零命中）—— 点了也无处可去，
+ *   做成按钮只会多一个"点了什么都不发生"的假控件（26 册 §16.8 明确反对的那一类）。
+ *
+ * ★ wushen 的做法是把表情名**填进输入框**（前缀 `*`，见 `src/game/main.js#ShowEmotePanel`），
+ *   而不是直接发指令。等本项目有了 `emote` 指令与生产者，照它实现"点击填入聊天框"，
+ *   落点就是这里。
+ */
 registerHandler('emote', (p) => {
   const items = Array.isArray(p['items']) ? p['items'].map(asString) : [];
   if (items.length === 0) return;
-  // 表情列表进面板（点开即用），而不是塞进消息流刷屏
   openPanel('表情', items);
 });
 
@@ -66,15 +87,34 @@ registerHandler('emote', (p) => {
  * ⚠️ 旧注释称"知名面板走 `PANEL_TABS`（有取数指令）" —— **`PANEL_TABS` 这个常量不存在**
  *   （2026-10-14 复查：全仓仅此一处命中，且在注释里）。已删除该引用，别再拿它当既有事实。
  *
- * ⚠️ **已知缺口（F4）**：协议里 `dialog` 的 `close` / `refresh` / `clear` / `remove`
- *   四个**控制字段**本 handler 全部没消费，一律当普通字段列成文本行 ——
- *   服务端若发 `{dialog:'pack', close:true}`，这里会显示一行 `close: true` 而不是关面板。
- *   当前无服务端生产者 ⇒ 暂不实现；补的时候要按语义分流（其余字段才落行）。
+ * ★★ **控制字段已分流**（F4，2026-10-16 审查）：`close` / `refresh` / `clear` / `remove`
+ *   改的是**面板本身**，不再是"面板里的一行"。原先四个字段全被当普通字段列成文本行 ——
+ *   服务端发 `{dialog:'pack', close:true}` 会看到一行 `close: true`，而面板**不关**。
+ *
+ * ★ 两种语义按"**本帧有没有内容字段**"区分：
+ *     - **控制帧**（只带控制字段）⇒ 作用于**当前**面板：`close` 收起 / `remove` 删一行 /
+ *       `clear` 清空 / `refresh` 消费掉（面板是纯文本快照，无需重绘）；
+ *     - **内容帧**（带别的字段）⇒ 重建面板，内容字段逐条落行。
+ *   混在一帧里时 `close` 优先（面板都关了，再列行没有意义）。
  */
 registerHandler('dialog', (p) => {
+  if (p['close'] === true) {
+    closePanel();
+    return;
+  }
+
+  const contentKeys = Object.keys(p).filter(
+    (k) => k !== 'v' && k !== 'type' && k !== 'dialog' && !isControlField(k),
+  );
+
+  if (contentKeys.length === 0) {
+    if (typeof p['remove'] === 'string') removePanelRow(p['remove']);
+    if (p['clear'] === true || typeof p['clear'] === 'string') clearPanelRows();
+    // `refresh` 只表示"数据已更新到该时刻" —— 面板是纯文本快照，没有要重算的视图
+    return;
+  }
+
   const name = asString(p['dialog']);
-  const rows = Object.entries(p)
-    .filter(([k]) => k !== 'v' && k !== 'type' && k !== 'dialog')
-    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+  const rows = contentKeys.map((k) => `${k}: ${formatField(p[k])}`);
   openPanel(name === '' ? '面板' : name, rows.length === 0 ? ['（空面板）'] : rows);
 });

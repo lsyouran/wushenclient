@@ -23,6 +23,7 @@ describe('parseArgs · 缺省值', () => {
     expect(o.webRoot).toBe(join(PROJECT_ROOT, 'dist', 'web'));
     expect(o.help).toBe(false);
     expect(o.maxConnections).toBeUndefined();
+    expect(o.maxConnectionsPerIp).toBeUndefined();
   });
 
   it('★ 缺省**只绑本机**（2026-10-13 体检 N2：原先不传 host ⇒ 绑全部网卡）', () => {
@@ -50,6 +51,19 @@ describe('parseArgs · 覆盖', () => {
   it('--max-connections 有值才带上（无值必须是 undefined，不是 0）', () => {
     expect(parseArgs(['--max-connections', '50']).maxConnections).toBe(50);
     expect(parseArgs([]).maxConnections).not.toBe(50);
+  });
+
+  it('--max-connections-per-ip 同样"有值才带上"（N4：同址多人 / 压测时要能调大）', () => {
+    expect(parseArgs(['--max-connections-per-ip', '40']).maxConnectionsPerIp).toBe(40);
+    expect(parseArgs([]).maxConnectionsPerIp).toBeUndefined();
+    // ★ 别和 `--max-connections` 串了（两条上限各管一段）
+    expect(parseArgs(['--max-connections-per-ip', '40']).maxConnections).toBeUndefined();
+    expect(parseArgs(['--max-connections', '40']).maxConnectionsPerIp).toBeUndefined();
+  });
+
+  it('★ --max-connections-per-ip 非整数 ⇒ 报错，不静默取缺省', () => {
+    expect(() => parseArgs(['--max-connections-per-ip', 'x'])).toThrow(UsageError);
+    expect(() => parseArgs(['--max-connections-per-ip', '0'])).toThrow(UsageError);
   });
 
   it('★ --host 覆盖缺省（要对外必须显式声明）', () => {

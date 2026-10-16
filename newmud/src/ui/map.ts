@@ -38,7 +38,7 @@
  *   `HTMLElement`，而 SVG 元素是 `SVGElement`。
  */
 
-import { clear, need, on } from './dom.js';
+import { clear, need, onActivate } from './dom.js';
 import { dirLabel, placeExits } from './dirs.js';
 import { plainText } from './markup.js';
 import { state } from '../state.js';
@@ -250,5 +250,5 @@ export function bindMap(): void {
     if (target.closest('.ccg') !== null) runner('look');
   });
 
-  on(need('mapBtn'), 'click', () => toggleMap());
+  onActivate(need('mapBtn'), () => toggleMap());
 }

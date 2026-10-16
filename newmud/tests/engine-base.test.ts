@@ -97,6 +97,54 @@ describe('engine/base · 容器约束', () => {
     expect(() => b.addItem(b)).toThrow(ContainerError);
   });
 
+  // ★ S6（2026-10-16 审查）：`addItem` 原先只挡 `child === this` 的自环，
+  //   挡不住**互环** —— `a.moveTo(b); b.moveTo(a)` 两次调用、零报错，
+  //   位置链成环。读取侧（`room` getter）有 `seen` 兜住不死循环，但环照样能造：
+  //   成环对象静默"不在任何房间"，`Character.go()` 看到 `room` 非 Room 就回
+  //   `'blocked'`，玩家看到一句含义错误的"那边过不去"。
+  //   ⇒ 写入侧必须拒环，而不是让读取侧兜。
+  it('★ 不准成环：把祖先放进它的后代 → 抛（互环在写入侧挡住）', () => {
+    const a = new Box('a');
+    const b = new Box('b');
+    a.moveTo(b); // a 在 b 里 ⇒ b 是 a 的祖先
+    expect(() => b.moveTo(a)).toThrow(ContainerError); // b 放进 a ⇒ 成环
+    // 结构未被破坏（抛错发生在任何可变状态被改之前）
+    expect(a.environment).toBe(b);
+    expect(b.environment).toBeNull();
+    expect(a.itemCount).toBe(0);
+  });
+
+  it('★ 更长的链也挡得住（A→B→C，把 C 放进 A）', () => {
+    const a = new Box('a');
+    const b = new Box('b');
+    const c = new Box('c');
+    b.moveTo(c); // b 在 c 里
+    a.moveTo(b); // a 在 b 里 ⇒ 链 A→B→C
+    expect(() => c.moveTo(a)).toThrow(ContainerError);
+    expect(c.environment).toBeNull(); // c 仍在顶层
+  });
+
+  it('★ 兄弟节点之间移动不误伤（同层互换，不成环）', () => {
+    const room = new Box('r', 'room');
+    const x = new Box('x', 'npc');
+    const y = new Box('y', 'npc');
+    x.moveTo(room);
+    y.moveTo(room);
+    expect(() => y.moveTo(x)).not.toThrow(); // y 移进兄弟 x 里 —— 合法
+    expect(y.environment).toBe(x);
+    expect(x.room).toBe(room);
+  });
+
+  it('【反向锚点】非祖先关系的移动照常（别把正常移动误伤）', () => {
+    const room = new Box('r', 'room');
+    const pack = new Box('p', 'npc');
+    const sword = new Thing('i1');
+    expect(() => sword.moveTo(pack)).not.toThrow();
+    expect(() => pack.moveTo(room)).not.toThrow();
+    expect(pack.environment).toBe(room);
+    expect(sword.room).toBe(room);
+  });
+
   it('容量上限：超容抛 ContainerError（房间/背包各自的上限走同一个机制）', () => {
     const small = new Box('small', 'room', 2);
     small.addItem(new Thing('a'));
