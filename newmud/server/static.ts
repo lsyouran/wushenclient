@@ -19,7 +19,7 @@
  *   （由 `tools/copy-web-assets.mjs` 产出，见 docs/26 §15.2 的补注）。
  */
 
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
@@ -199,6 +199,22 @@ function handleRequest(
     return;
   }
 
+  // ★ 符号链接复判（2026-10-17 审查 **L5**）：`statSync` 与 `createReadStream`
+  //   都**跟随**符号链接，于是 `dist/web/` 里一个指向外部的 symlink 会被原样读出来
+  //   发送出去 —— 而 `resolveRequestPath` 只做**路径代数**，看不见这一层
+  //   （它的 `..` 拦截是对的，本条补的是它管不到的那个面）。
+  //   ⇒ 解析真实路径后对根目录再判一次；解析不出来（链接断了 / 没权限）一律 403。
+  const real = realpathFile(target);
+  if (real === null) {
+    sendText(res, 403, 'Forbidden');
+    return;
+  }
+  const backReal = relative(rootDir, real);
+  if (backReal !== '' && (backReal.startsWith('..') || isAbsolute(backReal))) {
+    sendText(res, 403, 'Forbidden');
+    return;
+  }
+
   res.writeHead(200, {
     'content-type': guessContentType(target),
     'content-length': stat.size,
@@ -221,6 +237,20 @@ function statFile(target: string): { size: number } | null {
   try {
     const s = statSync(target);
     return s.isFile() ? { size: s.size } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 真实路径（`realpathSync`），解析不出来返回 `null`。
+ *
+ * ★ 与 `statFile` 同款"失败即 null"：文件系统的问题不该让请求处理器抛异常，
+ *   一律转成 403/404 —— 见 `handleRequest` 里对它的两处用法。
+ */
+function realpathFile(target: string): string | null {
+  try {
+    return realpathSync(target);
   } catch {
     return null;
   }

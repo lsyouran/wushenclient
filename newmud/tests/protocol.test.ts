@@ -21,6 +21,7 @@ import {
   REG_ATTR_SUM_TOTAL,
 } from '@shared/constants.js';
 import {
+  ClientCommandSchema,
   ClientPacketSchema,
   EnvelopeSchema,
   ERROR_CODES,
@@ -35,7 +36,7 @@ import {
   missingPacketSchemas,
   routeFrame,
 } from '@shared/protocol.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LOGIN_FATAL_CODES, isFatalLoginFailure } from '@shared/error-codes.js';
 import { z } from 'zod';
 
@@ -311,12 +312,21 @@ describe('S1 消息体大小上限（★ docs/26 S1 回归）', () => {
 });
 
 describe('S2 明文通道只承载指令（★ docs/26 S2 回归）', () => {
-  it('★ 回归锚点：看起来是 JSON 的输入必须被打回 JSON 分支', () => {
-    for (const json of ['{"v":1}', '[1,2]', '  {"type":"ping"}']) {
-      const r = checkPlaintext(json);
-      expect(r.ok, json).toBe(false);
+  it('★ 回归锚点：看起来是 JSON 的输入必须被打回 —— 且**不断连**（L6 后）', () => {
+    // ★ 2026-10-17 审查 **L6** 之后：真 JSON 由 `routeFrame` 分流进 JSON 通道，
+    //   能走到本函数的"像 JSON"支 ⇒ 说明 `JSON.parse` 已经**失败过**了。
+    //   ⇒ 语义是"一条长得像 JSON 的明文指令"，回 `PLAINTEXT_NOT_COMMAND`
+    //     （明文通道的任何失败都**不断连**），而不是 `BAD_PACKET`（它会断连）。
+    //   旧实现在这里回 `BAD_PACKET`，于是 CLI 随手敲一个 `[` 就直接掉线。
+    for (const jsonish of ['{"v":1,', '[1,2', '  {"type":"ping"', '{bad', '[']) {
+      const r = checkPlaintext(jsonish);
+      expect(r.ok, jsonish).toBe(false);
       if (r.ok) continue;
-      expect(r.code, json).toBe('BAD_PACKET');
+      expect(r.code, jsonish).toBe('PLAINTEXT_NOT_COMMAND');
+    }
+    // ★ 反向锚点：**真** JSON 也会被本函数挡住（它的判据不看"能不能解析"）
+    for (const json of ['{"v":1}', '[1,2]', '  {"type":"ping"}']) {
+      expect(checkPlaintext(json).ok, json).toBe(false);
     }
   });
 
@@ -448,5 +458,70 @@ describe('N4 · 登录失败的闭集（哪些要断连）', () => {
   it('【反向锚点】是闭集不是全集（别用"所有错误码"实现它）', () => {
     expect(LOGIN_FATAL_CODES.size).toBeGreaterThan(0);
     expect(LOGIN_FATAL_CODES.size).toBeLessThan(Object.keys(ERROR_CODES).length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★ M1 · JSON `command` 通道也要挡控制字符（2026-10-17 审查）
+// ---------------------------------------------------------------------------
+//
+// ★ 原先 `FORBIDDEN_CONTROL_RE` 只架在**明文**通道上（`checkPlaintext`），
+//   JSON 通道的 `cmd` 只有 `min(1).max(512)` ⇒ 客户端发
+//   `{"type":"command","cmd":"say a\u001b[2J"}` 就能把 ESC / C0 / C1 送进 `say`，
+//   再经 `sendRoom` 广播给全房间（`neutralizePlayerText` 只替换 `<`，不管控制字符）。
+
+describe('★ M1 · JSON `command` 通道与控制字符（两条通道同一把刀）', () => {
+  const packet = (cmd: string) => ({ v: PROTOCOL_VERSION, type: 'command', cmd });
+
+  it('★ 含 ESC / C0 / C1 的 `cmd` 一律被拒（原先只有明文通道挡）', () => {
+    for (const evil of [
+      'say a\u001b[2J', // ESC + 清屏
+      'say a\u001b[31mred', // ESC + 颜色序列
+      'say a\u0000b', // NUL
+      'say a\u009bb', // C1 CSI：8 位，**不需要**先发 ESC 就能让终端执行转义序列
+      'say a\u0085b', // C1 NEL：在日志查看器里被当成换行 ⇒ 可伪造日志行
+      'say a\u007fb', // DEL
+      'look\nquit', // 换行（伪造两条指令）
+    ]) {
+      const r = ClientCommandSchema.safeParse(packet(evil));
+      expect(r.success, JSON.stringify(evil)).toBe(false);
+    }
+  });
+
+  it('【反向锚点】正常指令照常通过（别用"一律拒"来实现它）', () => {
+    for (const good of ['look', 'go north', 'say 你好', 'get 丹药', 'kill 阿飞']) {
+      expect(ClientCommandSchema.safeParse(packet(good)).success, good).toBe(true);
+    }
+  });
+
+  it('★ 两条通道共用同一份判据（各写一遍早晚漏一处）', () => {
+    for (const evil of ['a\u001b[2J', 'a\u009bb', 'a\u0000b']) {
+      expect(checkPlaintext(evil).ok, JSON.stringify(evil)).toBe(false);
+      expect(ClientCommandSchema.safeParse(packet(evil)).success, JSON.stringify(evil)).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★ R1 · 分流阶段**不做解析**（解析必须留在限流之后）
+// ---------------------------------------------------------------------------
+
+describe('★ R1 · `routeFrame` 只做形状分流，不做任何解析', () => {
+  it('★ 分流期间 `JSON.parse` 一次都不能被调用', () => {
+    // ★ 2026-10-17 审查 R1（§55 修复自身引入的回归）：上一版把"像 JSON 还得**真能
+    //   解析**才走 JSON 通道"实现成**在这里 `JSON.parse`** —— 但 `routeFrame` 跑在
+    //   **限流之前**（frame-pipeline：① 尺寸 → ② 限流 → ③ 分诊 → ④ 解析），于是每个
+    //   `{`/`[` 帧都在限流前被完整解析一次，且管线里还会再 parse 一次（双解析）。
+    //   这违反本文件 13–19 行写死的"限流必须排在解析之前"。
+    //   ⇒ 本断言钉住"分流阶段**绝不解析**"：谁再往 `routeFrame` 里塞 `JSON.parse`，这里立刻红。
+    const spy = vi.spyOn(JSON, 'parse');
+    try {
+      for (const raw of ['{"v":1}', '[1,2]', '{"v":1,', '[', 'look', '  { "a": 1 }']) {
+        expect(routeFrame(raw).ok, raw).toBe(true);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

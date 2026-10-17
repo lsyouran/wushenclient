@@ -1710,3 +1710,38 @@ describe('颜色标签 ↔ 样式表（成对）', () => {
     expect(wrong, wrong.join('\n')).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #pFlags · 战斗 / 状态 / 冷却摘要
+// ---------------------------------------------------------------------------
+
+describe('#pFlags · 战斗 / 状态 / 冷却摘要（R6 / R7，2026-10-17 审查）', () => {
+  // ★ L2 把 `state.fighting` / `statuses` / `cooldowns` 接到 `#pFlags`，但**一个字都没测**
+  //   —— 本批审查 R6 抓到的"改了没人守"。这里补齐：三族帧各驱动一次，断言 DOM 上的摘要。
+  const flags = (): string => document.getElementById('pFlags')?.textContent ?? '';
+
+  it('combat 帧 → 摘要出现「战斗中」；停手 → 消失', () => {
+    mod.dispatchPacket('combat', { start: 1 });
+    expect(flags()).toContain('战斗中');
+    mod.dispatchPacket('combat', { start: 0 });
+    expect(flags()).not.toContain('战斗中');
+  });
+
+  it('status 帧 → 名字进摘要；clear → 清空', () => {
+    mod.dispatchPacket('status', { action: 'add', id: 'poison', name: '中毒' });
+    expect(flags()).toContain('中毒');
+    mod.dispatchPacket('status', { action: 'clear' });
+    expect(flags()).not.toContain('中毒');
+  });
+
+  it('★ 冷却帧 → 「冷却 N」出现，且 clear 后消失（R7：不补 `renderStatus()` 这条会红）', () => {
+    // 干净起点：先清一次（`clearDistime` 自己也会重绘）
+    mod.dispatchPacket('clearDistime', {});
+    mod.dispatchPacket('dispfm', { id: 'sword', rtime: 100 });
+    // ★ 判据：`dispfm` 改完 `state.cooldowns` 必须**立即重绘**。若 handler 只改状态、
+    //   不调 `renderStatus()`（R7 修的问题）⇒ 这里读到的是**上一次**绘制的旧值 ⇒ 红。
+    expect(flags()).toContain('冷却 1');
+    mod.dispatchPacket('clearDistime', {});
+    expect(flags()).not.toContain('冷却');
+  });
+});

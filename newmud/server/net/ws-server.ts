@@ -25,6 +25,7 @@ import type { RawData, WebSocket } from 'ws';
 import type { IncomingMessage, Server } from 'node:http';
 import { APP_HEARTBEAT_MS, WS_MAX_PAYLOAD_BYTES, WS_PING_INTERVAL_MS } from '@shared/constants.js';
 import { OidSpace } from '../engine/oid.js';
+import { reportTimerError } from './hub.js';
 import type { ConnectionHub, NetConnection } from './hub.js';
 
 /**
@@ -242,6 +243,46 @@ export function startWsServer(options: WsServerOptions): Promise<MudServer> {
           path: WS_PATH,
           maxPayload: WS_MAX_PAYLOAD_BYTES,
         });
+  /**
+   * ★★ 两条理由，**必须**在构造之后**立刻**给 `wss` 挂上 `'error'`：
+   *
+   *   ① **EventEmitter 的 `'error'` 无人接就直接抛** ⇒ `uncaughtException`。
+   *      而 `ws` 会把内部/外部 server 的 error **转发**到 `wss.emit('error')`
+   *      （`node_modules/ws/lib/websocket-server.js:127`）—— 于是"只给 `owner`
+   *      挂了监听"是不够的：`wss` 那边空着 ⇒ 端口被占时进程挂死、且错误无人归因
+   *      （实测踩到，2026-10-17 审查 M2）。
+   *   ② `owner === undefined` 时上面那个 `new WebSocketServer({ port })` 会在
+   *      **构造的同时**就 listen ⇒ error 可能比下面的 Promise 还早到。
+   *
+   *   ⇒ 这里指向一个稍后（Promise 执行器里）填好的 `reject`。`listen` 是异步的、
+   *     而 `new Promise` 是同步的 ⇒ `rejectFn` 一定先就绪。
+   */
+  let rejectFn: ((reason: unknown) => void) | null = null;
+  /** Promise 是否已 settle（resolve 或 reject）。见 `onWssError`。 */
+  let settled = false;
+  /**
+   * `wss` 的 `'error'` **唯一**处理入口。
+   *
+   * ★ 只监听 `wss` 就够：`ws` 在 `_server` 存在时（无论自建还是外部传入的 `owner`）
+   *   都 `addListeners(this._server, { error: this.emit.bind(this, 'error') })`
+   *   —— 把 server 的 `'error'` **转发**到 `wss`（`ws/lib/websocket-server.js:125`）。
+   *   所以 `owner.on('error')` 是多余的：原实现里同时挂了两个 `wss` error 监听
+   *   （`rejectFn` 版 + 裸 `reject`）和一个 `owner` 监听 ⇒ 同一个错会被 settle 两三次。
+   *
+   * ★ R2（2026-10-17 审查）：settle **之后**的 error 是**运行期**错误 —— 原先它落到
+   *   `rejectFn`（对已 settle 的 Promise 是空操作）就完了，**完全静默**，比"没挂
+   *   监听器"时的 `uncaughtException` 更糟（那个至少被进程兜底记下）。⇒ 必须留痕。
+   */
+  const onWssError = (error: unknown): void => {
+    const e = error instanceof Error ? error : new Error(String(error));
+    if (settled || rejectFn === null) {
+      reportTimerError('ws-server', e);
+      return;
+    }
+    settled = true;
+    rejectFn(e);
+  };
+  wss.on('error', onWssError);
   const hub = options.hub;
   const connIds = new OidSpace();
   const sockets = new Map<string, WebSocket>();
@@ -308,23 +349,42 @@ export function startWsServer(options: WsServerOptions): Promise<MudServer> {
     if (pingIntervalMs !== null) {
       timers.push(
         setInterval(() => {
-          for (const socket of sockets.values()) {
-            if (socket.readyState === socket.OPEN) socket.ping();
+          // ★ 异常边界（M6 补齐 · R3，2026-10-17 审查）：本批原声称"定时器都包了
+          //   try/catch"，实际只包了下面的 hub-prune、漏了这一处 —— 补上，口径才自洽。
+          try {
+            for (const socket of sockets.values()) {
+              if (socket.readyState === socket.OPEN) socket.ping();
+            }
+          } catch (error) {
+            reportTimerError('ws-ping', error);
           }
         }, pingIntervalMs),
       );
     }
     timers.push(
       setInterval(() => {
-        hub.pruneIdle();
-        hub.pruneRateLimit();
+        // ★ 异常边界（M6）：`pruneIdle` 会 `conn.close()`，抛错不该打死进程
+        try {
+          hub.pruneIdle();
+          hub.pruneRateLimit();
+        } catch (error) {
+          reportTimerError('hub-prune', error);
+        }
       }, APP_HEARTBEAT_MS),
     );
   }
 
-  return new Promise<MudServer>((resolve) => {
+  // ★ `reject` 是必需的（2026-10-17 审查 M2）：原先只有 `resolve`，
+  //   而 `wss` / `owner` 都没有 `'error'` 监听 —— `EADDRINUSE` 时
+  //   `listening` 永不到达，这个 Promise **永不 settle** ⇒ `main()` 永久 await：
+  //   进程不死、也不服务，运维只看到一个"卡住的进程"，而不是"端口被占"。
+  return new Promise<MudServer>((resolve, reject) => {
+    // ★ 见上方 `rejectFn` 的注释：端口占用时 `'error'` 可能来得更早，
+    //   这里把真正的 `reject` 补进去（同步执行器 ⇒ 一定赶在 error 之前）。
+    rejectFn = reject;
     const listening = (): void => {
       const addr = (owner ?? wss).address() as { port: number } | null;
+      settled = true; // ★ 见 `onWssError`：settle 之后的 error 只记日志，不再 settle
       resolve({
         // 端口 0 时由系统分配，取实际端口（测试依赖这个）
         port: addr?.port ?? options.port,
@@ -346,7 +406,20 @@ export function startWsServer(options: WsServerOptions): Promise<MudServer> {
       });
     };
     // 挂在外部服务器上时由本层负责 listen（契约见 WsServerOptions.httpServer）
-    if (owner === undefined) wss.on('listening', listening);
-    else owner.listen(options.port, host, listening);
+    if (owner === undefined) {
+      wss.on('listening', listening);
+      // ★ 不再在此重复挂 `'error'`：顶部 `onWssError` 已监听同一个 `wss` 实例。
+    } else {
+      // ★ 不挂 `owner.on('error')`：`ws` 已把 `owner` 的 `'error'` 转发到 `wss`
+      //   （见 `onWssError` 注释）—— 这里再挂就是重复 settle。
+      // ★ `listen` 对**非法参数**是**同步**抛（如 `ERR_INVALID_ARG_TYPE`），
+      //   那种情况走不到 `'error'` 事件 ⇒ 这里也要接住。
+      try {
+        owner.listen(options.port, host, listening);
+      } catch (error) {
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   });
 }

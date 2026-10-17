@@ -188,6 +188,17 @@ export function roomSignatureOf(player: Player): string {
   return `${env.path}|${ids}`;
 }
 
+/**
+ * 一个角色的**数值签名**（`hp|maxHp|mp|maxMp`）—— `#reconcileStats` 的判据。
+ *
+ * ★ 与 `roomSignatureOf` 同一形态：它是"客户端状态条应当显示什么"的**事实**，
+ *   会话层拿它比对"已经推过什么"，不一致才补推 `sc`。
+ *   `maxHp` / `maxMp` 也在内：换了装备 / 升了技能会上限变化，那时血条**比例**也得跟着动。
+ */
+export function statSignatureOf(player: Player): string {
+  return `${String(player.hp)}|${String(player.maxHp)}|${String(player.mp)}|${String(player.maxMp)}`;
+}
+
 // ---------------------------------------------------------------------------
 // 会话
 // ---------------------------------------------------------------------------
@@ -261,6 +272,16 @@ export class GameSessions {
    *      的记账。删掉它不会变慢，会变成"走了房间但画面还停在上一个房间"。
    */
   readonly #sentRooms = new Map<string, string>();
+  /**
+   * 连接 id → **已经推给该客户端的数值签名**（`hp|maxHp|mp|maxMp`）。
+   *
+   * ★ 与 `#sentRooms` 同一条纪律：**不是缓存，是"客户端已知什么"的记账**。
+   *   战斗是**世界时钟异步驱动**的（`World.scheduler`），掉血不经过任何指令 ⇒
+   *   `handleCommand` 那条路看不到它。于是 tick 之后要对一次账（`afterTick`），
+   *   判据就是这张表 —— 不一致才补推一个 `sc` 帧。
+   *   ⚠️ 少了它，表现是"打起来了、消息在滚，可血条一直不动"（真机才看得见）。
+   */
+  readonly #sentStats = new Map<string, string>();
   /** 出站超限时的处置（缺省写 stderr） */
   readonly #onOutboundDrop: (info: OutboundDropInfo) => void;
 
@@ -329,11 +350,16 @@ export class GameSessions {
       name: roleId,
       roleId,
       output: this.#outputFor(conn),
+      // ★ 世界时钟：战斗节拍要它。世界是角色的时钟来源（单源，见 `World.scheduler`）。
+      scheduler: this.#world.scheduler,
     });
 
     try {
       startRoom.addItem(player);
     } catch (e) {
+      // ★ 人没进世界 ⇒ 上面刚发出的 oid 必须还回去。
+      //   否则"满员被拒"这种**失败**路径也会永久吃掉一个 id（见 `logout` 的 T4 注释）。
+      this.#oidSpace.release(player.id);
       // 房间容量满：与"服务器人数过多"同语义，玩家应当稍后再试
       return {
         ok: false,
@@ -363,11 +389,16 @@ export class GameSessions {
     const player = this.#players.get(conn.id);
     if (player === undefined) return false;
     player.moveTo(null); // 从房间摘掉（moveTo(null) 不会抛容量错）
+    // ★ T4（26 册 §55）：oid 一度**只发不收** —— `login()` 每次发一个，
+    //   而这里是唯一"角色离开世界"的出口 ⇒ 不释放的话 `#used` 随历史登录次数
+    //   单调增长，启动日志的"已发 id"也会持续漂移。
+    this.#oidSpace.release(player.id);
     this.#players.delete(conn.id);
     // ★ 名字的占用随下线释放：否则"重名检查"会退化成"这个名被永久占死"
     this.#byRoleId.delete(player.roleId);
     this.#conns.delete(conn.id);
     this.#sentRooms.delete(conn.id);
+    this.#sentStats.delete(conn.id);
     return true;
   }
 
@@ -377,6 +408,37 @@ export class GameSessions {
   }
 
   // ── 指令 ────────────────────────────────────────────────────────────────
+
+  /**
+   * 一次**世界 tick** 之后的对账。
+   *
+   * ★ 为什么 tick 之后要同时对账房间与数值：战斗由世界时钟**异步**驱动
+   *   （`World.scheduler`），一次出招既能改数值（掉血），也能改房间内容
+   *   （NPC 被打死 ⇒ 从房间消失）。会话层不知道哪条路径改了什么，
+   *   于是复用与 `handleCommand` 同一套"diff 之后补推"。
+   * ★ 生产路径由 `main.ts` 的 `setInterval(…, TICK_MS)` 调；测试手动调
+   *   （`timers: false` 时定时器不建，测试自己 `scheduler.step()` + `afterTick()`）。
+   */
+  public afterTick(): void {
+    this.#reconcileRooms();
+    this.#reconcileStats();
+    this.#pruneTemps();
+  }
+
+  /**
+   * ★ T5（26 册 §55）：周期清掉**所有活体**的过期 temp 键 —— `Scheduler` 落地后
+   *   一直在等的那个消费者（此前 `pruneTemp()` 全仓零生产调用点）。
+   *
+   * 为什么必须周期跑：`TempStore` 是自由键值袋。`busy` 靠"到点即删"自清，
+   * 但冷却（`pfm/<skill>/<pid>`）只在 `canUsePfm()` **被问到时**才清；
+   * 写过一次就不再读的键（任务进度、一次性 BUFF）会长期驻留。
+   * ⇒ 长寿命对象（常驻 NPC、长期在线的玩家）身上尤其明显。
+   */
+  #pruneTemps(): void {
+    const now = this.#now();
+    for (const p of this.#players.values()) p.temp.pruneTemp(now);
+    for (const n of this.#world.npcs.values()) n.temp.pruneTemp(now);
+  }
 
   /**
    * 一行指令进来 → `dispatch()`。
@@ -399,6 +461,8 @@ export class GameSessions {
       nowMs: this.#now(),
     });
     this.#reconcileRooms();
+    // ★ 指令也可能改数值（吃药回血、将来的花费内力…），与房间对账同一处理
+    this.#reconcileStats();
   }
 
   // ── 输出通道 ────────────────────────────────────────────────────────────
@@ -435,6 +499,22 @@ export class GameSessions {
         const me = this.#players.get(conn.id);
         if (me === undefined) return;
         this.#deliverChannel(conn, me, ch, content, to);
+      },
+      // ★ 战斗开始 / 结束 → `combat` 帧。**这一条以前没有生产者**：
+      //   协议里 `CombatPacket` 写着、前端也有对应 handler，但全仓零发送点
+      //   （与 `showItem` 同一类，26 册 §20.3）。现在由战斗引擎喂它。
+      combat: (phase) => {
+        this.#send(conn, packet({ type: 'combat', [phase]: 1 }));
+      },
+      // ★ 死亡 → `die` 帧（带复活按钮）。对照 wushen `USER.check_state()`
+      //   （`os/char/user.js:401` 的 `{type:"die",commands:[…]}`）。
+      die: (commands) => {
+        this.#send(conn, packet({ type: 'die', commands }));
+      },
+      // ★ 复活 → 同一个 `die` 包的 `relive:true` 那一支（wushen `relive.js:46`）。
+      //   前端 `combat.ts` 的 `die` handler 靠 `p['relive'] === true` 分支成"你又活过来了"。
+      revive: () => {
+        this.#send(conn, packet({ type: 'die', relive: true }));
       },
     };
   }
@@ -558,7 +638,27 @@ export class GameSessions {
     // ★ 登录后的**数值快照**：前端状态条（气血 / 内力）只认这一帧。
     //   不发它就是"协议里声明了 sc、却从来没有生产者"—— 与 T19 同族，
     //   表现为前端那条血条永远显示 `—`（真机复核时抓到的）。
+    this.#pushStats(conn, player);
+  }
+
+  /** 推一个 `sc` 帧并**记账**（"客户端已知这个数值"） */
+  #pushStats(conn: NetConnection, player: Player): void {
     this.#send(conn, this.#statusPacket(player));
+    this.#sentStats.set(conn.id, statSignatureOf(player));
+  }
+
+  /**
+   * 数值对账：把"服务端现在的数值"与"已经推给客户端的数值"比对，不一致才补推。
+   * ★ 与 `#reconcileRooms` 同一处理 —— 会话层不必知道"哪条路径改了血"
+   *   （指令 / 世界 tick / 将来的状态系统），只要数值变了就同步。
+   */
+  #reconcileStats(): void {
+    for (const [cid, player] of this.#players) {
+      const signature = statSignatureOf(player);
+      if (this.#sentStats.get(cid) === signature) continue;
+      const conn = this.#conns.get(cid);
+      if (conn !== undefined) this.#pushStats(conn, player);
+    }
   }
 
   /** `sc`：角色当前数值（前端 `sc` handler 逐字段合并，缺字段不动） */

@@ -111,6 +111,17 @@ export function handleInboundFrame(
   try {
     parsed = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
   } catch (e) {
+    // ★★ L6（回退订正版）：字符串帧能被分到 JSON 通道 ⇒ 必然"像 JSON"
+    //   （`LOOKS_LIKE_JSON_RE` 命中），只是 `JSON.parse` 不成 —— CLI / 运维工具
+    //   随手敲一个 `{` / `[` 是常见情形 ⇒ **回落到明文通道**（`PLAINTEXT_NOT_COMMAND`，
+    //   不断连），而不是 `BAD_PACKET` + 断连。
+    //   ★ 本段在**限流之后**（② → ③ → 这里）⇒ 不违反"限流在解析前"。
+    if (typeof raw === 'string') {
+      const plain = checkPlaintext(raw);
+      if (!plain.ok) return reject(plain.code, plain.detail, false);
+      return { kind: 'command', command: plain.command, bytes: route.bytes };
+    }
+    // 二进制帧（Uint8Array）走这里：解码后仍 parse 不成 ⇒ 是真坏包
     return reject('BAD_PACKET', `不是合法 JSON（${e instanceof Error ? e.message : String(e)}）`, true);
   }
 

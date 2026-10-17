@@ -14,13 +14,17 @@ import { bootstrapWorld } from '../server/bootstrap.js';
 import type { World } from '../server/engine/world.js';
 import { OBJ_KINDS } from '../server/engine/base.js';
 import { RecordingOutput } from '../server/engine/character.js';
+import { Item } from '../server/engine/item.js';
+import { OidSpace } from '../server/engine/oid.js';
 import { Player, PlayerError } from '../server/engine/player.js';
 import { Room } from '../server/engine/room.js';
+import { NEVER_EXPIRES } from '../server/engine/temp.js';
 import { asWorldId } from '../shared/ids.js';
-import { GameSessions, logOutboundDrop, roomSignatureOf } from '../server/session.js';
+import type { LoginResult } from '../server/session.js';
+import { GameSessions, logOutboundDrop, roomSignatureOf, statSignatureOf } from '../server/session.js';
 import { ConnectionHub } from '../server/net/hub.js';
 import type { NetConnection } from '../server/net/hub.js';
-import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, MAX_OUTBOUND_QUEUE } from '@shared/constants.js';
+import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, MAX_OUTBOUND_QUEUE, FIGHT_TYPE } from '@shared/constants.js';
 
 class FakeConn implements NetConnection {
   public readonly sent: string[] = [];
@@ -56,6 +60,20 @@ function hubWith() {
       onReject: () => undefined,
     },
   });
+}
+
+/**
+ * 断言登录**成功**并窄化类型（替代 `if (!r.ok) return;`）。
+ *
+ * ★ 为什么不许写 `if (!r.ok) return;`：那会把"登录开始失败"变成**整条用例静默绿**
+ *   —— 红灯变绿灯，是最坏的一种测试失败（2026-10-17 审查 **H2**：本文件一度有
+ *   **10 处**这样的静默跳过，其中 8 处连 `expect(r.ok)` 都没有）。
+ *   登录失败的原因（角色名校验回归 / 起始房满员 / 世界缺起始点）**必须**当场炸出来。
+ *
+ *   ⇒ 断言与窄化必须成对出现，且只由本函数提供 —— 免得下次再有人手写漏掉。
+ */
+function assertOk(r: LoginResult): asserts r is { readonly ok: true; readonly player: Player } {
+  if (!r.ok) throw new Error(`登录应当成功，却失败：${r.code} —— ${r.detail}`);
 }
 
 /** 取出某类型的包（按 JSON 解析，避免断言整串文本） */
@@ -118,7 +136,7 @@ describe('会话', () => {
 
     const r = sessions.login(conn, 't'.repeat(20), '张三');
     expect(r.ok).toBe(true);
-    if (!r.ok) return;
+    assertOk(r);
 
     expect(r.player.environment).toBe(world.startRoom);
     expect(r.player.phase).toBe('playing');
@@ -176,7 +194,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-phase');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     r.player.phase = 'login'; // 回到登录期
 
     const before = conn.sent.length;
@@ -195,7 +213,8 @@ describe('会话', () => {
     hub.accept(b);
     const ra = sessions.login(a, 't'.repeat(20), '甲');
     const rb = sessions.login(b, 't'.repeat(20), '乙');
-    if (!ra.ok || !rb.ok) return;
+    assertOk(ra);
+    assertOk(rb);
 
     const beforeA = a.sent.length;
     const beforeB = b.sent.length;
@@ -216,7 +235,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-big');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     const before = conn.sent.length;
 
     // 亲手造一个超限帧：玩家看得见的"某条输出太长"，正是服务端拼包出错的样子
@@ -235,7 +254,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-small');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
 
     r.player.notify('正常长度的一行');
     expect(drops).toEqual([]);
@@ -271,7 +290,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-bp-queue');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     const before = conn.sent.length;
 
     // 模拟"某个批量发送的调用方只 enqueue 不 drain"：把 hub 自己的队列灌到上限
@@ -296,7 +315,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-bp');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     const before = conn.sent.length;
 
     conn.buffered = MAX_BUFFERED_BYTES + 1; // 客户端不读了
@@ -313,7 +332,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-bp-ok');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     const before = conn.sent.length;
 
     conn.buffered = 1_000; // 有点积压，但远没到上限
@@ -361,7 +380,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-phase-e2e');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
 
     expect(r.player.phase).toBe('playing');
     // 立刻敲指令：不被闸门拦（对照见上一条手里那个"拨回 login 就拦住了"）
@@ -378,7 +397,7 @@ describe('会话', () => {
     const conn = new FakeConn('c-out');
     hub.accept(conn);
     const r = sessions.login(conn, 't'.repeat(20), '张三');
-    if (!r.ok) return;
+    assertOk(r);
     const room = r.player.environment;
     expect(room?.items).toContain(r.player);
 
@@ -389,17 +408,41 @@ describe('会话', () => {
   });
 
   it('起始房间满员：登录被拒（LOGIN_TOO_MANY），而不是把异常抛到调用栈', () => {
-    const full = new GameSessions({ world, hub: hubWith() });
-    // 把起始房间塞满（容量来自 `room.max_item_count` / 默认 50）
-    const room = world.startRoom;
-    if (room === null) throw new Error('测试世界没有起始房间');
-    const filler = new Player({ oid: 'filler-0', path: null, name: '占位', roleId: 'f0' });
-    // 用一个容量很小的房间更直接：直接把它的容量打满是不暴露的，
-    // 所以这里改为断言"满员时返回 LOGIN_TOO_MANY 而不是抛错"——
-    // 通过塞满真实容量来验证代价太大，改为验证**未登录时不抛**与**已登录时不抛**。
-    expect(() => full.handleCommand(new FakeConn('c-none'), 'look')).not.toThrow();
-    expect(filler).toBeInstanceOf(Player);
-    expect(room.itemCount).toBeGreaterThan(0);
+    // ★ 造一个"起始房已满"的世界：`World` 是 interface，只需换掉 `startRoom`，
+    //   其余（`oidSpace` / `scheduler` / 指令表）沿用真实世界的 ——
+    //   比"往真实起始房里塞满 50 个物品"便宜得多，且**容量判据是真的**。
+    //
+    // ★★ 2026-10-17 审查 H1：这一条原先是**假绿** —— 标题写着测 `LOGIN_TOO_MANY`，
+    //   用例里却**从未调用 `login()`**，三条断言分别是"走 NOT_LOGGED_IN 分支不抛"、
+    //   "上一行刚 new 出来的 Player 是 Player"、"起始房 itemCount > 0"（恒真）。
+    //   反证：把 `session.ts` 里整个 LOGIN_TOO_MANY 分支删掉，那条**照样绿**。
+    const startRoom = world.startRoom;
+    if (startRoom === null) throw new Error('测试世界没有起始房间');
+    const startPath = startRoom.path;
+    if (startPath === null) throw new Error('测试世界的起始房间没有 path');
+    const fullRoom = new Room({
+      oid: 'room-full',
+      path: startPath,
+      name: '满员房',
+      desc: '',
+      maxItems: 1,
+    });
+    fullRoom.addItem(new Item({ oid: 'filler-0', path: startPath, name: '占位' }));
+    // ★ 哨兵：房间**确实**满了。它若不为真，下面的"登录被拒"就会因为别的原因成立。
+    expect(fullRoom.isFull()).toBe(true);
+
+    const hub = hubWith();
+    const conn = new FakeConn('c-full');
+    hub.accept(conn);
+    const sessions = new GameSessions({ world: { ...world, startRoom: fullRoom }, hub });
+
+    const r = sessions.login(conn, 't'.repeat(20), '张三');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe('LOGIN_TOO_MANY');
+    // ★ 被拒了就不该留下痕迹：没建会话，也没往这条连接上发过任何帧
+    expect(sessions.size).toBe(0);
+    expect(conn.sent).toEqual([]);
   });
 });
 
@@ -442,8 +485,7 @@ describe('★ 角色名收口：字符集与全局唯一', () => {
     hub.accept(b);
 
     const ra = sessions.login(a, 't'.repeat(20), '阿飞');
-    expect(ra.ok).toBe(true);
-    if (!ra.ok) return;
+    assertOk(ra);
     const room = ra.player.environment;
 
     const rb = sessions.login(b, 't'.repeat(20), '阿飞');
@@ -567,5 +609,251 @@ describe('N5 · 房间签名是房间级的（同房共用一份）', () => {
     b.moveTo(null);
     b.moveTo(room);
     expect(roomSignatureOf(a)).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 数值快照（sc）对账 —— 战斗由世界时钟**异步**驱动，数值变化不经过指令
+// ---------------------------------------------------------------------------
+//
+// ★ 为什么单独钉这一层：`combat.test.ts` 证明"战斗会改血、会发 combat/die 帧"，
+//   这里证明"改了血之后**会话层会把新数值推给客户端**"。两半合起来才是完整链路
+//   （战斗 e2e 跑不了：起始房 `yz/guangchang` 是 `no_fight`，打不起来）。
+
+describe('数值快照（sc）对账', () => {
+  it('`statSignatureOf` 覆盖 hp / maxHp / mp / maxMp 四项（任一变化 ⇒ 签名变）', () => {
+    // ★ 2026-10-17 审查 **L7**：原先钉的是**字符串格式**
+    //   （`${hp}|${maxHp}|${mp}|${maxMp}`）—— 那等于把实现抄进断言：
+    //   改个分隔符就假红，而"签名漏掉 maxMp 这一项"这种真问题反而可能假绿。
+    //   ⇒ 改为行为断言：**四项任一变化 ⇒ 签名变**；四项都不动 ⇒ 签名不变。
+    const mk = (): Player => new Player({ oid: 'o-sig', path: null, name: '签名', roleId: 'r-sig' });
+    const base = statSignatureOf(mk());
+    // ★ 反向锚点：什么都不动 ⇒ 签名必须不变（防"每次算都不一样"的实现蒙混过关）
+    expect(statSignatureOf(mk())).toBe(base);
+
+    const sigOf = (mutate: (q: Player) => void): string => {
+      const q = mk();
+      mutate(q);
+      return statSignatureOf(q);
+    };
+    // ★ 每条都带**哨兵**：先证明"我要改的那个量真的变了"，否则"改了却没变"⇒ 断言空转
+    const hpSig = sigOf((q) => {
+      const before = q.hp;
+      q.setHp(before - 1);
+      expect(q.hp, '哨兵：hp 必须真的变了').not.toBe(before);
+    });
+    const mpSig = sigOf((q) => {
+      expect(q.mp, '哨兵：初始 mp 必须 > 0，否则"改 mp"是空操作').toBeGreaterThan(0);
+      const before = q.mp;
+      q.setMp(before - 1);
+      expect(q.mp, '哨兵：mp 必须真的变了').not.toBe(before);
+    });
+    const maxHpSig = sigOf((q) => {
+      const before = q.maxHp;
+      q.setInnate({ con: 40 }); // maxHp 随 con 变（血没动，比例变了）
+      expect(q.maxHp, '哨兵：maxHp 必须真的变了').not.toBe(before);
+    });
+    const maxMpSig = sigOf((q) => {
+      const before = q.maxMp;
+      q.setInnate({ maxMp: before + 500 });
+      expect(q.maxMp, '哨兵：maxMp 必须真的变了').not.toBe(before);
+    });
+
+    // ⇒ 签名漏掉其中任何一项，这里就会红（签名不变 = 没覆盖到）
+    expect(hpSig).not.toBe(base);
+    expect(mpSig).not.toBe(base);
+    expect(maxHpSig).not.toBe(base);
+    expect(maxMpSig).not.toBe(base);
+  });
+
+  it('登录发一个 sc 帧（前端血条只认它）', () => {
+    const hub = hubWith();
+    const sessions = new GameSessions({ world, hub });
+    const conn = new FakeConn('c-sc-login');
+    hub.accept(conn);
+    const r = sessions.login(conn, 't'.repeat(20), '数值甲');
+    if (!r.ok) throw new Error('登录失败');
+    const sc = packetsOf(conn, 'sc');
+    expect(sc).toHaveLength(1);
+    expect(sc[0]?.['hp']).toBe(r.player.hp);
+    expect(sc[0]?.['max_hp']).toBe(r.player.maxHp);
+  });
+
+  it('★ 数值变了之后 `afterTick` 补推 sc（战斗掉血走的正是这条路）', () => {
+    const hub = hubWith();
+    const sessions = new GameSessions({ world, hub });
+    const conn = new FakeConn('c-sc-tick');
+    hub.accept(conn);
+    const r = sessions.login(conn, 't'.repeat(20), '数值乙');
+    if (!r.ok) throw new Error('登录失败');
+    expect(packetsOf(conn, 'sc')).toHaveLength(1);
+
+    // 模拟"世界时钟推进造成的掉血"——不经过任何指令
+    r.player.setHp(r.player.maxHp - 30);
+    // 还没对账 ⇒ 客户端手里的仍是旧值
+    expect(packetsOf(conn, 'sc')).toHaveLength(1);
+
+    sessions.afterTick();
+    const sc = packetsOf(conn, 'sc');
+    expect(sc).toHaveLength(2);
+    expect(sc[1]?.['hp']).toBe(r.player.maxHp - 30);
+  });
+
+  it('★ 上限变化也算数值变化（换装备 / 升技能 ⇒ 血条比例要跟着动）', () => {
+    const hub = hubWith();
+    const sessions = new GameSessions({ world, hub });
+    const conn = new FakeConn('c-sc-max');
+    hub.accept(conn);
+    const r = sessions.login(conn, 't'.repeat(20), '数值丙');
+    if (!r.ok) throw new Error('登录失败');
+    r.player.setInnate({ con: 40 }); // maxHp 随之变化（血没动，但比例变了）
+    sessions.afterTick();
+    const sc = packetsOf(conn, 'sc');
+    expect(sc).toHaveLength(2);
+    expect(sc[1]?.['max_hp']).toBe(r.player.maxHp);
+  });
+
+  it('★ 无变化 ⇒ `afterTick` 不重复推（判据是区分性字段，不是"每 tick 都发"）', () => {
+    const hub = hubWith();
+    const sessions = new GameSessions({ world, hub });
+    const conn = new FakeConn('c-sc-idle');
+    hub.accept(conn);
+    sessions.login(conn, 't'.repeat(20), '数值丁');
+    sessions.afterTick();
+    sessions.afterTick();
+    expect(packetsOf(conn, 'sc')).toHaveLength(1);
+    // 房间也没变 ⇒ room / items 同样不该重复推（对账是 diff，不是盲发）
+    expect(packetsOf(conn, 'room')).toHaveLength(1);
+    expect(packetsOf(conn, 'items')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 战斗 / 死亡 / 复活帧 —— 由会话层真发到线上
+// ---------------------------------------------------------------------------
+//
+// ★ 为什么单列：`combat.test.ts` 证明引擎会调 `output.combat/die`，但那是
+//   `RecordingOutput`（假通道）。这里证明**会话层的 `#outputFor` 把这三个回调
+//   接成了真正的 `combat` / `die` 包**（否则帧在引擎侧产生、到网络层却断了）。
+// ★ 用**独立 world**（`bootstrapWorld()` 是纯工厂）避免污染 `beforeAll` 那个共享世界。
+
+describe('战斗 / 死亡 / 复活帧', () => {
+  it('★ `combat{start}` → `die{commands}` → `die{relive}` 三段都由会话层发出', () => {
+    const w = bootstrapWorld().world;
+    const hub = hubWith();
+    const sessions = new GameSessions({ world: w, hub });
+    const conn = new FakeConn('c-frames');
+    hub.accept(conn);
+    const r = sessions.login(conn, 't'.repeat(20), '帧来客');
+    if (!r.ok) throw new Error('登录失败');
+
+    expect(packetsOf(conn, 'combat')).toHaveLength(0);
+    expect(packetsOf(conn, 'die')).toHaveLength(0);
+
+    // 对手：一个裸 Player（`beginFight` 只校验"是不是角色"，不要求同房间）
+    const foe = new Player({
+      oid: w.oidSpace.next(),
+      path: null,
+      name: '木桩',
+      roleId: 'r-dummy',
+      scheduler: w.scheduler,
+      output: new RecordingOutput(),
+    });
+
+    // ① 开战 ⇒ combat{start:1}
+    expect(r.player.beginFight(foe, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+    const combat = packetsOf(conn, 'combat');
+    expect(combat).toHaveLength(1);
+    expect(combat[0]?.['start']).toBe(1);
+
+    // ② 死亡 ⇒ die{commands:[复活按钮]}
+    expect(r.player.die()).toBe(true);
+    const deaths = packetsOf(conn, 'die');
+    expect(deaths).toHaveLength(1);
+    expect(deaths[0]?.['commands']).toEqual([{ cmd: 'relive', name: '复活' }]);
+
+    // ③ 复活 ⇒ 同一个 die 包的 relive:true 支
+    expect(r.player.revive()).toBe(true);
+    const after = packetsOf(conn, 'die');
+    expect(after).toHaveLength(2);
+    expect(after[1]?.['relive']).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★ T4 / T5 清偿（2026-10-17 审查 **M5**）
+// ---------------------------------------------------------------------------
+//
+// ★★ 为什么单独钉这一层：26 册 §54.1 与路线图三处都声明「已清偿 T4/T5」，
+//   实测 `OidSpace.release()` / `pruneTemp()` 却**双双零生产调用点** ——
+//   "报已清、实际未清"。⇒ 下面两条就是那个"已清偿"的**实证**：
+//   删掉任一处调用点，这里立刻红。
+
+describe('★ T4 / T5：oid 释放与 temp 周期清理', () => {
+  it('T4 · 登出归还 oid（`oidSpace.size` 回到登录前）', () => {
+    const oidSpace = new OidSpace();
+    const hub = hubWith();
+    const conn = new FakeConn('c-oid-out');
+    hub.accept(conn);
+    const sessions = new GameSessions({ world, hub, oidSpace });
+
+    const before = oidSpace.size;
+    const r = sessions.login(conn, 't'.repeat(20), '归还甲');
+    assertOk(r);
+    expect(oidSpace.size).toBe(before + 1); // 登录后多占一个
+
+    expect(sessions.logout(conn)).toBe(true);
+    // ★ 判据：登出必须把 id 还回去。不修 `logout()` ⇒ 这里红。
+    expect(oidSpace.size).toBe(before);
+  });
+
+  it('T4 · 满员被拒**也**归还 oid（失败路径同样不许吃掉 id）', () => {
+    const startRoom = world.startRoom;
+    if (startRoom === null) throw new Error('测试世界没有起始房间');
+    const startPath = startRoom.path;
+    if (startPath === null) throw new Error('测试世界的起始房间没有 path');
+    const fullRoom = new Room({
+      oid: 'room-full-2',
+      path: startPath,
+      name: '满员房',
+      desc: '',
+      maxItems: 1,
+    });
+    fullRoom.addItem(new Item({ oid: 'filler-1', path: startPath, name: '占位' }));
+
+    const oidSpace = new OidSpace();
+    const hub = hubWith();
+    const conn = new FakeConn('c-oid-reject');
+    hub.accept(conn);
+    const sessions = new GameSessions({ world: { ...world, startRoom: fullRoom }, hub, oidSpace });
+
+    const before = oidSpace.size;
+    const r = sessions.login(conn, 't'.repeat(20), '被拒甲');
+    expect(r.ok).toBe(false);
+    // ★ 判据：失败路径也不能吃 id（只修 `logout` 而漏掉这里 ⇒ 这条红）
+    expect(oidSpace.size).toBe(before);
+  });
+
+  it('T5 · `afterTick` 周期清掉过期 temp（`pruneTemp` 的第一个生产消费者）', () => {
+    let now = 1_000;
+    const hub = hubWith();
+    const conn = new FakeConn('c-temp');
+    hub.accept(conn);
+    const sessions = new GameSessions({ world, hub, now: () => now });
+    const r = sessions.login(conn, 't'.repeat(20), '清理甲');
+    assertOk(r);
+
+    r.player.temp.setTemp('probe', 1, 100, now); // 100ms 后过期
+    r.player.temp.setTemp('forever', 1, NEVER_EXPIRES, now); // 永不过期
+    expect(r.player.temp.size).toBe(2);
+
+    now += 200; // 越过 `probe` 的过期时刻
+    sessions.afterTick();
+
+    // ★★ 判据用 `size`（**记录数**）而不是 `hasTemp`：`hasTemp` 自带
+    //   "读时顺带清理"，拿它当判据 ⇒ 删掉 `pruneTemp` 照样绿（假绿）。
+    expect(r.player.temp.size).toBe(1);
+    // ★ 反向锚点：永不过期的键**不能**被周期清理带走
+    expect(r.player.temp.hasTemp('forever', now)).toBe(true);
   });
 });

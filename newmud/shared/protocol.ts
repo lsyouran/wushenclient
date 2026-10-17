@@ -534,10 +534,9 @@ export const SERVER_PACKET_UNWIRED = [
   'cross',
   // ── 等级（等经验/等级流程）──
   'levelup',
-  // ── 战斗（未开工：`on_use` 还没有消费者）──
-  'combat',
+  // ── 战斗（`combat` / `die` 已接线：`session.ts` 的 `#outputFor`；
+  //      其余属状态 / 绝招批次，`on_use` 之外的消费者还没落地）──
   'status',
-  'die',
   'state',
   'perform',
   'dispfm',
@@ -676,6 +675,24 @@ export const ROLE_NAME_MAX_LENGTH = 64;
  *   ※ 这里是三道防线里的**第一道**；另两道见 `server/engine/view-text.ts`
  *     `neutralizePlayerText` 的注释（`view-text` 层 + 聊天指令出口）。
  */
+/**
+ * **任何**进站文本都不允许出现的字符：C0 控制字符（含 NUL / 换行 / 回车 / **ESC**）、
+ * DEL，以及 **C1 控制区（U+0080–U+009F）**。
+ *
+ * ★ 26 册 §11.2 R4：原来只写了 `\u0000-\u001f\u007f`，漏掉 C1 区。
+ *   C1 里的 **U+009B 是 8 位 CSI**：它不需要先发 ESC(0x1B) 就能让终端
+ *   执行转义序列（清屏 / 移动光标 / 改写状态行）。也就是说"禁了 ESC"
+ *   **不等于**禁了终端注入 —— 只挡 7 位表示法会把这条后门留着。
+ *   U+0085（NEL）同理：在不少日志查看器里会被当成换行，可用来伪造日志行。
+ *
+ * ★★ 2026-10-17 审查 **M1**：这把刀原先**只架在明文通道上**（`checkPlaintext`），
+ *   而 JSON 通道的 `cmd` 只有 `min(1).max(512)` ⇒ 客户端发
+ *   `{"type":"command","cmd":"say a\u001b[2J"}` 就能把 ESC / C0 / C1 送进 `say`，
+ *   再经 `sendRoom` 广播给全房间（`neutralizePlayerText` 只替换 `<`，不管控制字符）。
+ *   ⇒ 两条通道**共用同一份判据**，不许再各写一遍（各写一遍早晚有一处漏）。
+ */
+export const FORBIDDEN_CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
 export function isRoleName(raw: unknown): raw is string {
   if (typeof raw !== 'string') return false;
   if (raw.length === 0 || raw.length > ROLE_NAME_MAX_LENGTH) return false;
@@ -688,7 +705,14 @@ export function isRoleName(raw: unknown): raw is string {
 
 export const ClientCommandSchema = EnvelopeSchema.extend({
   type: z.literal('command'),
-  cmd: z.string().min(1).max(512),
+  // ★ 控制字符在这里被拒（M1，2026-10-17 审查）：与明文通道**同一把刀**，
+  //   见 `FORBIDDEN_CONTROL_RE` 的注释。zod 失败 ⇒ `BAD_PACKET`，
+  //   包根本进不到 `dispatch`，也就进不到 `say` 的广播出口。
+  cmd: z
+    .string()
+    .min(1)
+    .max(512)
+    .refine((s) => !FORBIDDEN_CONTROL_RE.test(s), { message: 'cmd 含控制字符' }),
 });
 
 export const ClientLoginSchema = EnvelopeSchema.extend({
@@ -906,18 +930,6 @@ export function checkPayloadSize(raw: string | Uint8Array): PayloadCheck {
   return { ok: true, bytes };
 }
 
-/**
- * 明文里不允许出现的字符：C0 控制字符（含 NUL / 换行 / 回车 / **ESC**）、
- * DEL，以及 **C1 控制区（U+0080–U+009F）**。
- *
- * ★ 26 册 §11.2 R4：原来只写了 `\u0000-\u001f\u007f`，漏掉 C1 区。
- *   C1 里的 **U+009B 是 8 位 CSI**：它不需要先发 ESC(0x1B) 就能让终端
- *   执行转义序列（清屏 / 移动光标 / 改写状态行）。也就是说"禁了 ESC"
- *   **不等于**禁了终端注入 —— 只挡 7 位表示法会把这条后门留着。
- *   U+0085（NEL）同理：在不少日志查看器里会被当成换行，可用来伪造日志行。
- */
-const PLAINTEXT_FORBIDDEN_RE = /[\u0000-\u001f\u007f-\u009f]/;
-
 // ★ `LOOKS_LIKE_JSON_RE` 已上移到 `constants.ts`（S10，2026-10-16 审查）：
 //   前端 `net/client.ts` 也要用**同一份**判据（决定一条指令发明文还是发 `command` 包），
 //   而前端只许 `import type` 本文件 ⇒ 放在双方都能 import 的共享层。
@@ -957,11 +969,17 @@ export function routeFrame(raw: string | Uint8Array): FrameRoute {
   const size = checkPayloadSize(raw);
   if (!size.ok) return size; // 尺寸不过关先出局，连"是不是 JSON"都不必看
   if (typeof raw !== 'string') return { ok: true, channel: 'json', bytes: size.bytes };
-  return {
-    ok: true,
-    channel: LOOKS_LIKE_JSON_RE.test(raw) ? 'json' : PLAINTEXT_CHANNEL,
-    bytes: size.bytes,
-  };
+  // ★★ 2026-10-17 审查 **L6 回退订正**（§55 修复自身引入的回归）：
+  //   上一版把"像 JSON 还得**真能解析**才走 JSON 通道"实现成了**在这里 `JSON.parse`**
+  //   —— 但本函数跑在**限流之前**（`frame-pipeline.ts`：① 尺寸 → ② 限流 → ③ 分诊 → ④ 解析），
+  //   于是每个 `{`/`[` 开头的帧都在限流前被完整解析一次（且管线里还会再 parse 一次 = 双解析）。
+  //   这违反本文件 13–19 行写死的"**限流必须排在解析之前**"（否则高频大包可未限流烧 CPU）。
+  //   ⇒ 分流**只做形状判定**（首字符）；"像 JSON 但解析不了怎么办"交给**管线**在
+  //     解析阶段（已在限流之后）处理，见 `frame-pipeline.ts` 的 JSON 分支回落。
+  if (LOOKS_LIKE_JSON_RE.test(raw)) {
+    return { ok: true, channel: 'json', bytes: size.bytes };
+  }
+  return { ok: true, channel: PLAINTEXT_CHANNEL, bytes: size.bytes };
 }
 
 export type PlaintextCheck =
@@ -984,10 +1002,13 @@ export function checkPlaintext(raw: unknown): PlaintextCheck {
     return { ok: false, code: 'BAD_PACKET', detail: '明文帧必须是字符串' };
   }
   if (LOOKS_LIKE_JSON_RE.test(raw)) {
+    // ★ 走到这里 = 一条"长得像 JSON 的明文指令"：正常分流下真 JSON 走 JSON 通道，
+    //   只有"像 JSON 但 `JSON.parse` 失败"的帧才会被**管线**回落到本函数（L6）。
+    //   回 `PLAINTEXT_NOT_COMMAND`（**不断连**），而不是 `BAD_PACKET`。
     return {
       ok: false,
-      code: 'BAD_PACKET',
-      detail: '看起来是 JSON —— 必须走 JSON 分支（明文通道只承载指令）',
+      code: 'PLAINTEXT_NOT_COMMAND',
+      detail: '看起来是 JSON 但解析不了 —— 明文通道只承载指令',
     };
   }
   const command = raw.trim();
@@ -1001,7 +1022,7 @@ export function checkPlaintext(raw: unknown): PlaintextCheck {
       detail: `明文 ${command.length} 字符超过上限 ${MAX_PLAINTEXT_CHARS}`,
     };
   }
-  const bad = PLAINTEXT_FORBIDDEN_RE.exec(command);
+  const bad = FORBIDDEN_CONTROL_RE.exec(command);
   if (bad !== null) {
     return {
       ok: false,

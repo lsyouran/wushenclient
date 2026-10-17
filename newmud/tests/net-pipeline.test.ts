@@ -95,10 +95,15 @@ describe('入站管线', () => {
     expect(r.close).toBe(true);
   });
 
-  it('不是合法 JSON → BAD_PACKET + 断连', () => {
+  it('像 JSON 但**解析不了** → PLAINTEXT_NOT_COMMAND + **不断连**（L6）', () => {
+    // ★ 2026-10-17 审查 **L6**：原先"看着像 JSON"就一律进 JSON 通道 ⇒
+    //   `JSON.parse` 失败 ⇒ `BAD_PACKET` + **断连**。CLI / 运维工具随手敲一个
+    //   `[` 或 `{` 就掉线，而不是回一句"这不是指令"。
+    //   ⇒ 现在像 JSON 还得**真能解析**才走 JSON 通道；解析不了的按明文处理
+    //     （明文通道的任何失败都不断连，见上面 `reject(..., false)`）。
     const r = asReject(handleInboundFrame('{"v":1,', ctx()));
-    expect(r.code).toBe('BAD_PACKET');
-    expect(r.close).toBe(true);
+    expect(r.code).toBe('PLAINTEXT_NOT_COMMAND');
+    expect(r.close).toBe(false);
   });
 
   it('JSON 但字段不合规 → BAD_PACKET + 断连（明文不能绕开 schema）', () => {
@@ -239,7 +244,9 @@ describe('T1 判据② · 断连后限流表收缩', () => {
     const { hub, calls } = makeHub();
     const a = new FakeConn('A2');
     hub.accept(a);
-    hub.inbound(a, '{"v":1,'); // BAD_PACKET + close
+    // ★ 用一个**真会断连**的坏包（合法 JSON、字段不合规 ⇒ `BAD_PACKET` + close）。
+    //   `{"v":1,` 这类"像 JSON 但解析不了"的现在走明文通道、**不断连**（L6）⇒ 它不该被这里用。
+    hub.inbound(a, frame('command', { cmd: '' })); // BAD_PACKET + close
     expect(calls.rejects.at(-1)?.[0]).toBe('BAD_PACKET');
     expect(hub.size).toBe(0);
     expect(hub.limiter.trackedKeys).toBe(0);

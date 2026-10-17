@@ -243,7 +243,29 @@ export class ConnectionHub {
   public inbound(conn: NetConnection, raw: string | Uint8Array): InboundIntent {
     const rec = this.#conns.get(conn.id);
     if (rec === undefined || rec.closed) {
-      return { kind: 'reject', code: 'NOT_LOGGED_IN', detail: '连接未登记或已关闭', close: true };
+      // ★ 2026-10-17 审查 **L3**：原先这里直接 `return close: true` ——
+      //   既没有 `conn.close()` 也没有回调 `onReject`，与本文件下面那条
+      //   "断连必须由 hub **主动**做，只 `forget()` 等于 socket 还开着"自相矛盾。
+      //   ⇒ 客户端毫无提示地被静默吞帧（背压关闭走的是**优雅握手**，
+      //     对端在握手完成前继续发帧就会落进这条分支）。
+      const intent: InboundIntent = {
+        kind: 'reject',
+        code: 'NOT_LOGGED_IN',
+        detail: '连接未登记或已关闭',
+        close: true,
+      };
+      try {
+        this.#hooks.onReject(conn, intent.code, intent.detail, true);
+      } catch {
+        // 通知失败也要接着关连接 —— 反过来（关了却不通知）才是"客户端莫名其妙"
+      }
+      try {
+        conn.close(intent.detail);
+      } catch {
+        // 连关闭都失败也要继续 `forget`，否则这条连接会永久留在连接表里
+      }
+      this.forget(conn);
+      return intent;
     }
     rec.lastSeenMs = this.#now();
 
@@ -435,4 +457,24 @@ export class ConnectionHub {
   public lastSeenMsOf(connId: string): number | null {
     return this.#conns.get(connId)?.lastSeenMs ?? null;
   }
+}
+
+/**
+ * 报告一次**定时器回调**里的内部错误（没有具体的连接可归因）。
+ *
+ * ★ 为什么单独有它（2026-10-17 审查 M6）：`setInterval` 的回调是**裸调**的 ——
+ *   它抛错就是 `uncaughtException`。生产靠 `cli.ts` 的进程兜底不死，但
+ *   `createGameServer()` 作为**库**被用（测试、将来嵌入别的服务）时直接崩进程。
+ *
+ *   ⇒ 与 `Hub#inbound` 那条纪律一致：内容层/会话层的回调抛错是**可能发生的输入**，
+ *     出错只影响这一拍，定时器继续跑。
+ */
+export function reportTimerError(context: string, error: unknown): void {
+  let detail: string;
+  try {
+    detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  } catch {
+    detail = '<无法序列化的错误>';
+  }
+  process.stderr.write(`[${context}] 定时器回调抛异常（本次 tick 跳过，定时器继续）：${detail}\n`);
 }
