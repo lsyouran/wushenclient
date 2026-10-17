@@ -253,7 +253,15 @@ export class Room extends Container {
  *   结构判据在语义上也更准：内容层要的是"这个 def 有没有钩子"，不是"它是什么类"。
  */
 function hooksOf(obj: GameObject): EnterLeaveHooks | undefined {
-  return (obj as Partial<{ readonly def: EnterLeaveHooks | undefined }>).def;
+  const def = (obj as Partial<{ readonly def: EnterLeaveHooks | undefined }>).def;
+  if (def === undefined) return undefined;
+  // ★★ 2026-10-17 审查 **L9**：**B 批之后 `Item` 也持 `def`** ⇒
+  //   "有 `def` ⇒ 是 NPC" 这条判据**已经不成立**（注释里那句"`Item` / `Player`
+  //   都不持 `def`"是 B 批之前的快照）。今天 `ItemDef` 没有 `on_enter` / `on_leave`，
+  //   所以行为没变；但只要将来 `ItemDef` 出现同名字段，房间里的**每件物品**
+  //   都会被当成"进出钩子宿主"。
+  //   ⇒ 问"这个 def 到底有没有进出钩子"，而不是"它有没有 def"。
+  return def.on_enter === undefined && def.on_leave === undefined ? undefined : def;
 }
 
 /** 拍平后的出口声明：方向 → 目标模板 id */
