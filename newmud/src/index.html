@@ -112,6 +112,11 @@
       <span class="lv" id="pLevel"></span>
       <span class="vital"><i class="lb">气血</i><i class="track"><i class="fill hp" id="hpFill"></i></i><i class="num" id="hpTx">—</i></span>
       <span class="vital"><i class="lb">内力</i><i class="track"><i class="fill mp" id="mpFill"></i></i><i class="num" id="mpTx">—</i></span>
+      <!-- ★ 战斗 / 状态 / 冷却的落点（2026-10-17 审查 L2）：
+           服务端早就在发 `combat` / `status` / `dispfm` 三族帧，前端也收了并写进
+           `state`，但没有任何地方**读** —— 玩家看不到自己在不在战斗、中了什么。
+           ⇒ 这里给它们一格；没有内容时保持空串（`.lv` 同款：不占视觉空间）。 -->
+      <span class="lv" id="pFlags"></span>
     </div>
     <span class="tool-item" data-act="look"><span class="glyphicon glyphicon-search tool-icon"></span><span class="tool-text">环顾</span></span>
     <span class="tool-item" data-act="cmd"><span class="glyphicon glyphicon-edit tool-icon"></span><span class="tool-text">指令</span></span>

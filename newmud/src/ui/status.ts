@@ -36,12 +36,31 @@ function gauge(fillId: string, textId: string, value: number, max: number): void
   text.textContent = `${String(value)}/${String(max)}`;
 }
 
+/**
+ * 战斗 / 状态 / 冷却的**一格**摘要。
+ *
+ * ★ 2026-10-17 审查 **L2**：`state.fighting` / `statuses` / `cooldowns` 此前
+ *   **只写不读** —— `combat` / `status` / `dispfm` 三族帧都改了状态、也调了
+ *   `renderStatus()`，而本函数根本不看它们 ⇒ 收了等于没收，玩家看不到自己在不在战斗。
+ *
+ * ★ 一律 `textContent`（`dom.ts` 不提供 innerHTML 助手），服务端文案不会被当成标签。
+ * ★ 没有内容时是空串，不是占位符 —— 空串不占视觉空间（与 `#pLevel` 同一取向）。
+ */
+function flagsText(): string {
+  const parts: string[] = [];
+  if (state.fighting) parts.push('战斗中');
+  for (const s of state.statuses) parts.push(s.name ?? s.id);
+  if (state.cooldowns.length > 0) parts.push(`冷却 ${String(state.cooldowns.length)}`);
+  return parts.join(' · ');
+}
+
 export function renderStatus(): void {
   const v = state.vitals;
   need('pName').textContent = state.roleId === '' ? '—' : state.roleId;
   need('pLevel').textContent = v.level > 0 ? `Lv.${String(v.level)}` : '';
   gauge('hpFill', 'hpTx', v.hp, v.maxHp);
   gauge('mpFill', 'mpTx', v.mp, v.maxMp);
+  need('pFlags').textContent = flagsText();
 }
 
 /**

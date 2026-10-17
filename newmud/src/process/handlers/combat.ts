@@ -1,8 +1,13 @@
 /**
  * src/process/handlers/combat.ts — 战斗 / 状态 / 冷却
  *
- * ⚠️ 战斗系统尚未落地（服务端目前不会发 `combat` / `perform`），
- *    这些 handler 是**协议已声明**的部分：收到就要画出来，否则将来接入时会静默丢帧。
+ * ★ 接线现状（2026-10-16 批 2 订正，原文写"服务端目前不会发 combat"已**不实**）：
+ *   - `sc` / `combat` / `die` —— **已有生产者**（`server/session.ts` 的 `#outputFor`
+ *     与 `#pushStats`）：登录与每次数值对账推 `sc`；开打 / 停手推 `combat`；
+ *     死亡推 `die`（带复活按钮）。
+ *   - `perform` / `status` / `state` / 冷却四包（`dispfm` / `disobj` /
+ *     `changepfm` / `clearDistime`）—— **仍无生产者**（属技能 / 状态批次）。
+ *     这些 handler 是"协议已声明"的部分：收到就要画出来，否则接入时会静默丢帧。
  */
 
 import { registerHandler } from '../registry.js';
@@ -95,6 +100,7 @@ function cooldown(kind: string) {
     const id = asString(p['id']);
     if (kind === 'clearDistime') {
       state.cooldowns = id === '' ? [] : state.cooldowns.filter((c) => c.id !== id);
+      renderStatus(); // ★ R7（2026-10-17 审查）：改了状态就得重绘，否则 `#pFlags` 的"冷却 N"不更新
       return;
     }
     const entry: { id: string; rtime?: number; time?: number; count?: number } = { id };
@@ -109,6 +115,10 @@ function cooldown(kind: string) {
     // ★ 冷却只落消息流：没有"武学面板"这种东西（服务端没有 skills 指令），
     //   往一个不存在的面板里写行，玩家永远看不到。
     pushLine(`【冷却】${id} ${String(rtime ?? 0)}ms`, 'sys');
+    // ★ R7（2026-10-17 审查）：本族帧此前只改 `state.cooldowns`、**不重绘**
+    //   ⇒ L2 的"让 `renderStatus()` 消费冷却"实际对冷却这批帧是半失效的
+    //   （要等下一个 `sc` / `combat` / `status` 帧顺带刷新）。补上。
+    renderStatus();
   };
 }
 
