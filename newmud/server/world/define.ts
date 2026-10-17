@@ -156,6 +156,14 @@ export function defineTask(id: string, def: DefMap['task']): void {
 export type { DefMap };
 
 /**
+ * 内容层的**类型**出口：`practice` 指令要拿 `PracticeResult` 的字段做文案。
+ *
+ * ★ 只转出类型（`import type` 会被完全擦除），所以这条出口不引入新的运行时依赖，
+ *   也不破坏"内容层只 import `server/world/**`"的 G13 约束。
+ */
+export type { PracticeResult, PracticeRefusal } from './defs.js';
+
+/**
  * 目标查找（`<id>` / 名字 / 模板路径 / 路径末段任一命中）。
  *
  * ★ 定义在 `server/engine/command.ts`（它是 `dispatch` 第 ③ 级的实现），

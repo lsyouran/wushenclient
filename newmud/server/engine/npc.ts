@@ -52,6 +52,14 @@ export interface NpcInit extends CharacterInit {
    * ★ 缺省（测试里裸构造的 NPC）= 不入索引 ⇒ 无需摘除，`#onDestroy?.()` 是空操作。
    */
   readonly onDestroy?: (() => void) | undefined;
+  /**
+   * 重生排期（世界实例化期注入；`undefined` = 不重生）。
+   *
+   * ★ 与 `spawnItem` 同源：重生要"再造一个同模板的实例并放进原房间"，
+   *   那需要注册表、oid、房间索引 —— 全在 `instantiateWorld` 里。
+   *   引擎侧只留一个"该排期了"的信号，`no_refresh` 的判据也在这里（见 `afterDeath`）。
+   */
+  readonly onRespawn?: (() => void) | undefined;
 }
 
 /**
@@ -59,6 +67,12 @@ export interface NpcInit extends CharacterInit {
  * 玩家角色不在此列 —— 它走 `DEFAULT_CHARACTER_CAPACITY`（50，见 `character.ts`）。
  */
 export const DEFAULT_NPC_CAPACITY = 10;
+
+/**
+ * 死亡后**默认重生间隔**（毫秒）。照抄 wushen `os/char/npc.js:145` 的 `300000`（5 分钟）。
+ * 内容可用 `NpcDef.respawn_ms` 覆盖。
+ */
+export const DEFAULT_RESPAWN_MS = 300_000;
 
 /** 一条掉落 roll 的产物：模板路径 + 份数（还未铸造） */
 export interface DropRoll {
@@ -113,6 +127,8 @@ export class Npc extends Character {
   readonly #spawnItem: ItemSpawner | undefined;
   /** 销毁回调（世界实例化期注入；`undefined` = 这个 NPC 不在世界索引里） */
   readonly #onDestroy: (() => void) | undefined;
+  /** 重生排期（世界实例化期注入；`undefined` = 这个实例死后不重生） */
+  readonly #onRespawn: (() => void) | undefined;
 
   public constructor(init: NpcInit) {
     const d = init.def;
@@ -154,6 +170,20 @@ export class Npc extends Character {
     this.onMaster = d.on_master ?? false;
     this.#spawnItem = init.spawnItem;
     this.#onDestroy = init.onDestroy;
+    this.#onRespawn = init.onRespawn;
+
+    // ★ 击杀奖励与重生间隔在**构造时**校验：它们是内容层写的数，写错了应该在世界
+    //   实例化那一刻炸（与 `SkillTemplate` 校验技能定义同一个取向），而不是等某次
+    //   死亡时把 `addExp` 的异常打进战斗循环的 stderr。
+    for (const [label, value] of [
+      ['exp', d.exp],
+      ['pot', d.pot],
+      ['respawn_ms', d.respawn_ms],
+    ] as const) {
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        throw new NpcError(`NPC ${init.path} 的 ${label} 必须是 ≥0 的有限数值，收到 ${String(value)}`);
+      }
+    }
 
     // ★ 构造收尾：`super()` 里算派生属性时技能簿还是空的（见 character.ts 的说明），
     //   所以这里装载技能并用真实的内功系数重算一次。这是唯一一处"构造完再算"，
@@ -195,6 +225,22 @@ export class Npc extends Character {
     return { onAccept: this.def.on_accept };
   }
 
+  /**
+   * NPC **不受"经验决定技能等级上限"约束** —— 上限就是模板的 `max_level`。
+   *
+   * ★ 依据：wushen 的 `skill_limit()` **只有玩家的练习路径在调**
+   *   （`lianxi.js:44`、`:131` 的 `me.skill_limit()`），NPC 的技能是模板直接给的
+   *   （`skill_map(...)`）。而 NPC 的 `exp` 在 wushen 里是"击杀奖励"那一列，
+   *   不是自己攒的经验 ⇒ 拿它算上限只会得到 0 或 NaN。
+   *
+   * ★ 返回 `Infinity` 而不是一个"足够大的常数"：`SkillBook.#capOf` 做
+   *   `Math.min(tpl.maxLevel, skillLimit())`，`Infinity` 让上限**精确**等于模板上限，
+   *   不会因为某个魔数太小而在将来被撞破。
+   */
+  public override skillLimit(): number {
+    return Number.POSITIVE_INFINITY;
+  }
+
   // ── 死亡 ─────────────────────────────────────────────────────────────────
 
   /**
@@ -215,7 +261,7 @@ export class Npc extends Character {
    *   ⇒ 表现上少了一个容器，掉落与拾取的玩法闭环不变。
    * ★ 定时重刷（wushen 的 `this.call_out(this.relive, 300000)`）属后续批次。
    */
-  protected override afterDeath(_killer?: Character): void {
+  protected override afterDeath(killer?: Character): void {
     // ★ 先摘出房间、再掉落：`#dropLoot` 抛错（见下）时人也已经消失，
     //   不会留下"死而不消散"的幽灵；掉落要掉在**原来那个**房间，所以先抓住引用。
     const room = this.environment;
@@ -223,7 +269,30 @@ export class Npc extends Character {
     // ★ T4（26 册 §55）：人没了 ⇒ 从世界的实例索引里摘掉、**把 oid 还回去**。
     //   不摘的话 `world.npcs` 只增不减，而每次击杀还会铸新掉落物进 `world.items`。
     this.#onDestroy?.();
+    // ★ 击杀奖励排在掉落**前面**：若 `#dropLoot` 抛错（内容写了 drops 却没注入铸造器），
+    //   经验/潜能至少已经到账 —— 主要收益不该被次要收益的配置错误连坐。
+    this.#awardKiller(killer);
     if (room !== null) this.#dropLoot(room);
+    // ★ 重生（wushen `os/char/npc.js:144-146` 的 `call_out(this.relive, 300000)`）：
+    //   排期由世界注入（`#onRespawn`），`no_refresh` 的模板死了就是死了。
+    if (this.def.no_refresh !== true) this.#onRespawn?.();
+  }
+
+  /**
+   * 把 `NpcDef.exp` / `NpcDef.pot` 交给**击杀者**（wushen 的 `add_exp(exp, pot, money)`，
+   * `os/char/character.js:304`）。
+   *
+   * ★ 这里给的是**击杀奖励**，不是"NPC 自己攒了多少" —— 两者同名字段但不同义，
+   *   详见 `defs.ts#NpcDef.exp` 的说明。
+   * ★ 只有"有击杀者"才发：NPC 自己消失 / 掉线 / GM 清理都不该凭空造出经验。
+   *   （未来 NPC 互殴时击杀者也是 NPC —— `addExp` 在它身上照样成立，只是没人消费。）
+   */
+  #awardKiller(killer: Character | undefined): void {
+    if (killer === undefined) return;
+    const exp = this.def.exp ?? 0;
+    const pot = this.def.pot ?? 0;
+    if (exp === 0 && pot === 0) return;
+    killer.addExp(exp, pot);
   }
 
   /**

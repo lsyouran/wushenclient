@@ -28,7 +28,7 @@ import { asWorldId } from '@shared/ids.js';
 import { CommandTable } from './command.js';
 import type { CommandEntry } from './command.js';
 import { Item } from './item.js';
-import { Npc } from './npc.js';
+import { Npc, DEFAULT_RESPAWN_MS } from './npc.js';
 import { OidSpace } from './oid.js';
 import { entriesOf, getDef } from './registry.js';
 import { Room, exitPairsOf } from './room.js';
@@ -206,6 +206,63 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
     return item;
   };
 
+  /**
+   * 造一个 NPC 实例并放进房间。**首次摆放与重生共用这一条**（否则"重生出来的怪"
+   * 与"世界初始的怪"迟早会分叉：少注入一个回调、少进一次索引）。
+   *
+   * ★ 用 `function` 声明而不是 `const` 箭头：`spawnNpc ↔ respawnNpc` 互相引用，
+   *   声明提升让这对递归不需要先声明后使用。
+   */
+  function spawnNpc(room: Room, npcPath: string, ctxId: string): Npc {
+    const npcDef = getDef<NpcDef>('npc', npcPath);
+    if (npcDef === undefined) {
+      throw new WorldError(`${ctxId} 里的 NPC 模板不存在：${npcPath}`);
+    }
+    const npc = new Npc({
+      oid: oidSpace.next(),
+      path: brand(npcPath, 'instantiateWorld:npc'),
+      name: npcDef.name,
+      def: npcDef,
+      skillRegistry,
+      scheduler,
+      // ★ 掉落铸造器：NPC 死时按 `drops` roll 出物品，需要"铸新物品"的能力
+      //   （oid + 模板），那是本函数独有的 —— 注入进去（同 `scheduler`）。
+      spawnItem: makeItem,
+      // ★ 销毁回调（T4）：NPC 死亡消散时从世界索引摘除并释放 oid
+      //   （与 `spawnItem` 同款注入：`afterDeath` 拿不到世界）。
+      onDestroy: () => forget(npc),
+      // ★ 重生排期：同一个模板、**同一个房间**，隔 `respawn_ms` 再刷一只
+      //   （wushen `npc.js:145` 的 `call_out(this.relive, 300000)`）。
+      onRespawn: () => {
+        respawnNpc(room, npcPath, npcDef.respawn_ms ?? DEFAULT_RESPAWN_MS);
+      },
+    });
+    npcs.set(npc.oid, npc);
+    const list = npcsByPath.get(npcPath);
+    if (list === undefined) npcsByPath.set(npcPath, [npc]);
+    else list.push(npc);
+    room.addItem(npc);
+    return npc;
+  }
+
+  /**
+   * 排一次重生。
+   *
+   * ★ 房间满（`max_item_count`）时**再等一轮**而不是放弃：怪已经死了，如果因为
+   *   地上东西多就不刷，玩家会看到"这里永远空了"。重试间隔与正常重生相同。
+   * ★ 排期走 `scheduler`（世界的**唯一**时钟），于是测试 `step(t)` 就能验证重生，
+   *   不必真等 5 分钟。
+   */
+  function respawnNpc(room: Room, npcPath: string, delayMs: number): void {
+    scheduler.schedule(delayMs, () => {
+      if (room.isFull()) {
+        respawnNpc(room, npcPath, delayMs);
+        return;
+      }
+      spawnNpc(room, npcPath, String(room.path));
+    });
+  }
+
   // ── 2. 房间骨架（先把所有房间造出来，出口才有东西可连）──────────────────
   for (const entry of entriesOf('room')) {
     const def = getDef<RoomDef>('room', entry.id);
@@ -245,29 +302,7 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
     if (room === undefined || def === undefined) continue;
 
     for (const npcPath of def.npcs ?? []) {
-      const npcDef = getDef<NpcDef>('npc', npcPath);
-      if (npcDef === undefined) {
-        throw new WorldError(`${entry.id} 里的 NPC 模板不存在：${npcPath}`);
-      }
-      const npc = new Npc({
-        oid: oidSpace.next(),
-        path: brand(npcPath, 'instantiateWorld:npc'),
-        name: npcDef.name,
-        def: npcDef,
-        skillRegistry,
-        scheduler,
-        // ★ 掉落铸造器：NPC 死时按 `drops` roll 出物品，需要"铸新物品"的能力
-        //   （oid + 模板），那是本函数独有的 —— 注入进去（同 `scheduler`）。
-        spawnItem: makeItem,
-        // ★ 销毁回调（T4）：NPC 死亡消散时从世界索引摘除并释放 oid
-        //   （与 `spawnItem` 同款注入：`afterDeath` 拿不到世界）。
-        onDestroy: () => forget(npc),
-      });
-      npcs.set(npc.oid, npc);
-      const list = npcsByPath.get(npcPath);
-      if (list === undefined) npcsByPath.set(npcPath, [npc]);
-      else list.push(npc);
-      room.addItem(npc);
+      spawnNpc(room, npcPath, entry.id);
     }
 
     for (const itemPath of def.objects ?? []) {

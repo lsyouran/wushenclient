@@ -428,13 +428,17 @@ describe('engine/skill · 经验 / 升级 / 进阶（数值全部走 SKILL_FORMU
     expect(npc.skills.entryOf('wd/a')?.exp).toBe(19);
   });
 
-  it('addExp 到 max_level 封顶：等级停住、经验清零（不再滚下去）', () => {
+  it('addExp 到 max_level 封顶：等级停住、**剩余经验保留**（上限是动态的，不能吞进度）', () => {
     const npc = makeNpc();
     npc.skills.learn('wd/a', 99);
     const gained = npc.skills.addExp('wd/a', 10 ** 6);
     expect(gained).toBe(1); // 99 → 100（defaultMaxLevel）
     expect(npc.skills.levelOf('wd/a')).toBe(SKILL_FORMULA.defaultMaxLevel);
-    expect(npc.skills.entryOf('wd/a')?.exp).toBe(0);
+    // ★ 26 册 §56：`cap` 现在由**角色经验**动态决定（`skillLimit()`），到顶不清零。
+    //   旧实现 `if (level>=maxLevel) exp=0` 会把已经付过代价的进度吞掉：
+    //   玩家只看到"练到上限，再打几只怪，经验还是 0"。
+    //   这里多出来的 999000 就是"封顶后仍在累积的进度"，上限一抬就能继续用。
+    expect(npc.skills.entryOf('wd/a')?.exp).toBe(999_000);
   });
 
   it('addExp 的数值必须有限（写 NaN 不许静默变 0）', () => {

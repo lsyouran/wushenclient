@@ -39,6 +39,7 @@ import type {
   CommandGateDecl,
   ItemDetailView,
   NpcDef,
+  PracticeResult,
   RoomDef,
   FightStart,
 } from '../server/world/defs.js';
@@ -128,6 +129,24 @@ class TestActor implements CommandActor {
 
   public isBusy(): boolean {
     return this.#busy;
+  }
+
+  // ── 成长面（本文件只测分发闸门，所以是"永远无经验、练不了"的桩）────────────
+  public exp = 0;
+  public pot = 0;
+
+  public spendPot(amount: number): boolean {
+    if (this.pot < amount) return false;
+    this.pot -= amount;
+    return true;
+  }
+
+  public practiceSkill(): PracticeResult {
+    return { ok: false, reason: 'unknown', name: '', spent: 0, gained: 0, level: 0, limit: 0 };
+  }
+
+  public skillLimit(): number {
+    return 0;
   }
 
   public setBusy(v: boolean): void {
@@ -496,6 +515,12 @@ describe('engine/command · gateStateOf', () => {
       // 战斗批次新增（`gateStateOf` 用不到，但接口要求在场）
       beginFight: () => ({ ok: true }),
       revive: () => true,
+      // 成长批次新增（`gateStateOf` 用不到，但接口要求在场）
+      exp: 0,
+      pot: 0,
+      spendPot: () => false,
+      practiceSkill: () => ({ ok: false, reason: 'unknown', name: '', spent: 0, gained: 0, level: 0, limit: 0 }),
+      skillLimit: () => 0,
     };
     expect(gateStateOf(minimal, 1000)).toEqual({
       userLevel: 0,

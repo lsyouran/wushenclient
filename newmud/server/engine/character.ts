@@ -41,7 +41,7 @@ import { Scheduler } from './scheduler.js';
 import type { TaskHandle } from './scheduler.js';
 import { TempStore } from './temp.js';
 // `import type` 会被完全擦除，所以引擎 ↔ 内容层的类型引用不产生运行时环。
-import type { ActorObject, FightStart, ItemDetailView } from '../world/defs.js';
+import type { ActorObject, FightStart, ItemDetailView, PracticeResult } from '../world/defs.js';
 import {
   COMBAT_FORMULA,
   applyCritDamage,
@@ -56,7 +56,7 @@ import type { AttrBreakdown, DerivedCombat, InnateStats } from './formula.js';
 import { applyPropMap, createPropHolder, getProp, loadProps, snapshotProps } from './props.js';
 import type { LoadReport } from './load-report.js';
 import type { PropHolder, PropSnapshot, RawPropMap } from './props.js';
-import { SkillBook, emptySkillRegistry } from './skill.js';
+import { SkillBook, emptySkillRegistry, levelLimit } from './skill.js';
 import type { SkillRegistry } from './skill.js';
 import { VIEW_OTHER, VIEW_SELF, VIEW_TARGET, renderViewText } from './view-text.js';
 import type { ViewSubject } from './view-text.js';
@@ -634,6 +634,76 @@ export abstract class Character extends Container implements PropHolder {
     return isEnableSlot(idOrSlot)
       ? this.skills.levelOfSlot(idOrSlot)
       : this.skills.levelOf(idOrSlot);
+  }
+
+  // ── 成长：经验 / 潜能 / 技能上限 ──────────────────────────────────────────
+  // 对照 wushen：`os/char/character.js:304`（`add_exp`）、
+  // `os/char/chara_skill.js:87`（`skill_limit`）、`world/cmd/skill/lianxi.js`（练习）。
+
+  /**
+   * 技能等级上限（wushen `skill_limit`）：由**自身经验**与境界决定。
+   * 消费者是 `SkillBook.addExp()` 的封顶 —— 见 `SkillActor.skillLimit`。
+   *
+   * ★ wushen 的 `switch (this.level)` 把境界当**因子**（10/20/…/60），本实现照抄；
+   *   境界提升（`level_up`）属门派/任务批次，在此之前 `level` 恒 0 ⇒ 因子恒 10。
+   *   于是"经验越多、能练得越高"这一条现在就成立，境界只是把同一份经验**放大**。
+   */
+  public skillLimit(): number {
+    return levelLimit(this.exp, this.level);
+  }
+
+  /**
+   * 获得经验 / 潜能 / 钱（wushen `add_exp(exp, pot, money)`）。
+   *
+   * ★★ 这是**唯一**的增加入口：打怪奖励、任务奖励、GM 补给都走它，
+   *   于是"给了却没播报 / 播报的数与实际入账不一致"只可能有一处错。
+   *
+   * ★ 与 wushen 的差异（有意）：**负数抛错**。wushen 用同一个方法两头通吃，
+   *   于是掉经验也会播成"你获得了-500点经验"；而扣经验属于"死亡惩罚 / GM 调整"
+   *   那类独立玩法，该有自己的文案与审计点，不该混进"获得"。
+   */
+  public addExp(exp: number, pot = 0, money = 0): void {
+    for (const [label, value] of [
+      ['经验', exp],
+      ['潜能', pot],
+      ['钱', money],
+    ] as const) {
+      if (!Number.isFinite(value)) {
+        throw new CharacterError(`addExp 的${label}必须是有限数值，收到 ${String(value)}`);
+      }
+      if (value < 0) {
+        throw new CharacterError(`addExp 只收非负的${label}（扣减走各自的惩罚路径），收到 ${String(value)}`);
+      }
+    }
+    this.exp += Math.trunc(exp);
+    this.pot += Math.trunc(pot);
+    this.money += Math.trunc(money);
+
+    const parts: string[] = [];
+    if (exp > 0) parts.push(`${String(Math.trunc(exp))} 点经验`);
+    if (pot > 0) parts.push(`${String(Math.trunc(pot))} 点潜能`);
+    if (money > 0) parts.push(`${String(Math.trunc(money))} 文钱`);
+    if (parts.length === 0) return;
+    this.notify(`你获得了${parts.join('，')}。`);
+  }
+
+  /** 花掉潜能（wushen `lianxi.js` 的 `me.pot -= exp`）。返回 `false` = 不够 */
+  public spendPot(amount: number): boolean {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new CharacterError(`spendPot 需要 ≥0 的有限数值，收到 ${String(amount)}`);
+    }
+    const cost = Math.trunc(amount);
+    if (this.pot < cost) return false;
+    this.pot -= cost;
+    return true;
+  }
+
+  /**
+   * 练技能（内容层 `practice` 指令的落点）。账目全在 `SkillBook.practice` 里算，
+   * 这里只做委派 —— 于是"潜能 1:1 换技能经验"只有一份实现。
+   */
+  public practiceSkill(idOrName: string, targetLevel?: number): PracticeResult {
+    return this.skills.practice(idOrName, targetLevel);
   }
 
   /** 交给 `formula.ts` 的先天属性快照（含派生出来的 `forceRad`） */

@@ -308,6 +308,44 @@ export type FightStart =
  *   但六道闸门**现在**就按它们判定 —— 于是闸门是可达、可测的，
  *   而不是等系统齐了再补（`engine/command.ts` 的 `checkCommandGates`）。
  */
+/** `practiceSkill` 拒绝的原因（内容层据此分档给文案） */
+export type PracticeRefusal =
+  /** 没有这个技能（id 与名字都没命中） */
+  | 'unknown'
+  /** 有这个技能，但你没学 */
+  | 'not-learned'
+  /** 知识类技能只能靠读书（wushen `lianxi.js:20` 的 KNOWLEDGE 分支） */
+  | 'knowledge'
+  /** 已经到当前上限（`skillLimit()` 或模板 `max_level`） */
+  | 'capped'
+  /** 已经达到**你指定的目标等级**（不是上限；用于区分"还没到头，只是到点了"） */
+  | 'reached'
+  /** 潜能不足 */
+  | 'no-pot'
+  /** 基本功火候未到（wushen `check_skill` 的 `can_enables` 门槛） */
+  | 'basis';
+
+/**
+ * 一次"练技能"的结果（`CommandActor.practiceSkill`）。
+ *
+ * ★ `spent` 是**实际**消耗的潜能（可能小于预算：到上限就停）。
+ * ★ `limit` 一并返回：被 `capped` 拒掉时，客户端要能说出"上限是多少"。
+ */
+export interface PracticeResult {
+  readonly ok: boolean;
+  readonly reason?: PracticeRefusal;
+  /** 技能的**显示名**（`unknown` 时为空串）；文案用它，免得给玩家看 `wd/taijijian` */
+  readonly name: string;
+  /** 实际消耗的潜能 */
+  readonly spent: number;
+  /** 涨了几级 */
+  readonly gained: number;
+  /** 练完之后的等级 */
+  readonly level: number;
+  /** 当前上限 */
+  readonly limit: number;
+}
+
 export interface CommandActor extends Actor {
   /** 我在哪个容器里（房间 / 背包）。不在任何容器里则为 null */
   readonly environment: ActorEnvironment | null;
@@ -371,6 +409,46 @@ export interface CommandActor extends Actor {
    *   掉落 / 任务奖励 / 卖店，各有自己的入口与审计点。
    */
   spendMoney(amount: number): boolean;
+
+  // ── 成长（经验 / 潜能 / 练技能）───────────────────────────────────────────
+  //
+  // ★★ 与 `money` 的取用方式**刻意不同**：`money` 只给"花"，因为钱的**增加**
+  //   有各自的入口（掉落 / 任务奖励 / 卖店）且要审计；而 `exp` / `pot` 的**增加**
+  //   在本项目**只有一个入口**——`Character.addExp()`（wushen 同名方法，
+  //   `os/char/character.js:304`）。所以这里只读不写，写入留给那个方法。
+
+  /**
+   * 自身**经验**（wushen `this.exp`）。它决定技能等级上限（见 `SkillActor.skillLimit`）。
+   * ★ 与 `NpcDef.exp`（击杀奖励）不是一回事，别混。
+   */
+  readonly exp: number;
+  /** **潜能**（wushen `this.pot`）：练习技能的燃料 */
+  readonly pot: number;
+  /**
+   * 花掉潜能（wushen `lianxi.js` 的 `me.pot -= exp`）。返回 `false` = 不够。
+   * ★ 与 `spendItem` / `spendMoney` 同一族：只给"花"这个方向。
+   */
+  spendPot(amount: number): boolean;
+  /**
+   * 当前**技能等级上限**（与 `SkillActor.skillLimit` 是同一个数）。
+   *
+   * ★ 为什么这里再声明一次：`CommandActor` 与 `SkillActor` 是**两条平行的契约**
+   *   （前者"指令宿主"，后者"能学技能的角色"），彼此不继承；面板类指令（`score`）
+   *   要显示上限，就得从自己这条链上拿到它。`Character` 同时满足两者，
+   *   运行时只有一个实现 —— 不是两份真相。
+   */
+  skillLimit(): number;
+  /**
+   * **练技能**：把潜能按 1:1 换成技能经验（wushen `lianxi.js:169-176` 的
+   * `me.pot -= exp; skill.add_exp(me, exp)`，其中 `exp = count_speed(me)`）。
+   *
+   * @param idOrName  技能 id（`wd/taijijian`）或中文名（`太极剑法`）
+   * @param targetLevel 练到多少级；缺省 = 当前上限。给超过上限的值按上限截断。
+   *
+   * ★ 账目全在引擎里算（消耗多少、涨几级、有没有到上限），内容层只负责文案 ——
+   *   否则"够不够潜能"这类判断会在每个指令里各写一遍。
+   */
+  practiceSkill(idOrName: string, targetLevel?: number): PracticeResult;
 
   // ★ `isAlive`（活体判据）**已上提到 `Actor`** —— 全项目单源，理由见 `Actor` 上的注释（E4）。
   /**
@@ -468,6 +546,18 @@ export interface SkillActor extends Actor {
   readonly gender: Gender;
   /** 某技能 / 某装配槽的当前等级；0 = 不会 */
   skillLevel(idOrSlot: string): number;
+  /**
+   * **技能等级上限**（wushen `CHARACTER.prototype.skill_limit`，`os/char/chara_skill.js:87`）：
+   * 由**角色自身经验**（`Character.exp`）与境界（`Character.level`）决定。
+   *
+   * ★★ 它不是一个"给人看的数字"，而是 `SkillBook.addExp()` 的**封顶** ——
+   *   "经验决定技能等级上限"因此是引擎保证的规则，不靠每个调用方自觉
+   *   （26 册 §56：先有单一封顶点，才谈得上"所有加经验的入口都受约束"）。
+   *
+   * ★ 玩家与 NPC 的差异：wushen 里只有玩家走这条曲线（NPC 的 `exp` 是击杀奖励，
+   *   不是自身经验）。本项目的 `Npc` 覆写为 `Infinity`，理由见 `npc.ts`。
+   */
+  skillLimit(): number;
 }
 
 /** 所有定义共有的字段 */
@@ -626,6 +716,23 @@ export interface NpcDef extends BaseDef, PropMap, EnterLeaveHooks {
   readonly mp?: number;
   readonly max_mp?: number;
   readonly score?: number;
+  /**
+   * **击杀奖励**：击杀者获得的经验 / 潜能（wushen 内容层的写法就是 `exp: 500, pot: 500`，
+   * 见 `world/area/fb1/fb1.js:12-13`）。
+   *
+   * ★★ 它与 `Character.exp`（角色**自身**积累的经验，决定技能等级上限）是**两个概念**：
+   *   这里是"这只怪值多少"，那里是"这个人攒了多少"。同名不同义 —— 所以写在这里，
+   *   而不是把 NPC 的 `exp` 塞进 `Character.exp`（那样打死一只怪就等于自己练了一级）。
+   *
+   * ★ 缺省 = 0（不给）。`Npc.afterDeath` 只把这两个数交给**击杀者**，不写进自己。
+   */
+  readonly exp?: number;
+  readonly pot?: number;
+  /**
+   * 死亡后多久原地重生（毫秒）。缺省 `Npc.DEFAULT_RESPAWN_MS`（wushen `npc.js:145` 的 300000）。
+   * ★ 对 `no_refresh: true` 的模板**无效**（那种怪死了就是死了）。
+   */
+  readonly respawn_ms?: number;
   readonly skills?: readonly SkillMapEntry[];
   readonly drops?: readonly DropDef[];
   readonly no_refresh?: boolean;

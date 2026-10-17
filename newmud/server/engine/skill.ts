@@ -44,7 +44,7 @@ import {
 } from './props.js';
 import type { PropHolder } from './props.js';
 import type { TempStore } from './temp.js';
-import type { PerformDef, PropMap, SkillActor, SkillDef, SkillLearnCondition } from '../world/defs.js';
+import type { PerformDef, PracticeResult, PropMap, SkillActor, SkillDef, SkillLearnCondition } from '../world/defs.js';
 
 export class SkillError extends Error {
   public override readonly name = 'SkillError';
@@ -105,6 +105,34 @@ export function levelLimit(exp: number, realm: number): number {
 export function gradeUpLevel(pot: number, targetGrade: number): number {
   const lv = (pot * SKILL_FORMULA.gradeUpPotNum) / SKILL_FORMULA.gradeUpPotDen / (targetGrade + 1);
   return Math.trunc(Math.sqrt(Math.max(0, lv)));
+}
+
+/**
+ * 从 `(fromLevel, poolExp)` 练到 `targetLevel` 还**缺多少**技能经验。
+ *
+ * ★ **已有的经验先抵扣**（`poolExp`）：玩家可能已经攒了一截（`addExp` 到上限时
+ *   不再清零，见那里的说明），那部分不该再收一次钱。
+ * ★ 纯函数：`practice` 靠它把"要花多少潜能"算准，避免到顶时把多出来的潜能白扔掉。
+ */
+export function expToReach(
+  grade: number,
+  fromLevel: number,
+  poolExp: number,
+  targetLevel: number,
+): number {
+  if (targetLevel <= fromLevel) return 0;
+  let pool = Math.max(0, poolExp);
+  let cost = 0;
+  for (let lv = fromLevel; lv < targetLevel; lv += 1) {
+    const need = levelExp(lv, grade);
+    if (pool >= need) {
+      pool -= need;
+    } else {
+      cost += need - pool;
+      pool = 0;
+    }
+  }
+  return cost;
 }
 
 /** 便于查看当前技能数值参数（启动日志 / tuning 汇总用） */
@@ -306,6 +334,21 @@ export class SkillRegistry {
     return t;
   }
 
+  /**
+   * 按**中文名**找技能（`practice 太极剑法` 这类玩家输入）。
+   *
+   * ★ 重名**抛错**而不是取第一个：技能的显示名是内容层写的，两套武功同名是内容配置
+   *   错误，静默取一个会让"练了半天不是那个技能"。wushen 用 id 当键，没有这个问题，
+   *   但也因此玩家必须敲英文 id。
+   */
+  public byName(name: string): SkillTemplate | undefined {
+    const hits = this.all().filter((t) => t.name === name);
+    if (hits.length > 1) {
+      throw new SkillError(`技能名 "${name}" 不唯一：${hits.map((h) => h.id).join(', ')}`);
+    }
+    return hits[0];
+  }
+
   public all(): readonly SkillTemplate[] {
     return [...this.#byId.values()];
   }
@@ -347,6 +390,10 @@ export interface SkillState {
  */
 export interface SkillBookOwner extends SkillActor, PropHolder {
   readonly temp: TempStore;
+  /** 潜能（练习技能的燃料）。与 `CommandActor.pot` 是同一个数（`Character.pot`） */
+  readonly pot: number;
+  /** 花掉潜能；返回 `false` = 不够。与 `Character.spendPot` 同一实现 */
+  spendPot(amount: number): boolean;
   /** 重算派生属性（技能改完属性后必须调，等价 wushen 每次改技能尾部的 `me.recount()`） */
   recount(): void;
 }
@@ -485,12 +532,34 @@ export class SkillBook {
     this.recompute();
   }
 
-  /** 加经验，返回**升了几级**（wushen `add_exp` 的 while 循环） */
-  public addExp(id: string, exp: number): number {
+  /**
+   * 本簿的**等级上限**：模板上限与**角色经验上限**取小（wushen `skill_limit`）。
+   *
+   * ★★ 这是"经验决定技能等级上限"的**唯一落点**：所有加经验的路径
+   *   （`practice` / 未来的打怪涨技能 / 秘籍）都经过 `addExp`，于是没有哪条路能绕过它。
+   * ★ NPC 的 `skillLimit()` 是 `Infinity`（见 `npc.ts`），于是它们的上限就是模板 `max_level`
+   *   —— 与 wushen 一致（NPC 不走 `skill_limit` 那条曲线）。
+   */
+  #capOf(tpl: SkillTemplate): number {
+    return Math.min(tpl.maxLevel, this.#owner.skillLimit());
+  }
+
+  /**
+   * 加经验，返回**升了几级**（wushen `add_exp` 的 while 循环）。
+   *
+   * @param untilLevel **本次最多升到这一级**（缺省 = 不额外限制）。
+   *   ★ 只给 `practice` 用：玩家说"练到 20 级"时，手上那笔余额也许够冲到 100 ——
+   *   不钉住就会"我让它练到 20，它自己跳到 100"。普通加经验不要传它。
+   */
+  public addExp(id: string, exp: number, untilLevel?: number): number {
     if (!Number.isFinite(exp)) throw new SkillError(`addExp 需要有限数值，收到 ${String(exp)}`);
+    if (untilLevel !== undefined && (!Number.isFinite(untilLevel) || untilLevel < 0)) {
+      throw new SkillError(`addExp 的 untilLevel 必须是 ≥0 的有限数值，收到 ${String(untilLevel)}`);
+    }
     const tpl = this.#registry.getOrThrow(id);
     const st = this.#ensureState(id);
-    if (st.level >= tpl.maxLevel) return 0;
+    const cap = Math.min(this.#capOf(tpl), untilLevel ?? Number.POSITIVE_INFINITY);
+    if (st.level >= cap) return 0;
 
     // ★ 26 册 §11.2 R6：`st.exp += exp` 允许负增量把 exp 打成**负数** ——
     //   于是角色背上"经验债"：先扣经验、再打怪时得先还清才升得了级，
@@ -502,15 +571,112 @@ export class SkillBook {
     // ★ 与 wushen 的差异（docs/27 §4 决策 D4 注）：wushen 的循环在 `level++` **之前**
     //   重算 need，于是"升到 L+1 的代价"实际按 L-1 算，序列是 5,5,10,15…
     //   这里按自然语义修正：升到 L+1 的代价 = levelExp(L)。
-    while (st.level < tpl.maxLevel && st.exp >= need) {
+    while (st.level < cap && st.exp >= need) {
       st.exp -= need;
       st.level += 1;
       gained += 1;
       need = levelExp(st.level, tpl.grade);
     }
-    if (st.level >= tpl.maxLevel) st.exp = 0;
+    // ★★ 到上限**不再清零剩余经验**（旧实现有 `if (level>=maxLevel) exp=0`）：
+    //   `cap` 现在是**动态**的（角色经验涨了上限就抬高），今天到顶不代表明天也到顶。
+    //   清零会把已经付过代价的进度吞掉 —— 玩家只看到"练到 10 级，再打几只怪，
+    //   技能经验却是 0"。`setLevel`（GM 直接设等级）仍然清零，那是另一回事。
     if (gained > 0) this.recompute();
     return gained;
+  }
+
+  /**
+   * **练技能**：把潜能 1:1 换成技能经验（wushen `lianxi.js:169-176`
+   * 的 `me.pot -= exp; this.skill_base.add_exp(me, exp)`）。
+   *
+   * ★ 与 wushen 的差异（形态，非数值）：wushen 是**持续状态** —— `set_state({on_check,
+   *   on_stop})` 之后由心跳每 5 秒调一次 `do_learn`，可排队、可中断。本项目本批做
+   *   **一次结算**：`state` 状态机尚未落地（`Actor.state` 目前是只读的诊断字段），
+   *   而"扣潜能 → 涨等级"这条账与形态无关，先把它做成一个可验证的原子操作。
+   *   状态机落地后，`do_learn` 只需要每拍调用本方法一次。
+   *
+   * ★ 兑换率 1:1 照抄 wushen。智力只影响 wushen 的**每拍量**（`count_speed`，见
+   *   `lianxi.js:178`），不影响兑换率；本批没有"拍"，故智力不参与。
+   *
+   * @param idOrName    技能 id 或中文名
+   * @param targetLevel 练到多少级；缺省 = 当前上限（超过按上限截断）
+   */
+  public practice(idOrName: string, targetLevel?: number): PracticeResult {
+    const tpl = this.#registry.get(idOrName) ?? this.#registry.byName(idOrName);
+    const limit = tpl === undefined ? 0 : this.#capOf(tpl);
+    const name = tpl?.name ?? '';
+    if (tpl === undefined) {
+      return { ok: false, reason: 'unknown', name, spent: 0, gained: 0, level: 0, limit };
+    }
+    const st = this.#states.get(tpl.id);
+    if (st === undefined) {
+      return { ok: false, reason: 'not-learned', name, spent: 0, gained: 0, level: 0, limit };
+    }
+    if (tpl.type === SKILL_TYPES.KNOWLEDGE) {
+      // wushen `lianxi.js:20-22`：知识类只能靠读书（`study`），不能"练"。
+      return { ok: false, reason: 'knowledge', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+    if (st.level >= limit) {
+      return { ok: false, reason: 'capped', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+    if (!this.#basisReady(tpl, st.level)) {
+      return { ok: false, reason: 'basis', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+
+    let target = limit;
+    if (targetLevel !== undefined) {
+      if (!Number.isFinite(targetLevel)) {
+        throw new SkillError(`practice 的目标等级必须是有限数值，收到 ${String(targetLevel)}`);
+      }
+      target = Math.min(Math.trunc(targetLevel), limit);
+    }
+    if (target <= st.level) {
+      // ★ 与 capped 分开：这里还没到上限，只是**已经达到你给的 target**。
+      //   合成一个 reason 会让文案说成"你到了瓶颈（上限 350 级）"—— 玩家明明才 5 级。
+      return { ok: false, reason: 'reached', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+
+    // ★ 只花"练到目标等级"所需的量：wushen 是每拍花一点、到 `max_level` 就停，
+    //   一次结算必须**精确**算出这笔账，否则会把潜能花超（多出来的部分因为到顶而白扔）。
+    const cost = expToReach(tpl.grade, st.level, st.exp, target);
+
+    // ★★ 余额已经够到 target ⇒ **不花钱，直接把余额转成等级**。
+    //   这不是理论情况：技能到上限时 `addExp` 会把剩余经验**留着**（见那里的说明），
+    //   等角色经验把上限抬高，那笔余额就正好覆盖若干级。若这里按"要花 0 点潜能"判成
+    //   `no-pot`，玩家会遇到"明明攒够了却练不动"的死局 —— 而且查不出来（余额不显示）。
+    if (cost === 0) {
+      const gained = this.addExp(tpl.id, 0, target);
+      return { ok: true, name, spent: 0, gained, level: st.level, limit };
+    }
+
+    if (this.#owner.pot <= 0) {
+      return { ok: false, reason: 'no-pot', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+    const spent = Math.min(cost, this.#owner.pot);
+    if (spent <= 0) {
+      return { ok: false, reason: 'no-pot', name, spent: 0, gained: 0, level: st.level, limit };
+    }
+    if (!this.#owner.spendPot(spent)) {
+      // 上面刚比过 `pot`，走到这里说明 `pot` 与 `spendPot` 不是同一份账 —— 大声报出来，
+      // 不要静默把等级加上去（"不花钱也能练"是最难发现的那类漏洞）。
+      throw new SkillError('practice 结账失败：pot 与 spendPot 读数不一致');
+    }
+    const gained = this.addExp(tpl.id, spent);
+    return { ok: true, name, spent, gained, level: st.level, limit };
+  }
+
+  /**
+   * 基本功火候（wushen `lianxi.js:146-156` 的 `check_skill`）：
+   * 一套武功要装到某个槽，它的等级就必须**严格低于**该槽当前的基本技能等级。
+   *
+   * ★ 「当前」= `levelOfSlot()`（占该槽的**基本技能**），不是 `activeTemplate()`
+   *   —— 后者会把"被装配的武功"算进去，于是武功跟自己比，永远不达标。
+   */
+  #basisReady(tpl: SkillTemplate, level: number): boolean {
+    for (const slot of tpl.canEnables) {
+      if (level >= this.levelOfSlot(slot)) return false;
+    }
+    return true;
   }
 
   /**
