@@ -142,7 +142,8 @@ class TestActor implements CommandActor {
   }
 
   public practiceSkill(): PracticeResult {
-    return { ok: false, reason: 'unknown', name: '', spent: 0, gained: 0, level: 0, limit: 0 };
+    // ★ 判别联合会拒绝"半边有值"的形状：拒绝时就不能带 spent/gained，也不能编造 level
+    return { kind: 'refused', reason: 'unknown' };
   }
 
   public skillLimit(): number {
@@ -519,7 +520,7 @@ describe('engine/command · gateStateOf', () => {
       exp: 0,
       pot: 0,
       spendPot: () => false,
-      practiceSkill: () => ({ ok: false, reason: 'unknown', name: '', spent: 0, gained: 0, level: 0, limit: 0 }),
+      practiceSkill: () => ({ kind: 'refused', reason: 'unknown' }),
       skillLimit: () => 0,
     };
     expect(gateStateOf(minimal, 1000)).toEqual({

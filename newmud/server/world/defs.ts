@@ -308,43 +308,68 @@ export type FightStart =
  *   但六道闸门**现在**就按它们判定 —— 于是闸门是可达、可测的，
  *   而不是等系统齐了再补（`engine/command.ts` 的 `checkCommandGates`）。
  */
-/** `practiceSkill` 拒绝的原因（内容层据此分档给文案） */
-export type PracticeRefusal =
-  /** 没有这个技能（id 与名字都没命中） */
-  | 'unknown'
-  /** 有这个技能，但你没学 */
-  | 'not-learned'
-  /** 知识类技能只能靠读书（wushen `lianxi.js:20` 的 KNOWLEDGE 分支） */
-  | 'knowledge'
-  /** 已经到当前上限（`skillLimit()` 或模板 `max_level`） */
-  | 'capped'
-  /** 已经达到**你指定的目标等级**（不是上限；用于区分"还没到头，只是到点了"） */
-  | 'reached'
-  /** 潜能不足 */
-  | 'no-pot'
-  /** 基本功火候未到（wushen `check_skill` 的 `can_enables` 门槛） */
-  | 'basis';
+/** 给拒绝分支挂上 `kind` 标记（`T & {kind}` 不引入联合，不会破坏判别） */
+type Refused<T extends { readonly reason: string }> = T & { readonly kind: 'refused' };
 
 /**
- * 一次"练技能"的结果（`CommandActor.practiceSkill`）。
+ * 「没练成」—— 七种原因，**每种只带自己文案真正要用的字段**。
  *
- * ★ `spent` 是**实际**消耗的潜能（可能小于预算：到上限就停）。
- * ★ `limit` 一并返回：被 `capped` 拒掉时，客户端要能说出"上限是多少"。
+ * ★★ 为什么不是 `{ ok: false; reason: PracticeRefusal; name; level; limit }`
+ *   这种"一个袋子装全部字段"的写法：那个形状**允许合法但不存在**的组合
+ *   （`ok: true` 且 `reason: 'capped'`、`reason: 'unknown'` 且 `level: 0`），
+ *   读的人必须先想"哪个字段说了算"，写的人被迫在六个分支里各填两个恒为 0 的
+ *   `spent`/`gained`。改成判别联合之后，非法状态**写不出来**，编译器直接挡。
+ *
+ * ★ 字段为什么逐个分支声明：`basis` 分支读不到 `level`，`reached` 分支读不到
+ *   `limit` —— 想读就得先证明自己已经把它算出来了。可选字段（`level?: number`）
+ *   做不到这一点，它只是把"读的人要处理 undefined"的负担往后传。
  */
-export interface PracticeResult {
-  readonly ok: boolean;
-  readonly reason?: PracticeRefusal;
-  /** 技能的**显示名**（`unknown` 时为空串）；文案用它，免得给玩家看 `wd/taijijian` */
+export type PracticeRefused =
+  /** 没有这个技能（id 与名字都没命中）。文案不需要任何字段 */
+  | Refused<{ readonly reason: 'unknown' }>
+  /** 有这个技能，但你没学 */
+  | Refused<{ readonly reason: 'not-learned'; readonly name: string }>
+  /** 知识类技能只能靠读书（wushen `lianxi.js:20` 的 KNOWLEDGE 分支） */
+  | Refused<{ readonly reason: 'knowledge'; readonly name: string }>
+  /** 已经到当前上限（`skillLimit()` 或模板 `max_level`）——要报出"上限是多少" */
+  | Refused<{ readonly reason: 'capped'; readonly name: string; readonly level: number; readonly limit: number }>
+  /** 已经达到**你指定的目标等级**（不是上限；用于区分"还没到头，只是到点了"） */
+  | Refused<{ readonly reason: 'reached'; readonly name: string; readonly level: number }>
+  /** 基本功火候未到（wushen `check_skill` 的 `can_enables` 门槛） */
+  | Refused<{ readonly reason: 'basis'; readonly name: string }>
+  /** 潜能不足 */
+  | Refused<{ readonly reason: 'no-pot'; readonly name: string; readonly limit: number }>;
+
+/**
+ * 拒绝原因的**标签联合**（由上面派生，不再手抄第二份）。
+ *
+ * ★ 派生而非重写：`PracticeRefused` 加一支、这里自动跟着变 —— 两份清单会漂移。
+ */
+export type PracticeRefusal = PracticeRefused['reason'];
+
+/** 「练成了」—— `spent`/`gained` 在这里才有意义 */
+export interface PracticeDone {
+  readonly kind: 'done';
+  /** 技能的**显示名**；文案用它，免得给玩家看 `wd/taijijian` */
   readonly name: string;
-  /** 实际消耗的潜能 */
+  /** 实际消耗的潜能（可能小于预算：到上限就停） */
   readonly spent: number;
-  /** 涨了几级 */
+  /** 涨了几级（可能为 0：潜能不够升一级，但经验已经累进去了） */
   readonly gained: number;
   /** 练完之后的等级 */
   readonly level: number;
   /** 当前上限 */
   readonly limit: number;
 }
+
+/**
+ * 一次"练技能"的结果（`CommandActor.practiceSkill`）。
+ *
+ * ★★ 判别联合，不是"布尔标记 + 可选原因"：`kind` 是唯一判据，
+ *   于是 `if (r.kind === 'refused')` 之后编译器就知道 `spent`/`gained` 不存在，
+ *   `switch (r.reason)` 里每一支的字段都是精确的（漏一支编译不过）。
+ */
+export type PracticeResult = PracticeDone | PracticeRefused;
 
 export interface CommandActor extends Actor {
   /** 我在哪个容器里（房间 / 背包）。不在任何容器里则为 null */

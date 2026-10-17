@@ -161,7 +161,7 @@ export type { DefMap };
  * ★ 只转出类型（`import type` 会被完全擦除），所以这条出口不引入新的运行时依赖，
  *   也不破坏"内容层只 import `server/world/**`"的 G13 约束。
  */
-export type { PracticeResult, PracticeRefusal } from './defs.js';
+export type { PracticeDone, PracticeRefused, PracticeRefusal, PracticeResult } from './defs.js';
 
 /**
  * 目标查找（`<id>` / 名字 / 模板路径 / 路径末段任一命中）。

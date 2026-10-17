@@ -603,24 +603,27 @@ export class SkillBook {
    */
   public practice(idOrName: string, targetLevel?: number): PracticeResult {
     const tpl = this.#registry.get(idOrName) ?? this.#registry.byName(idOrName);
-    const limit = tpl === undefined ? 0 : this.#capOf(tpl);
-    const name = tpl?.name ?? '';
     if (tpl === undefined) {
-      return { ok: false, reason: 'unknown', name, spent: 0, gained: 0, level: 0, limit };
+      // ★ 旧形状要求每个分支都填 `name` / `level` / `limit`，技能不存在时只能编造
+      //   `''` 和 `0` —— 于是"0 级"作为**假数据**被传出去。判别联合里这一支不带字段，
+      //   假数据无处可写。
+      return { kind: 'refused', reason: 'unknown' };
     }
+    const name = tpl.name;
+    const limit = this.#capOf(tpl);
     const st = this.#states.get(tpl.id);
     if (st === undefined) {
-      return { ok: false, reason: 'not-learned', name, spent: 0, gained: 0, level: 0, limit };
+      return { kind: 'refused', reason: 'not-learned', name };
     }
     if (tpl.type === SKILL_TYPES.KNOWLEDGE) {
       // wushen `lianxi.js:20-22`：知识类只能靠读书（`study`），不能"练"。
-      return { ok: false, reason: 'knowledge', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'knowledge', name };
     }
     if (st.level >= limit) {
-      return { ok: false, reason: 'capped', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'capped', name, level: st.level, limit };
     }
     if (!this.#basisReady(tpl, st.level)) {
-      return { ok: false, reason: 'basis', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'basis', name };
     }
 
     let target = limit;
@@ -633,7 +636,7 @@ export class SkillBook {
     if (target <= st.level) {
       // ★ 与 capped 分开：这里还没到上限，只是**已经达到你给的 target**。
       //   合成一个 reason 会让文案说成"你到了瓶颈（上限 350 级）"—— 玩家明明才 5 级。
-      return { ok: false, reason: 'reached', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'reached', name, level: st.level };
     }
 
     // ★ 只花"练到目标等级"所需的量：wushen 是每拍花一点、到 `max_level` 就停，
@@ -646,15 +649,15 @@ export class SkillBook {
     //   `no-pot`，玩家会遇到"明明攒够了却练不动"的死局 —— 而且查不出来（余额不显示）。
     if (cost === 0) {
       const gained = this.addExp(tpl.id, 0, target);
-      return { ok: true, name, spent: 0, gained, level: st.level, limit };
+      return { kind: 'done', name, spent: 0, gained, level: st.level, limit };
     }
 
     if (this.#owner.pot <= 0) {
-      return { ok: false, reason: 'no-pot', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'no-pot', name, limit };
     }
     const spent = Math.min(cost, this.#owner.pot);
     if (spent <= 0) {
-      return { ok: false, reason: 'no-pot', name, spent: 0, gained: 0, level: st.level, limit };
+      return { kind: 'refused', reason: 'no-pot', name, limit };
     }
     if (!this.#owner.spendPot(spent)) {
       // 上面刚比过 `pot`，走到这里说明 `pot` 与 `spendPot` 不是同一份账 —— 大声报出来，
@@ -662,7 +665,7 @@ export class SkillBook {
       throw new SkillError('practice 结账失败：pot 与 spendPot 读数不一致');
     }
     const gained = this.addExp(tpl.id, spent);
-    return { ok: true, name, spent, gained, level: st.level, limit };
+    return { kind: 'done', name, spent, gained, level: st.level, limit };
   }
 
   /**

@@ -27,9 +27,30 @@ import { getDef } from '../server/engine/registry.js';
 import { Scheduler } from '../server/engine/scheduler.js';
 import { instantiateWorld } from '../server/engine/world.js';
 import type { World } from '../server/engine/world.js';
-import type { NpcDef } from '../server/world/defs.js';
+import type { NpcDef, PracticeDone, PracticeRefused, PracticeRefusal, PracticeResult } from '../server/world/defs.js';
 import { asWorldId } from '../shared/ids.js';
 import { dispatch } from '../server/engine/command.js';
+
+// ---------------------------------------------------------------------------
+// 判别联合取支助手：**取不到就抛** —— 等于顺手多一条断言。
+// ★ 不用 `as` 强转取字段：那样形状写错会静默通过，这里错了会红。
+// ---------------------------------------------------------------------------
+
+function done(r: PracticeResult): PracticeDone {
+  if (r.kind !== 'done') throw new Error(`期望练成，实际被拒：${r.reason}`);
+  return r;
+}
+
+/** 取「被拒」并断言原因；返回**收窄后**的分支 —— capped 里读得到 `level`，basis 里读不到 */
+function refusedAs<R extends PracticeRefusal>(
+  r: PracticeResult,
+  reason: R,
+): Extract<PracticeRefused, { readonly reason: R }> {
+  if (r.kind !== 'refused') throw new Error(`期望被拒（${reason}），实际练成了`);
+  if (r.reason !== reason) throw new Error(`期望 ${reason}，实际 ${r.reason}`);
+  // 上面的运行时检查已把 r 限定在这一支；泛型 R 无法让 TS 自己收窄，故此处显式转。
+  return r as Extract<PracticeRefused, { readonly reason: R }>;
+}
 
 let world: World;
 let oidSeq = 0;
@@ -241,8 +262,7 @@ describe('progression · 消耗潜能练技能', () => {
     player.pot = 100;
 
     // 1 → 5 级：10 + 15 + 20 + 25 = 70
-    const r = player.practiceSkill('基本剑法', 5);
-    expect(r.ok).toBe(true);
+    const r = done(player.practiceSkill('基本剑法', 5));
     expect(r.spent).toBe(70);
     expect(r.gained).toBe(4);
     expect(r.level).toBe(5);
@@ -256,8 +276,7 @@ describe('progression · 消耗潜能练技能', () => {
     player.skills.learn('base/sword', 1);
     player.pot = 1_000_000;
 
-    const r = player.practiceSkill('基本剑法');
-    expect(r.ok).toBe(true);
+    const r = done(player.practiceSkill('基本剑法'));
     expect(r.level).toBe(10); // = skillLimit()
     expect(r.limit).toBe(10);
     // 1 → 10 级合计 5*(2+…+10) = 270；多出来的潜能必须还在
@@ -269,10 +288,11 @@ describe('progression · 消耗潜能练技能', () => {
     const { player } = makePlayer('yz/guangchang');
     player.skills.learn('base/sword', 10);
     player.pot = 500;
-    const r = player.practiceSkill('基本剑法');
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('capped');
+    const r = refusedAs(player.practiceSkill('基本剑法'), 'capped');
+    // ★ 判别联合的实证：只有 'capped' 带 level/limit，所以这两行读得到；
+    //   换成 'basis' 分支就会编译失败（不是"约定上不该读"）。
     expect(r.level).toBe(10);
+    expect(r.limit).toBe(10);
     expect(player.pot).toBe(500); // 一分没花
   });
 
@@ -280,9 +300,9 @@ describe('progression · 消耗潜能练技能', () => {
     const { player } = makePlayer('yz/guangchang');
     player.skills.learn('base/sword', 1);
     player.pot = 0;
-    const r = player.practiceSkill('基本剑法');
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('no-pot');
+    const r = refusedAs(player.practiceSkill('基本剑法'), 'no-pot');
+    // 'no-pot' 带 limit（"还差多少级"要说得出上限），但不带 level
+    expect(r.limit).toBe(10);
     expect(player.skills.levelOf('base/sword')).toBe(1);
     expect(player.pot).toBe(0);
   });
@@ -290,8 +310,10 @@ describe('progression · 消耗潜能练技能', () => {
   it('没学过的技能 ⇒ not-learned；完全不存在的 ⇒ unknown', () => {
     const { player } = makePlayer('yz/guangchang');
     player.pot = 1000;
-    expect(player.practiceSkill('基本剑法').reason).toBe('not-learned');
-    expect(player.practiceSkill('不存在的功夫').reason).toBe('unknown');
+    refusedAs(player.practiceSkill('基本剑法'), 'not-learned');
+    // ★ `unknown` 这一支**不带任何字段**（技能不存在时 name/level 都是编造的），
+    //   所以这里只能断 reason 本身 —— 这正是想要的效果。
+    refusedAs(player.practiceSkill('不存在的功夫'), 'unknown');
     expect(player.pot).toBe(1000);
   });
 
@@ -305,13 +327,11 @@ describe('progression · 消耗潜能练技能', () => {
     player.pot = 100_000;
 
     // 1 级 < 基本剑法 30 级 ⇒ 可以练
-    expect(player.practiceSkill('太极剑法', 2).ok).toBe(true);
+    done(player.practiceSkill('太极剑法', 2));
 
     // 把武功拨到与基本功**同级** ⇒ 火候未到
     player.skills.setLevel('wd/taijijian', 30);
-    const r = player.practiceSkill('太极剑法');
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('basis');
+    refusedAs(player.practiceSkill('太极剑法'), 'basis');
     expect(player.skills.levelOf('wd/taijijian')).toBe(30);
   });
 
@@ -319,8 +339,7 @@ describe('progression · 消耗潜能练技能', () => {
     const { player } = makePlayer('yz/guangchang');
     player.skills.learn('base/sword', 1);
     player.pot = 1_000_000;
-    const r = player.practiceSkill('基本剑法', 9999);
-    expect(r.ok).toBe(true);
+    const r = done(player.practiceSkill('基本剑法', 9999));
     expect(r.level).toBe(10);
     expect(player.skills.levelOf('base/sword')).toBe(10);
   });
@@ -329,11 +348,11 @@ describe('progression · 消耗潜能练技能', () => {
     const { player } = makePlayer('yz/guangchang');
     player.skills.learn('base/sword', 5);
     player.pot = 100;
-    const r = player.practiceSkill('基本剑法', 5);
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('reached');
+    const r = refusedAs(player.practiceSkill('基本剑法', 5), 'reached');
     expect(r.level).toBe(5);
-    expect(r.limit).toBe(10); // 上限仍是 10 ⇒ 与 capped 语义可区分
+    // ★ 'reached' 这一支**不带 limit** —— 它压根不需要说上限（说了反而误导）。
+    //   这里改成从角色上读上限，确认「上限仍远大于 level」，与 capped 可区分。
+    expect(player.skillLimit()).toBe(10);
     expect(player.pot).toBe(100);
   });
 
@@ -350,8 +369,7 @@ describe('progression · 消耗潜能练技能', () => {
     // 上限抬到 100，且**一分潜能都没有** —— 那笔余额应该能直接换等级
     player.exp = 100_000;
     player.pot = 0;
-    const r = player.practiceSkill('基本剑法', 20);
-    expect(r.ok).toBe(true);
+    const r = done(player.practiceSkill('基本剑法', 20));
     expect(r.spent).toBe(0);
     expect(r.gained).toBe(10);
     expect(r.level).toBe(20);

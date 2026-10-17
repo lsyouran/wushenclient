@@ -1,5 +1,5 @@
 import { defineCommand } from '@engine/world/define.js';
-import type { PracticeResult } from '@engine/world/define.js';
+import type { PracticeDone, PracticeRefused } from '@engine/world/define.js';
 
 /**
  * `practice`（别名 `lianxi`）—— **消耗潜能练技能**。
@@ -30,7 +30,7 @@ import type { PracticeResult } from '@engine/world/define.js';
 
 /** 文案集中在表里（与 `kill.ts` / `fight.ts` 同款），便于对账与改口吻 */
 const PRACTICE_MESSAGES = {
-  refuse(r: PracticeResult): string {
+  refuse(r: PracticeRefused): string {
     switch (r.reason) {
       case 'unknown':
         return '没有这个技能。';
@@ -50,12 +50,16 @@ const PRACTICE_MESSAGES = {
         return '你的基本功火候未到，必须先打好基础才能继续提高。';
       case 'no-pot':
         return '你的潜能不够，无法继续练习下去了。';
-      default:
-        return '你现在练不了这门功夫。';
     }
+    // ★★ 这里**刻意不写 `default`**。七个分支全部 `return` 之后，`r` 才被收窄成 `never`，
+    //   这一行才编译得过。将来谁给 refusal 加第八支，`tsc` 会**在这一行失败** ——
+    //   而不是静默落进一个"你现在练不了这门功夫"的兜底文案，让玩家不知道该去打怪
+    //   还是去练基本功。（旧实现有 `default`，穷举全靠人肉，等于没有。）
+    const uncovered: never = r;
+    throw new Error(`practice 文案缺一支：${JSON.stringify(uncovered)}`);
   },
 
-  done(r: PracticeResult): string {
+  done(r: PracticeDone): string {
     const head = `你练了一阵${r.name}，消耗 ${String(r.spent)} 点潜能`;
     // ★ 潜能可能不够升一级（经验只累到一半）—— 那**不算失败**，钱已经花在熟练度上了。
     //   把这两种结果分开说，玩家才不会以为"点了没反应"。
@@ -81,7 +85,7 @@ defineCommand('train/practice', {
     }
     const target = rawTarget === undefined ? undefined : Number(rawTarget);
     const r = me.practiceSkill(key, target);
-    if (!r.ok) {
+    if (r.kind === 'refused') {
       me.notify(PRACTICE_MESSAGES.refuse(r));
       return;
     }
