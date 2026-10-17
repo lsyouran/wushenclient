@@ -86,6 +86,13 @@ export const COMBAT_FORMULA = {
   critPerDex: 0.1,
 
   /**
+   * 暴击伤害的**基础百分比**（wushen `world/extends/char/combat.js:118`）：
+   *   `sh = sh * (150 + add_bjsh_per) / 100`
+   * 即暴击至少把伤害放大到 **1.5 倍**，再叠 `add_bjsh_per`（暴击伤害加成%）。
+   */
+  critDamageBasePer: 150,
+
+  /**
    * ★ 内功系数的**默认值**（当角色没有任何"占据 `force` 槽的技能"时）。
    *
    * docs/27 决策：这里原先是一个**待定的近似**（`forceSkillLevel * 0.01`，下限 1），
@@ -402,12 +409,168 @@ export function computeDerived(innate: InnateStats, props: PropHolder): DerivedC
  *   这是刻意的 —— 不做"至少 1 点"的保底，否则低级角色能靠无限次磨把高防目标磨死。
  *   该边界由 `tests/engine-formula.test.ts` 显式钉住（`=== 0`）。
  */
+function reduceByDefense(damage: number, defense: number): number {
+  if (damage <= 0) return 0;
+  if (defense <= 0) return damage;
+  return (damage / (damage + defense)) * damage;
+}
+
 export function damageAfterDefense(damage: number, defense: number): number {
   assertFinite(damage, 'damage.sh');
   assertFinite(defense, 'damage.fy');
-  if (damage <= 0) return 0;
-  if (defense <= 0) return int(damage);
-  return int((damage / (damage + defense)) * damage);
+  return int(reduceByDefense(damage, defense));
+}
+
+// ---------------------------------------------------------------------------
+// 战斗结算（批 · 打起来）—— 命中 / 躲闪 / 招架 / 暴击 / 伤害
+// ---------------------------------------------------------------------------
+//
+// ★ 本节全部是**纯函数**：不读 `Character`、不写状态，随机源也**注入**
+//   （`rand: () => number`，缺省 `Math.random`）。理由与 `computeDerived` 同：
+//   判定逻辑本来就只有"一次比较"，但它的取值区间、边界、与 wushen 的对应
+//   必须能被单测逐条锚住 —— 而"真随机"没法锚。
+//
+// ★ 与 wushen 的对应（`world/extends/char/combat.js:27-179` 的 `do_attack`）：
+//   下面 `rollDefense` 逐分支照抄它的 8 支判定（`target.is_faint` / `is_rash` /
+//   `this.is_miss` / `target.is_miss` / `target.is_busy` / 默认），
+//   **本批只接得上 4 支**（faint / busy / 默认；rash / miss / shadow 属技能·BUFF
+//   批次，其字段还没有生产者）。缺的几支不是"没实现"，是"输入还不存在"——
+//   接上时只需给 `DefenseParams` 补字段，判定体不动。
+
+/** 暴击伤害放大（wushen `sh * (150 + add_bjsh_per) / 100`） */
+export function applyCritDamage(sh: number, addBjshPer = 0): number {
+  return (sh * (COMBAT_FORMULA.critDamageBasePer + addBjshPer)) / 100;
+}
+
+/**
+ * 暴击判定（wushen `CHARACTER.prototype.crit`，`world/extends/char/combat.js:21`）。
+ *
+ *     if (this.random(100) < bj_per + part.crit - target.query_prop("diff_bj"))
+ *
+ * ★ 本项目**不做攻击部位**（`CHARACTER_PARTS` 的 `part.crit` 档）—— 那是
+ *   "打头/打心"的细化，属战斗体验批次；这里取 `part.crit = 0`。
+ *   同理 `diff_bj`（防暴击）没有生产者（装备/BUFF 批次），取 0。
+ * ★ `crit` 传**攻击方的暴击派生值**（`DerivedCombat.crit`，wushen 的 `this.bj`）。
+ */
+export function rollCrit(crit: number, rand: () => number = Math.random): boolean {
+  assertFinite(crit, 'rollCrit.crit');
+  return Math.floor(rand() * 100) < crit;
+}
+
+/** 命中 / 躲闪 / 招架一次判定所需的数值 */
+export interface DefenseParams {
+  /** 攻击方**命中**（`DerivedCombat.hit`，wushen `mz`） */
+  readonly hit: number;
+  /** 防御方**躲闪**（`DerivedCombat.evasion`，wushen `ds`）。★ 不叫 dodge —— 那是技能 id */
+  readonly evasion: number;
+  /** 防御方**招架**（`DerivedCombat.deflect`，wushen `zj`）。★ 不叫 parry */
+  readonly deflect: number;
+  /** 防御方是否**昏迷**（wushen `target.is_faint`）—— 昏迷者不躲不招 */
+  readonly defenderFaint?: boolean;
+  /** 防御方是否**忙乱**（wushen `target.is_busy`）—— 忙乱者只能躲、不能招 */
+  readonly defenderBusy?: boolean;
+}
+
+/** 一次判定的结果：挨打者要么躲开、要么招架、要么（两者皆否）吃下伤害 */
+export interface DefenseOutcome {
+  readonly dodged: boolean;
+  readonly parried: boolean;
+}
+
+/**
+ * 命中 / 躲闪 / 招架判定（wushen `do_attack` 的 8 支 `if/else`）。
+ *
+ * ★★ wushen 的比较式**照抄**，别"顺手改成更直观的写法"：
+ *
+ *     is_dodge = Math.random() * (target.ds / 2) + target.ds / 2 > mz
+ *
+ *   即：**在 `[ds/2, ds)` 上均匀取一个数，与 `mz` 比大小**。躲闪越高、命中越低
+ *   ⇒ 越容易读出"大于 mz" ⇒ 越容易躲开。这是一个**线性**的对抗式
+ *   （不是常见的 `rand() < ds/(ds+mz)` 概率式）—— 数值手感完全不同，照抄才对得上原作。
+ *
+ * ★ `rand()` 的**调用次数与顺序**是行为的一部分（wushen 先算躲闪、再算招架，
+ *   各用一次随机数）—— 测试注入确定序列时依赖这一点，别合并成一次调用。
+ * ★ `defenderFaint` 缺省 false（状态系统落地前恒无昏迷）；`defenderBusy`
+ *   由 `Character.isBusy()` 提供（已落地）。
+ */
+export function rollDefense(p: DefenseParams, rand: () => number = Math.random): DefenseOutcome {
+  assertFinite(p.hit, 'rollDefense.hit');
+  assertFinite(p.evasion, 'rollDefense.evasion');
+  assertFinite(p.deflect, 'rollDefense.deflect');
+  // wushen: `if (target.is_faint …) { is_dodge=false; is_parry=false; }`
+  if (p.defenderFaint === true) return { dodged: false, parried: false };
+  /** `[v/2, v)` 上均匀取样（wushen 那两行的公共部分） */
+  const sample = (v: number): number => rand() * (v / 2) + v / 2;
+  // wushen: `else if (target.is_busy …) { is_dodge = …; is_parry=false; }`
+  if (p.defenderBusy === true) {
+    return { dodged: sample(p.evasion) > p.hit, parried: false };
+  }
+  // wushen 的默认支：先躲闪后招架，各一次随机数
+  return { dodged: sample(p.evasion) > p.hit, parried: sample(p.deflect) > p.hit };
+}
+
+/**
+ * **完整**伤害结算（wushen `CHARACTER.prototype.damage`，
+ * `world/extends/char/combat.js:205`）。
+ *
+ * 顺序照抄（每一步都能改变最终值，别重排）：
+ *   ① 攻击方的**忽视防御%**（`diff_fy_per`）先冲抵防御方的**伤害减免%**（`diff_sh_per`），
+ *      多出来的部分转成"额外忽视防御"；
+ *   ② 用（剩余的）忽视防御削减防御值 `fy`；
+ *   ③ 按（剩余的）伤害减免% 削减伤害；
+ *   ④ 递减减伤 `sh/(sh+fy)*sh`（与 `damageAfterDefense` **同一个内核**，见 `reduceByDefense`）；
+ *   ⑤ **固定**减伤 `sh - diff_sh`（wushen `combat.js:228`）。
+ *
+ * ★ 与 `damageAfterDefense` 的关系：后者是"只有第 ④ 步"的简化版（给不关心
+ *   减免/忽视的调用方）；本函数是完整链路。**递减内核只有一份**（`reduceByDefense`），
+ *   所以两条路不会各自漂移。
+ * ★ 取整只在**最后**做一次（wushen 也是最后 `parseInt`）—— 中间保持浮点，
+ *   提前取整会让 ①②③ 的边界与 wushen 对不上。
+ *   ⑤ 也在取整**之前**：wushen 是 `sh = sh - diff_sh` 之后再 `parseInt`。
+ *
+ * ★★ 第 ⑤ 步一度**整个漏掉**（2026-10-17 审查 M4）：`diff_sh` 在核心表里早已登记，
+ *   内容作者写了却静默失效 —— 而本函数头还自称"完整…顺序照抄"。
+ */
+export function computeDamage(
+  raw: number,
+  defense: number,
+  damageReductionPer: number,
+  ignoreDefensePer: number,
+  damageReduction = 0,
+): number {
+  assertFinite(raw, 'damage.raw');
+  assertFinite(defense, 'damage.fy');
+  assertFinite(damageReductionPer, 'damage.diff_sh_per');
+  assertFinite(ignoreDefensePer, 'damage.diff_fy_per');
+  assertFinite(damageReduction, 'damage.diff_sh');
+  if (!(raw > 0)) return 0;
+
+  let sh = raw;
+  let fy = defense;
+  let dr = damageReductionPer;
+  let ig = ignoreDefensePer;
+
+  // ① 忽视防御先吃减免（wushen combat.js:214-219）
+  if (dr > 0 && ig > 0) {
+    dr -= ig;
+    if (dr < 0) ig = -dr;
+  }
+  // ② 削减防御值
+  if (fy > 0 && ig > 0) {
+    fy -= (fy * ig) / 100;
+    if (fy < 0) fy = 0;
+  }
+  // ③ 削减伤害
+  if (dr > 0) sh -= (sh * dr) / 100;
+  // ④ 递减减伤
+  if (fy > 0 && sh > 0) sh = reduceByDefense(sh, fy);
+  // ⑤ 固定减伤（wushen `combat.js:228`）。★ 在取整**之前**做，与 wushen 同序。
+  sh -= damageReduction;
+  // ★ wushen `combat.js:238`：`if (sh > 0) { … add_hp(-sh); return sh; } return 0;`
+  //   ⇒ 减到 0 或负数是"这一下**没打动**"，返回 0 —— **不是**返回负数
+  //   （那会让 `takeDamage` 的 `setHp(before - dealt)` 变成**加血**）。
+  if (!(sh > 0)) return 0;
+  return int(sh);
 }
 
 /** 便于查看当前参数（启动日志用；`world.ts` 的统计里会带上） */

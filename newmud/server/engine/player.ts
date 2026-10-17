@@ -61,6 +61,20 @@ export class Player extends Character {
     return this.phase === 'playing';
   }
 
+  /**
+   * 死亡收尾：**留在房间**（灵魂状态）+ 发 `die` 包（带复活入口）。
+   *
+   * ★ wushen 的玩家死法是"生成 corpse + `item_changed(this, false)` 移出房间 +
+   *   前端弹『去武庙复活 / 原地复活』"（`os/char/user.js:379-405`）。
+   *   本项目**不建尸体**，而"把玩家摘出房间"会让客户端失去一切上下文
+   *   （房间不推了、也看不到自己），于是这里选**留房间**：
+   *   `hp=0` ⇒ `isAlive=false` ⇒ 六道闸门（`allow_die` 缺省拒绝）自然挡住绝大多数指令，
+   *   加上 `die` 包里的复活按钮，闭环就完整了。
+   */
+  protected override afterDeath(): void {
+    this.sendDieFrame([{ cmd: 'relive', name: '复活' }]);
+  }
+
   public override toString(): string {
     return `player:${this.roleId}(${this.oid})`;
   }

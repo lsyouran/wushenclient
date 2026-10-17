@@ -19,6 +19,7 @@ import type {
   EnableSlot,
   EquipSlot,
   ExtProp,
+  FightType,
   Gender,
   MoveResult,
   PropKey,
@@ -148,6 +149,55 @@ export interface Actor {
 }
 
 /**
+ * 一个对象**能被怎么操作**（内容层可见的交互面）。
+ *
+ * ★ 为什么单开一个成员、而不把这些字段摊平进 `ActorObject`：
+ *   它们**只对某些 kind 有意义** —— `onAccept` 只在 NPC 上（`NpcDef.on_accept`）、
+ *   `noGet` / `onUse` 只在物品上（`ItemDef`）。分成一坨之后：
+ *     ① "这个对象有没有交互面"本身成了一个可判的东西（没有模板的玩家就是 `undefined`）；
+ *     ② `ActorObject` 的其余字段（`id`/`name`/`kind`/`path`/`desc`）保持
+ *        **所有 kind 都成立**这条不变式 —— 摊平会让"每个东西都可能有 `noUse`"
+ *        这种假命题写进类型里。
+ *
+ * ★★ 只放**当前有消费者**的字段（26 册 L8 的病：声明未实现）：
+ *   下面 6 个字段的消费者就在 `world/command/item/{get,give,use}.ts` 三条指令里。
+ *   以下**刻意不在这里**（做了才算，别提前写进来当"预留"）：
+ *     - `onStudy` / `onOpen` —— 秘籍 / 箱子属后续批次，没有读者；
+ *     - 使用冷却（`ItemDef.distime`）—— 需要往角色的 `TempStore` 写键，
+ *       而 `CommandActor` 不暴露 temp 写入（那是并发/生命周期有讲究的能力，
+ *       不该顺手开给内容层）。属"道具冷却"专项批次。
+ *     - 装备类物品"必须先装备才能用"（wushen `use.js:22`）—— 装备系统未落地。
+ */
+export interface InteractHooks {
+  /** 捡不起来（`ItemDef.no_get`，wushen `obj.no_get`） */
+  readonly noGet?: boolean | undefined;
+  /** 丢不掉（`ItemDef.no_drop`，wushen `obj.no_drop`） */
+  readonly noDrop?: boolean | undefined;
+  /** 用后**不消耗**（`ItemDef.no_consume`，wushen `obj.no_consume`） */
+  readonly noConsume?: boolean | undefined;
+  /**
+   * 被捡起之前的钩子（wushen `obj.on_get(player) === false` ⇒ 拦住）。
+   * 返回 `false` 表示"这次别捡"，其余返回值（含 `void`）视为放行。
+   */
+  readonly onGet?: ((me: Actor) => boolean | void) | undefined;
+  /**
+   * 使用（wushen `obj.on_use(player, par)`）。**缺省即"这个东西不能用"**
+   * —— 所以"能不能用"的判据是**这个钩子在不在**，不是另立一个布尔开关。
+   */
+  readonly onUse?: ((me: Actor, par?: string) => boolean | void) | undefined;
+  /**
+   * 别人**给我**东西时的准入（wushen `target.on_accept(player, objId, count)`）。
+   *
+   * ★ `objId` 是物品的**模板 id**（`drug/yao#0`）或字符串 `'money'`
+   *   —— 与 wushen 一致（它的 money 分支就是拿 `objid == "money"` 判的）。
+   * ★ 返回**真**才收下；`void` / `false` 都算拒收（wushen `&&` 短路）。
+   */
+  readonly onAccept?:
+    | ((me: Actor, objId: string, count: number) => boolean | void)
+    | undefined;
+}
+
+/**
  * 内容层可见的"世界对象"最小面（房间 / NPC / 物品共用）。
  *
  * ★ 只用**结构**描述（`id` / `name` / `kind`），不 import 引擎的 `GameObject`：
@@ -163,6 +213,11 @@ export interface ActorObject {
   readonly path: WorldId | null;
   /** 该对象自己的"可点击动作"（房间 / NPC 有；物品暂无） */
   readonly actions?: readonly ActionDef[] | undefined;
+  /**
+   * 交互面（物品的 `no_get` / `on_use`…，NPC 的 `on_accept`）。
+   * 由引擎从模板派生（`Item.interact` / `Npc.interact`）；玩家角色没有。
+   */
+  readonly interact?: InteractHooks | undefined;
   /**
    * 一句话描述（`look <目标>` / 详情正文用；对应 wushen 的 `this.desc`）。
    * 房间一定有；NPC 与物品可能有。缺省 = 没有可看的描述。
@@ -203,7 +258,42 @@ export interface ActorEnvironment extends ActorObject {
   readonly items: readonly ActorObject[];
   /** 房间有描述；角色 / 背包这类容器没有 */
   readonly desc?: string | undefined;
+  /**
+   * 这个环境**禁止战斗**（wushen `room.no_fight`，`world/cmd/battle/fight.js:14`）。
+   * ★ 只有**房间**有这个概念（`Room.noFight`）；背包 / 容器缺省 `undefined`
+   *   （= 不禁止）。`fight` / `kill` 指令读它给"这里不允许战斗。"。
+   */
+  readonly noFight?: boolean | undefined;
 }
+
+/**
+ * 开战的结果。**失败给原因而不是布尔**（26 册 T2）：`fight` / `kill` 有六种不同的
+ * "打不了"，每种对应一句不同的话（wushen 各处 `notify`），布尔会逼调用点说笼统话。
+ *
+ * ★ 每个取值 ↔ 一句文案的对应关系见 `world/command/combat/fight.ts` 的 `FIGHT_MESSAGES`。
+ */
+export type FightStart =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason:
+        /** 那不是个能打的角色（物品 / 房间） */
+        | 'not-actor'
+        /** 打的是自己 */
+        | 'self'
+        /** 目标已经死了 */
+        | 'dead'
+        /** 自己气血未满 —— 切磋要求双方满血（wushen `fight.js:24`） */
+        | 'self-wounded'
+        /** 对方气血未满（wushen `fight.js:21`） */
+        | 'target-wounded'
+        /** 已经在和**这个**对手打（wushen "加油，加油！！"） */
+        | 'self-fighting'
+        /** 正在和别人打（wushen "等你打完再和别人比试吧！"） */
+        | 'self-busy'
+        /** 对方正在和别人打（wushen "对方正在切磋…"） */
+        | 'target-fighting';
+    };
 
 /**
  * 指令与动作钩子能拿到的角色面。
@@ -227,6 +317,62 @@ export interface CommandActor extends Actor {
   readonly items: readonly ActorObject[];
   // ★ `isAlive`（活体判据）**已上提到 `Actor`** —— 全项目单源，理由见 `Actor` 上的注释（E4）。
   //   原先只挂在这里，于是房间进出钩子拿到的 `Actor` 问不到"他还活着吗"。
+
+  // ── 物品搬运（内容层唯一入口；位置一致性由引擎保证）─────────────────────
+  //
+  // ★★ 为什么不是 `addItem` / `removeItem`：`Character` 继承 `Container`，
+  //   而 `Container` 上**已经有** `addItem(child: GameObject)` / `removeItem(child)`
+  //   —— 同名成员会被**静默**当成那个实现（方法参数是双变的、少参数可赋值给多参数，
+  //   所以 `tsc` 一声不响）。那两个方法**不处理数量**（`removeItem` 摘整件、
+  //   `addItem` 不收 `count`），拿来当"消耗 1 个"用会得到一个**编译通过、语义错误**
+  //   的实现。⇒ 下面几个原语一律另起名字，让"接错线"在语法上不可能。
+  //
+  // ★ 为什么不把 `Container` 直接开给内容层（比如给一个 `container` 句柄）：
+  //   那等于把"改位置"的能力开放出去 —— `moveTo` 只保证**两侧引用一致**，
+  //   不保证 `on_enter` / `on_leave` 这类**内容侧**的约定被跑到（同 `go()` 的理由）。
+  //   走下面这几个原语，搬运这件事只有一个执行点。
+
+  /**
+   * 把一件东西**收进我身上**（wushen `CHARACTER.prototype.add_obj`）。
+   * 返回 `false` = 装不下（我的容量满了）。
+   *
+   * ★ 缺省含义就是"装不下"：非物品那一档由**指令先挡**（`get` 判 `kind !== 'item'`），
+   *   所以它不是一个"什么都可能失败"的布尔 —— 两个失败源挤一个出口会让
+   *   调用点只能给一句笼统的话（26 册 T2 的教训）。
+   */
+  takeItem(item: ActorObject): boolean;
+  /**
+   * 把我身上的一件东西**放到我所在的房间**（wushen `WORLD.add_recover_obj`）。
+   * 返回 `false` = 房间满了。
+   *
+   * ★ 与 `takeItem` 同样的收敛：另外两个失败源（"这东西不在我身上"由指令
+   *   先 `findTarget` 过一遍、"我不在任何房间"在游戏内**构造上不可达**）
+   *   都不该让这句话变形 —— 这是 `Character.go` 那句"`from` 不是房间"防御分支的同款处理。
+   */
+  dropItem(item: ActorObject): boolean;
+  /**
+   * 从我身上**失去** n 个（缺省 1）：给出去了、或用掉了（wushen `remove_obj`）。
+   * 数量归零即销毁；返回 `false` = 我身上没这么多。
+   *
+   * ★ 少了它，`give` 与 `use` 就得各自去动 `count` —— 而"归零要销毁"
+   *   这条约定就会有两份（24 册 §3 要消除的正是这种）。
+   * ★ 为什么 `give <谁> <个数> <东西>` 能支持任意个数而**不需要拆分物品**：
+   *   wushen 的 `give` 在非师徒分支里**只从给出方扣掉**、由对方 `on_accept`
+   *   自行处置（`world/cmd/obj/give.js:57-62`）—— 物品并没有真的换容器，
+   *   于是"扣 1 个"不产生新对象、不需要新 oid。见 `world/command/item/give.ts`。
+   */
+  spendItem(item: ActorObject, count?: number): boolean;
+  /**
+   * 掏钱（wushen `player.money -= count`）。返回 `false` = 身上的钱不够。
+   *
+   * ★ 与 `spendItem` 分开而不是合成一个 `pay(amount)`：物品与钱是两套账
+   *   （物品有实例 / oid，钱只是一个整数），合并会逼调用点先判断"这是哪种"。
+   * ★ 只给"花掉"这个方向，不给 `money` 读写口：钱的**增加**属于
+   *   掉落 / 任务奖励 / 卖店，各有自己的入口与审计点。
+   */
+  spendMoney(amount: number): boolean;
+
+  // ★ `isAlive`（活体判据）**已上提到 `Actor`** —— 全项目单源，理由见 `Actor` 上的注释（E4）。
   /**
    * 四维的**三档读数**（先天 / 后天加成 / 合计）—— 面板与诊断用。
    *
@@ -265,6 +411,35 @@ export interface CommandActor extends Actor {
    *   笼统的"过不去"，玩家分不清是路不通还是人满。
    */
   go(direction: Direction): MoveResult;
+
+  // ── 战斗（`fight` / `kill` 指令的落点）────────────────────────────────────
+  //
+  // ★ 为什么"开战"要做成引擎原语、而不是让指令自己拼：
+  //   ① 战斗状态（`fight_type` / 敌人表 / 下一拍的调度句柄）是**角色私有**的，
+  //      内容层拿到的 `ActorObject` 上根本没有这些字段；
+  //   ② wushen 的 `fight.js` 要读 `target.hp` / `target.max_hp` 判"满不满血"
+  //      （`fight.js:21-26`）—— 而本项目的内容层看不到血量（它们是角色内部状态）。
+  //      把那几条门槛收进引擎，内容层只读**原因**。
+  // ★ 这是**双向**的：wushen 的 `do_kill` 里 `this.begin_attack(target,2)` 之后
+  //   紧跟 `target.begin_attack(this,2)`（`os/char/combat.js:35`）—— 开战天然是互相的。
+
+  /**
+   * 对某个对象**开战**（`fight` = 切磋，`kill` = 击杀）。
+   *
+   * 成功的副作用：双方进入战斗、各自开始出招（第一次调用会发 `combat start` 帧）。
+   * 失败不改变任何状态，只返回**原因**。
+   */
+  beginFight(target: ActorObject, type: FightType): FightStart;
+
+  /**
+   * **复活**（`relive` 指令的落点）。返回 `false` = 本来就没死。
+   *
+   * ★ 为什么收进引擎：复活要改**气血**、清**忙乱**，两者都是角色私有状态，
+   *   内容层看不到（与 `beginFight` 同一条理由）。
+   * ★ 成功时会推一个 `die` 包的 `relive:true` 帧（前端据此显示"你又活过来了"），
+   *   内容层不必、也无法自己发这个包。
+   */
+  revive(): boolean;
 }
 
 /**
@@ -478,7 +653,22 @@ export interface ItemDef extends BaseDef, PropMap {
   readonly weaponType?: WeaponType;
   readonly combine_count?: number;
   readonly combine_to?: RefId;
-  readonly on_use?: (me: Actor) => boolean | void;
+  /**
+   * 捡不起来（wushen `obj.no_get`，`world/cmd/obj/get.js:35`）。
+   * 消费者：`world/command/item/get.ts`。典型用途是"固定在场景里的东西"
+   * （告示牌、雕像）—— 它存在于房间，但不该进任何人的背包。
+   */
+  readonly no_get?: boolean;
+  /** 丢不掉（wushen `obj.no_drop`，`drop.js:13`）。消费者：`item/drop.ts` */
+  readonly no_drop?: boolean;
+  /** 用后**不消耗**（wushen `obj.no_consume`，`use.js:59`）。消费者：`item/use.ts` */
+  readonly no_consume?: boolean;
+  /**
+   * 被捡起之前的钩子（wushen `obj.on_get(player)`，`get.js:38`）。
+   * 返回 `false` 拦住这次拾取。消费者：`item/get.ts`。
+   */
+  readonly on_get?: (me: Actor) => boolean | void;
+  readonly on_use?: (me: Actor, par?: string) => boolean | void;
   readonly on_study?: (me: Actor) => boolean | void;
   readonly on_open?: (me: Actor) => boolean | void;
 }

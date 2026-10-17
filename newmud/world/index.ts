@@ -26,6 +26,13 @@ import './command/chat/say.js';
 import './command/chat/shout.js';
 import './command/chat/tell.js';
 import './command/info/score.js';
+import './command/obj/get.js';
+import './command/obj/drop.js';
+import './command/obj/give.js';
+import './command/obj/use.js';
+import './command/combat/fight.js';
+import './command/combat/kill.js';
+import './command/combat/relive.js';
 
 /**
  * 清单（相对 `world/` 的路径，顺序 = 加载顺序）。
@@ -47,4 +54,11 @@ export const CONTENT_MODULES: readonly string[] = [
   'command/chat/shout.ts',
   'command/chat/tell.ts',
   'command/info/score.ts',
+  'command/obj/get.ts',
+  'command/obj/drop.ts',
+  'command/obj/give.ts',
+  'command/obj/use.ts',
+  'command/combat/fight.ts',
+  'command/combat/kill.ts',
+  'command/combat/relive.ts',
 ];

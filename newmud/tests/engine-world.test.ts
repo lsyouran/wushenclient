@@ -15,6 +15,7 @@ import '@world/index.js';
 import { Item } from '../server/engine/item.js';
 import { Npc } from '../server/engine/npc.js';
 import { OidSpace } from '../server/engine/oid.js';
+import { Player } from '../server/engine/player.js';
 import { getProp, setProp } from '../server/engine/props.js';
 import { getDef } from '../server/engine/registry.js';
 import { RecordingOutput } from '../server/engine/character.js';
@@ -44,7 +45,7 @@ describe('engine/world · 真实内容的实例化统计', () => {
   });
 
   it('启动日志一行统计含指令数', () => {
-    expect(describeWorld(world.stats)).toContain('指令 7（别名 13）');
+    expect(describeWorld(world.stats)).toContain('指令 14（别名 20）');
   });
 
   it('起始房间取区域 first', () => {
@@ -219,12 +220,14 @@ describe('engine/world · id 空间可复用（读档恢复场景）', () => {
 
 describe('engine/world · 指令表 + 真实内容的三级分发（全链路）', () => {
   it('指令表被建进世界（别名 → 条目）', () => {
-    // 7 条：action/{look,select} + move/go + chat/{say,shout,tell} + info/score
-    // 13 个别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper / score,attr
+    // 11 条：action/{look,select} + move/go + chat/{say,shout,tell} + info/score
+    //         + obj/{get,drop,give,use}（B 批四条物品指令）
+    // 17 个别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper / score,attr
+    //         + get / drop / give / use（各一个，与 wushen 的 `this.command` 同名，未起短写）
     //   ↑ `chat` 是 wushen 的原词（`world/cmd/channel/chat.js`），
     //     也是前端「世界」页签产出的命令名（26 册 §24.3）
-    expect(world.stats.commands).toBe(7);
-    expect(world.stats.commandAliases).toBe(13);
+    expect(world.stats.commands).toBe(14);
+    expect(world.stats.commandAliases).toBe(20);
     expect(world.commands.lookup('look')?.id).toBe('action/look');
     expect(world.commands.lookup('l')?.id).toBe('action/look');
     expect(world.commands.lookup('select')?.id).toBe('action/select');
@@ -321,5 +324,64 @@ describe('engine/world · 指令表 + 真实内容的三级分发（全链路）
     });
     // 店小二的 ask 动作是 `me.sendCommands('give pub/xiaoer 1000 money', '人字号客房')`
     expect(out.commands).toEqual([['give pub/xiaoer 1000 money', '人字号客房']]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★ T4 · 对象销毁要**离开世界**（不只是离开容器）—— 2026-10-17 审查 **M5**
+// ---------------------------------------------------------------------------
+//
+// ★ 26 册 §54.1 声明 T4 已清偿，实测 `world.npcs` / `world.items` 只增不减：
+//   NPC 死了只 `moveTo(null)`（还留在索引里，`world.npc(oid)` 能取回一个"已经
+//   消散"的人），物品用光只 `removeItem`（同理）。⇒ 这两条就是那个"已清偿"的实证。
+
+describe('★ T4 · 对象销毁要离开世界（不只是离开容器）', () => {
+  it('NPC 死亡消散：`world.npc(oid)` 取不回来', () => {
+    // ★ 用**独立**的世界实例：本文件模块级那个 `world` 被上面十几条用例共用，
+    //   在这里弄死一个 NPC / 用光一件物品，会让别的用例的结果跟着漂移。
+    const w = instantiateWorld();
+    const npc = [...w.npcs.values()][0];
+    if (npc === undefined) throw new Error('世界里没有 NPC');
+    const path = npc.path;
+    if (path === null) throw new Error('NPC 没有模板路径（不该发生）');
+    const oid = npc.id;
+    const before = w.npcs.size;
+    expect(w.npc(oid)).toBe(npc);
+
+    npc.die();
+
+    // ★ 判据：不摘索引的话这里还能取回"已经消散"的 NPC
+    expect(w.npc(oid)).toBeUndefined();
+    expect(w.npcs.has(oid)).toBe(false);
+    expect(w.npcsOf(path)).not.toContain(npc);
+    expect(w.npcs.size).toBe(before - 1);
+    // ★★ R4（2026-10-17 审查）：光钉"摘索引"**不够** —— T4 = "摘索引 **+ 释放 oid**"。删掉
+    //   `world.ts#forget` 里的 `oidSpace.release(obj.id)`，光靠上面的索引断言**照样绿**。
+    //   ★ 用 `has(oid)` 而**不是** `size - 1`：NPC 死亡会**掉落铸新物品**（各占一个 oid），
+    //     `size` 净变化不固定 —— 判据必须落在"**这一个** oid 还在不在"上。
+    expect(w.oidSpace.has(oid)).toBe(false);
+  });
+
+  it('物品被用光：`world.item(oid)` 取不回来', () => {
+    const w = instantiateWorld();
+    const item = [...w.items.values()][0];
+    if (item === undefined) throw new Error('世界里没有物品');
+    const path = item.path;
+    if (path === null) throw new Error('物品没有模板路径（不该发生）');
+    const oid = item.id;
+    const before = w.items.size;
+    expect(w.item(oid)).toBe(item);
+
+    const p = new Player({ oid: 'p-t4', path: null, name: '消耗甲', roleId: 'r-t4' });
+    item.moveTo(p);
+    expect(p.spendItem(item, item.count)).toBe(true); // 正好用完 ⇒ 归零销毁
+
+    // ★ 判据：只 `removeItem` 的话这里还能取回"已经不存在"的物品
+    expect(item.isDepleted).toBe(true);
+    expect(w.item(oid)).toBeUndefined();
+    expect(w.itemsOf(path)).not.toContain(item);
+    expect(w.items.size).toBe(before - 1);
+    // ★ R4：把"释放 oid"这半也钉住（`has` 口径与 NPC 用例一致）
+    expect(w.oidSpace.has(oid)).toBe(false);
   });
 });

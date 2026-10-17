@@ -32,6 +32,7 @@ import { Npc } from './npc.js';
 import { OidSpace } from './oid.js';
 import { entriesOf, getDef } from './registry.js';
 import { Room, exitPairsOf } from './room.js';
+import { Scheduler } from './scheduler.js';
 import { SkillRegistry } from './skill.js';
 import { tuningSummary } from './tuning.js';
 import type { AreaDef, CommandDef, ItemDef, NpcDef, RoomDef, SkillDef } from '../world/defs.js';
@@ -70,6 +71,15 @@ export interface World {
   readonly commands: CommandTable;
   /** 技能注册表（模板；取代 wushen 的 `WORLD.SKILLS` + `SKILL[slot][grade]`） */
   readonly skillRegistry: SkillRegistry;
+  /**
+   * **世界的时钟**（周期调度器）。战斗出招 / 心跳的"下一拍"都排在它上面。
+   *
+   * ★ 为什么挂在 `World` 而不是 `main.ts` 里单建：造 NPC 的是**本文件**
+   *   （`instantiateWorld`），而"角色自己排下一拍"要求角色构造时就拿到调度器。
+   *   挂在 world 上 ⇒ 一个世界一个时钟，`main.ts` 的 tick 与所有角色看到的是**同一个**
+   *   （若各建一个，`main` 推进的那个与角色用的那个不是同一个 ⇒ 战斗永远不动）。
+   */
+  readonly scheduler: Scheduler;
   readonly stats: WorldStats;
 
   room(path: string): Room | undefined;
@@ -78,20 +88,50 @@ export interface World {
   /** 某模板的**全部** NPC 实例（同一模板可能被多个房间各放一个） */
   npcsOf(path: string): readonly Npc[];
   itemsOf(path: string): readonly Item[];
+  /**
+   * 销毁一个实例（NPC 死亡消散 / 物品被用光）：摘索引 + **释放 oid**（T4，26 册 §55）。
+   *
+   * ★ 它是 `instantiateWorld` 里那个闭包的**同一个**引用 —— 世界内部的注入用它，
+   *   外部（存档层、未来的重生逻辑）调的是同一份逻辑，不会各自漂移。
+   */
+  forget(obj: Npc | Item): void;
 }
 
 export interface InstantiateOptions {
   /** 复用外部 id 空间（测试 / 读档恢复场景）；缺省自建 */
   readonly oidSpace?: OidSpace;
+  /** 复用外部调度器（测试注入假时钟）；缺省自建 */
+  readonly scheduler?: Scheduler | undefined;
 }
 
 function brand(id: string, ctx: string): WorldId {
   return asWorldId(id, ctx);
 }
 
+/**
+ * 从"模板路径 → 实例数组"的索引里摘掉一个实例；数组空了就**连键一起删掉**。
+ *
+ * ★ 为什么单独抽出来：NPC 与物品两张索引的摘除逻辑一字不差，写两遍迟早有一处
+ *   忘了"空了要删键"，于是索引里慢慢堆满空数组（`forget` 的两支共用它）。
+ */
+function dropFromIndex<T extends { readonly path: WorldId | null }>(
+  index: Map<string, T[]>,
+  obj: T,
+): void {
+  const key = obj.path;
+  if (key === null) return;
+  const list = index.get(key);
+  if (list === undefined) return;
+  const next = list.filter((x) => x !== obj);
+  if (next.length === 0) index.delete(key);
+  else index.set(key, next);
+}
+
 /** 从注册表造出整个世界。**纯函数式**：不写全局、不改注册表 */
 export function instantiateWorld(options: InstantiateOptions = {}): World {
   const oidSpace = options.oidSpace ?? new OidSpace();
+  // ★ 世界的时钟（战斗/心跳节拍）。测试可注入假时钟的调度器以推进时间。
+  const scheduler = options.scheduler ?? new Scheduler();
 
   // ── 0. 技能注册表（模板；NPC 技能表要靠它解析 id）────────────────────────
   //    构造时即校验每个技能定义（基本技能必须声明 slot、can_enables 只能是闭集槽名 …），
@@ -108,7 +148,32 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
   let exits = 0;
 
   // ── 1. 物品（先造，房间要往里放）────────────────────────────────────────
-  const makeItem = (path: string): Item => {
+
+  /**
+   * 销毁一个**实例**：从 oid / 路径两张索引里摘除，并**释放它的 oid**。
+   *
+   * ★ T4（26 册 §55）：`OidSpace.release()` 一度**零生产调用点** —— 于是 `#used`
+   *   与世界的两张实例索引只增不减：NPC 死了只是 `moveTo(null)`（还留在 `world.npcs`），
+   *   物品用光只 `removeItem`（还留在 `world.items`），`world.item(oid)` 甚至还能
+   *   取回一个"已经消失"的对象。而每次击杀还会 `makeItem` 铸新品进表 ⇒
+   *   击杀数与内存单调正相关。
+   *
+   * ★ 为什么是这里的闭包、而不是 `world` 对象上的方法：造 NPC / 物品发生在
+   *   `world` 成形**之前**，注入回调时它还不存在（TDZ）。`forget` 只是把这个
+   *   闭包原样挂到 `World` 上，两处用的是同一份逻辑。
+   */
+  const forget = (obj: Npc | Item): void => {
+    if (obj instanceof Npc) {
+      npcs.delete(obj.id);
+      dropFromIndex(npcsByPath, obj);
+    } else {
+      items.delete(obj.id);
+      dropFromIndex(itemsByPath, obj);
+    }
+    oidSpace.release(obj.id);
+  };
+
+  const makeItem = (path: string, count = 1): Item => {
     const def = getDef<ItemDef>('item', path);
     if (def === undefined) {
       throw new WorldError(`item 模板不存在：${path}`);
@@ -117,14 +182,22 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
       oid: oidSpace.next(),
       path: brand(path, 'instantiateWorld:item'),
       name: def.name,
+      // ★ 模板引用（B 批）：不传它 ⇒ 实例**够不着钩子**（`on_use` / `no_get`…），
+      //   于是"这枚丹药能不能吃"在运行时无从回答 —— 内容里写了也等于没写。
+      def,
       desc: def.desc,
-      count: 1,
+      // ★ `count` 供**掉落**用（`Npc.afterDeath` 按 `drops` roll 出份数）；
+      //   房间预置物（下面第 4 步）不传 ⇒ 缺省 1。
+      count,
       value: def.value,
       unit: def.unit,
       grade: def.grade,
       combined: def.combined,
       equipType: def.equipType,
       weaponType: def.weaponType,
+      // ★ 销毁回调（T4）：物品被用光时由 `Character.spendItem` 调 `item.destroy()`。
+      //   测试里裸构造的 `Item` 没有它 ⇒ `destroy()` 是空操作（不入索引，也无需摘除）。
+      onDestroy: () => forget(item),
     });
     items.set(item.oid, item);
     const list = itemsByPath.get(path);
@@ -182,6 +255,13 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
         name: npcDef.name,
         def: npcDef,
         skillRegistry,
+        scheduler,
+        // ★ 掉落铸造器：NPC 死时按 `drops` roll 出物品，需要"铸新物品"的能力
+        //   （oid + 模板），那是本函数独有的 —— 注入进去（同 `scheduler`）。
+        spawnItem: makeItem,
+        // ★ 销毁回调（T4）：NPC 死亡消散时从世界索引摘除并释放 oid
+        //   （与 `spawnItem` 同款注入：`afterDeath` 拿不到世界）。
+        onDestroy: () => forget(npc),
       });
       npcs.set(npc.oid, npc);
       const list = npcsByPath.get(npcPath);
@@ -224,6 +304,7 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
     startRoom,
     commands,
     skillRegistry,
+    scheduler,
     stats: {
       rooms: rooms.size,
       npcs: npcs.size,
@@ -241,6 +322,7 @@ export function instantiateWorld(options: InstantiateOptions = {}): World {
     item: (oid) => items.get(oid),
     npcsOf: (path) => npcsByPath.get(path) ?? [],
     itemsOf: (path) => itemsByPath.get(path) ?? [],
+    forget,
   };
   return world;
 }

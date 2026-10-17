@@ -18,8 +18,9 @@ describe('真实 world/ 内容加载', () => {
     expect(countOf('npc')).toBe(1);
     expect(countOf('room')).toBe(2);
     // action/look + action/select + move/go + chat/say + chat/shout + chat/tell + info/score
+    // + obj/get + obj/drop + obj/give + obj/use（B 批四条物品指令）
     // （移动方向不在这里 —— 它由房间的 `exits` **派生**，不是内容文件，见 server/engine/room.ts）
-    expect(countOf('command')).toBe(7);
+    expect(countOf('command')).toBe(14);
   });
 
   it('变体展开：继承基对象字段 + 被覆盖字段生效', () => {

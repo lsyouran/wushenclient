@@ -1,4 +1,12 @@
 import { defineNpc } from '@engine/world/define.js';
+import { GIVE_MONEY_KEY } from '@shared/constants.js';
+
+/**
+ * 住店钱（铜板）—— `ask` 动作里那颗按钮写的就是 1000。
+ * ★ 单源在这里：`actions.run` 与 `on_accept` 都读它，
+ *   于是"按钮上说的价"与"钩子收的价"不可能对不上。
+ */
+const LODGING_FEE = 1000;
 
 /**
  * 店小二。
@@ -45,10 +53,39 @@ defineNpc('pub/xiaoer', {
       cmd: 'ask',
       name: '打听',
       run: (me) => {
-        me.sendCommands('give pub/xiaoer 1000 money', '人字号客房');
+        me.sendCommands(`give pub/xiaoer ${String(LODGING_FEE)} money`, '人字号客房');
       },
     },
   ],
+  /**
+   * 收下客官的住店钱。
+   *
+   * ★★ **这条 `on_accept` 是 B 批补的，它接上了一个悬空按钮**：
+   *   上面的 `ask` 动作会发一颗 `give pub/xiaoer 1000 money` 的按钮，
+   *   而在这之前**店小二没有 `on_accept`** —— 于是那颗按钮点下去只会得到
+   *   「店小二不要你的钱。」（`give` 的拒收分支）。内容写了、引擎也通了，
+   *   但两者之间的**那一环从来没接**：这正是 26 册 L8 那类"内容写了没人消费"
+   *   的镜像 —— **入口在，但没有东西在后面应答**。
+   *
+   * ★ 判据是 `objId === GIVE_MONEY_KEY`（不是 `objId === 'money'` 字面量）：
+   *   保留字的单一来源在 `shared/constants.ts`，`give` 指令产出它、
+   *   这里按它分派 —— 两边共用一份，改一处不会漏改另一处。
+   *
+   * ★ 为什么"钱不够"时**也返回 `false`**（而不是收下再说）：
+   *   `on_accept` 是**准入判据**（`defs.ts#InteractHooks.onAccept`），
+   *   引擎在它返回真之后才扣钱。这里返回假 ⇒ 玩家一分钱没少，
+   *   并且先收到一句**为什么**（免得只看到笼统的"不要你的钱"）。
+   */
+  on_accept: (me, objId, count) => {
+    // 店小二不收东西 —— 要卖东西走商店的 `sell`（交易批次），不走 `give`。
+    if (objId !== GIVE_MONEY_KEY) return false;
+    if (count < LODGING_FEE) {
+      me.notify(`店小二陪笑道：住店要${String(LODGING_FEE)}文钱，客官。`);
+      return false;
+    }
+    me.notify('店小二收了钱，引你往人字号客房走去。');
+    return true;
+  },
   on_enter: (me) => {
     me.notify('店小二笑咪咪地说道：这位客官，要住店吗？');
   },

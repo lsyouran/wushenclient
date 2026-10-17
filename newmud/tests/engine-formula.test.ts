@@ -9,18 +9,22 @@
  * ★ prop 键一律走 `PROP` 别名表（`PROP.attack === 'gj'`）—— 与 `formula.ts` 同一套
  *   可读名；数据层仍是 wushen 原键（见 `docs/29` §29.10 的对照表）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { PROP } from '@shared/constants.js';
 import {
   ATTR_KEYS,
   COMBAT_FORMULA,
   FormulaError,
+  applyCritDamage,
   computeAttrBreakdowns,
+  computeDamage,
   computeDerived,
   damageAfterDefense,
   effectiveAttr,
   formulaSummary,
+  rollCrit,
+  rollDefense,
 } from '../server/engine/formula.js';
 import type { InnateStats } from '../server/engine/formula.js';
 import { createPropHolder, setProp } from '../server/engine/props.js';
@@ -258,5 +262,143 @@ describe('engine/formula · formulaSummary（启动日志）', () => {
     expect(s).toContain('hpPerCon=5');
     expect(s).toContain('attackIntervalFloorMs=500');
     expect(s.split(' ')).toHaveLength(Object.keys(COMBAT_FORMULA).length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 战斗结算：命中 / 躲闪 / 招架 / 暴击 / 伤害
+// ---------------------------------------------------------------------------
+
+/** 按给定序列出数的确定性随机源（用完后一直返回最后一个） */
+function seqRand(values: readonly number[]): () => number {
+  let i = 0;
+  return () => {
+    const v = values[Math.min(i, values.length - 1)] ?? 0;
+    i += 1;
+    return v;
+  };
+}
+
+describe('engine/formula · rollDefense（命中/躲闪/招架，照抄 wushen 的线性对抗式）', () => {
+  it('★ 边界：[v/2, v) 的下端恰好等于命中时**判为中**（严格大于）', () => {
+    // rand=0 ⇒ sample(v)=v/2；evasion=100 ⇒ 50，hit=50 ⇒ 50>50 为假
+    expect(rollDefense({ hit: 50, evasion: 100, deflect: 100 }, () => 0)).toEqual({
+      dodged: false,
+      parried: false,
+    });
+    // hit=40 ⇒ 50>40 真 ⇒ 躲开
+    expect(rollDefense({ hit: 40, evasion: 100, deflect: 100 }, () => 0)).toEqual({
+      dodged: true,
+      parried: true,
+    });
+  });
+
+  it('★ 躲闪/招架越高越容易读成"大于命中"（线性）', () => {
+    const r = seqRand([0.999, 0.999]);
+    // evasion=100 ⇒ sample≈99.95 > hit=60 ⇒ 躲；deflect=100 同上 ⇒ 招架
+    expect(rollDefense({ hit: 60, evasion: 100, deflect: 100 }, r)).toEqual({
+      dodged: true,
+      parried: true,
+    });
+  });
+
+  it('★ 可以"躲开但没招架"（两个判定相互独立）', () => {
+    const r = seqRand([0.999, 0]); // 躲闪读高、招架读低
+    expect(rollDefense({ hit: 60, evasion: 100, deflect: 100 }, r)).toEqual({
+      dodged: true,
+      parried: false,
+    });
+  });
+
+  it('★ 随机数**调用次数与顺序**：先躲闪、后招架（各一次）', () => {
+    const spy = vi.fn(() => 0.5);
+    rollDefense({ hit: 10, evasion: 100, deflect: 100 }, spy);
+    expect(spy).toHaveBeenCalledTimes(2);
+    // 第一次给躲闪（evasion），第二次给招架（deflect）—— 换不同数值即可看出顺序
+    const spy2 = vi.fn(() => 0);
+    const out = rollDefense({ hit: 55, evasion: 200, deflect: 40 }, spy2);
+    // dodge: sample(200)=100 > 55 ⇒ true；parry: sample(40)=20 > 55 ⇒ false
+    expect(out).toEqual({ dodged: true, parried: false });
+    expect(spy2).toHaveBeenCalledTimes(2);
+  });
+
+  it('★ 昏迷者：不躲不招，且**一次随机数都不消耗**', () => {
+    const spy = vi.fn(() => 0);
+    const out = rollDefense({ hit: 0, evasion: 999, deflect: 999, defenderFaint: true }, spy);
+    expect(out).toEqual({ dodged: false, parried: false });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('★ 忙乱者：只能躲、不能招（只消耗一次随机数）', () => {
+    const spy = vi.fn(() => 0);
+    const out = rollDefense({ hit: 10, evasion: 100, deflect: 999, defenderBusy: true }, spy);
+    // dodge: sample(100)=50 > 10 ⇒ true；parry 恒 false（不看 deflect 多高）
+    expect(out).toEqual({ dodged: true, parried: false });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('engine/formula · rollCrit（暴击判定）', () => {
+  it('floor(rand*100) < crit 才暴击（边界：等于不暴）', () => {
+    expect(rollCrit(1, () => 0)).toBe(true); // 0 < 1
+    expect(rollCrit(0, () => 0)).toBe(false); // 0 < 0 假
+    expect(rollCrit(99, () => 0.99)).toBe(false); // floor(99) < 99 假
+    expect(rollCrit(100, () => 0.99)).toBe(true); // 99 < 100
+  });
+
+  it('非有限 crit → FormulaError', () => {
+    expect(() => rollCrit(Number.NaN)).toThrow(FormulaError);
+  });
+});
+
+describe('engine/formula · applyCritDamage（暴击放大 150% 起）', () => {
+  it('基础 1.5 倍；叠加 add_bjsh_per 时更高', () => {
+    expect(applyCritDamage(100)).toBe(150);
+    expect(applyCritDamage(100, 50)).toBe(200); // (150+50)/100
+  });
+});
+
+describe('engine/formula · computeDamage（完整伤害：减免 → 忽视 → 递减）', () => {
+  it('只有防御时与 damageAfterDefense 同值（递减内核只有一份）', () => {
+    expect(computeDamage(100, 100, 0, 0)).toBe(damageAfterDefense(100, 100));
+    expect(computeDamage(100, 100, 0, 0)).toBe(50);
+  });
+
+  it('伤害减免% 先削减，再走递减', () => {
+    // sh=100*(1-50/100)=50 ⇒ 50/(50+100)*50 = 16.67 ⇒ 16
+    expect(computeDamage(100, 100, 50, 0)).toBe(16);
+  });
+
+  it('忽视防御% 削减防御值', () => {
+    // ig=50 ⇒ fy=100-50=50 ⇒ 100/(100+50)*100 = 66.67 ⇒ 66
+    expect(computeDamage(100, 100, 0, 50)).toBe(66);
+  });
+
+  it('★ 忽视防御先冲抵伤害减免，多出来的部分转为额外削防御', () => {
+    // dr=20, ig=50 ⇒ dr=-30<0 ⇒ ig=30；fy=100-30=70；sh=100/(100+70)*100=58.82 ⇒ 58
+    expect(computeDamage(100, 100, 20, 50)).toBe(58);
+    // dr=50, ig=50 ⇒ dr=0（不吃负）⇒ ig 仍 50 ⇒ fy=50 ⇒ 100/(100+50)*100=66.67 ⇒ 66
+    expect(computeDamage(100, 100, 50, 50)).toBe(66);
+  });
+
+  it('原始伤害 <=0 → 0；非有限参数 → FormulaError', () => {
+    expect(computeDamage(0, 100, 0, 0)).toBe(0);
+    expect(computeDamage(-5, 100, 0, 0)).toBe(0);
+    expect(() => computeDamage(100, Number.POSITIVE_INFINITY, 0, 0)).toThrow(FormulaError);
+  });
+
+  it('★ 第 ⑤ 步固定减伤 `diff_sh`（wushen combat.js:228；一度整个漏掉）', () => {
+    // ④ 之后 sh = 50，固定减 10 ⇒ 40（在取整**之前**做，与 wushen 同序）
+    expect(computeDamage(100, 100, 0, 0, 0)).toBe(50);
+    expect(computeDamage(100, 100, 0, 0, 10)).toBe(40);
+    // ★ 反向锚点：不传第 5 个参数（= 0）时与旧行为一致，别把老调用点打穿
+    expect(computeDamage(100, 100, 0, 0)).toBe(50);
+  });
+
+  it('★ 固定减伤把伤害压到 0 或负 ⇒ 返回 0（**不是**负数 ⇒ 不会变成加血）', () => {
+    // wushen `combat.js:238`：`if (sh > 0) { … add_hp(-sh); return sh; } return 0;`
+    expect(computeDamage(100, 100, 0, 0, 50)).toBe(0); // 正好减光
+    expect(computeDamage(100, 100, 0, 0, 999)).toBe(0); // 减成负数
+    // ⇒ `takeDamage` 的 `setHp(before - dealt)` 不会因此加血
   });
 });

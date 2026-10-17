@@ -21,22 +21,39 @@
  */
 
 import type { WorldId } from '@shared/ids.js';
-import type { Channel, Direction, Gender, MoveResult } from '@shared/constants.js';
-import { isEnableSlot } from '@shared/constants.js';
+import { FIGHT_TYPE, PROP, isEnableSlot } from '@shared/constants.js';
+import type { Channel, Direction, FightType, Gender, MoveResult } from '@shared/constants.js';
 import { Container } from './base.js';
 import type { ObjKind } from './base.js';
+import {
+  ATTACK_ACTIONS,
+  DIE_MESSAGES,
+  DODGE_ACTIONS,
+  PARRY_ACTIONS,
+  WINNER_MESSAGES,
+  damageMessage,
+  pick,
+  queryStatusMessage,
+} from './combat-text.js';
+import { Item } from './item.js';
 import { Room } from './room.js';
+import { Scheduler } from './scheduler.js';
+import type { TaskHandle } from './scheduler.js';
 import { TempStore } from './temp.js';
 // `import type` 会被完全擦除，所以引擎 ↔ 内容层的类型引用不产生运行时环。
-import type { ItemDetailView } from '../world/defs.js';import {
+import type { ActorObject, FightStart, ItemDetailView } from '../world/defs.js';
+import {
   COMBAT_FORMULA,
+  applyCritDamage,
   computeAttrBreakdowns,
+  computeDamage,
   computeDerived,
-  damageAfterDefense,
   effectiveAttr,
+  rollCrit,
+  rollDefense,
 } from './formula.js';
 import type { AttrBreakdown, DerivedCombat, InnateStats } from './formula.js';
-import { applyPropMap, createPropHolder, loadProps, snapshotProps } from './props.js';
+import { applyPropMap, createPropHolder, getProp, loadProps, snapshotProps } from './props.js';
 import type { LoadReport } from './load-report.js';
 import type { PropHolder, PropSnapshot, RawPropMap } from './props.js';
 import { SkillBook, emptySkillRegistry } from './skill.js';
@@ -48,6 +65,12 @@ export class CharacterError extends Error {
   public override readonly name = 'CharacterError';
 }
 
+/** 一个可点击按钮（`die` 包的复活入口用；与 `ItemDetailView.commands` 同形状） */
+export interface CommandButton {
+  readonly cmd: string;
+  readonly name: string;
+}
+
 /** 角色的输出通道。玩家挂真实连接，NPC / 测试用内存实现 */
 export interface CharacterOutput {
   notify(text: string): void;
@@ -56,6 +79,24 @@ export interface CharacterOutput {
   sendChannel(ch: Channel, content: string, to?: string): void;
   /** 对象详情（见 `defs.ts` 的 `Actor.showItem` / `ItemDetailView`） */
   showItem(detail: ItemDetailView): void;
+  /**
+   * 战斗开始 / 结束（`combat` 包）。前端据此切换"战斗中"界面。
+   * ★ 对照 wushen `this.send('{type:"combat",start:1}')`（`os/char/combat.js:22`）。
+   */
+  combat(phase: 'start' | 'end'): void;
+  /**
+   * 死亡（`die` 包，带复活入口）。
+   * ★ 对照 wushen `USER.check_state()` 发的 `{type:"die",commands:[…]}`（`os/char/user.js:401`）。
+   *   NPC 没有连接，用不到它 —— 但通道是统一的（`RecordingOutput` 也记）。
+   */
+  die(commands: readonly CommandButton[]): void;
+  /**
+   * 复活（同一 `die` 包族的 `relive:true` 那一支）。
+   * ★ 对照 wushen `relive.js:46` 的 `me.notify('{type:"die",relive:true}')` ——
+   *   原作把"复活"做成 `die` 包的一个变体（前端 `combat.ts` 的 `die` handler 就是靠
+   *   `p['relive'] === true` 分支成"你又活过来了"）。
+   */
+  revive(): void;
 }
 
 /**
@@ -86,6 +127,12 @@ export class RecordingOutput implements CharacterOutput {
   public readonly channelMessages: Array<{ ch: Channel; content: string; to?: string }> = [];
   /** 对象详情（`showItem` 收到的东西）。诊断与测试用 */
   public readonly items: ItemDetailView[] = [];
+  /** 收到的 `combat` 帧（开始 / 结束）。诊断与测试用 */
+  public readonly combatPhases: Array<'start' | 'end'> = [];
+  /** 收到的 `die` 帧（复活按钮）。诊断与测试用 */
+  public readonly deaths: Array<readonly CommandButton[]> = [];
+  /** 收到的**复活**帧数（`die` 包的 `relive:true` 那一支）。诊断与测试用 */
+  public reviveCount = 0;
 
   public notify(text: string): void {
     pushCapped(this.messages, text);
@@ -103,11 +150,26 @@ export class RecordingOutput implements CharacterOutput {
     pushCapped(this.items, detail);
   }
 
+  public combat(phase: 'start' | 'end'): void {
+    pushCapped(this.combatPhases, phase);
+  }
+
+  public die(commands: readonly CommandButton[]): void {
+    pushCapped(this.deaths, commands);
+  }
+
+  public revive(): void {
+    this.reviveCount += 1;
+  }
+
   public clear(): void {
     this.messages.length = 0;
     this.commands.length = 0;
     this.channelMessages.length = 0;
     this.items.length = 0;
+    this.combatPhases.length = 0;
+    this.deaths.length = 0;
+    this.reviveCount = 0;
   }
 }
 
@@ -140,6 +202,14 @@ export interface CharacterInit {
    */
   readonly skillRegistry?: SkillRegistry | undefined;
   readonly output?: CharacterOutput | undefined;
+  /**
+   * 世界时钟（战斗节拍）。缺省 = **没有时钟** ⇒ `beginFight()` 会抛错。
+   * ★ 不做静默兜底：一个"忘了注入时钟"的角色若安静地不排拍，
+   *   表现是"战斗开始了但双方永远不动"—— 那种 bug 只有真打一次才看得见。
+   */
+  readonly scheduler?: Scheduler | undefined;
+  /** 战斗随机源（测试注入确定性序列）；缺省 `Math.random` */
+  readonly rand?: (() => number) | undefined;
 }
 
 /**
@@ -211,6 +281,30 @@ export abstract class Character extends Container implements PropHolder {
   #mp: number;
   #derived: DerivedCombat;
 
+  /** 世界时钟（战斗节拍）。undefined = 未注入（`beginFight` 会抛） */
+  readonly #scheduler: Scheduler | undefined;
+  /** 战斗随机源 */
+  readonly #rand: () => number;
+  /** 当前战斗类型（`FIGHT_TYPE`） */
+  #fightType: FightType = FIGHT_TYPE.NONE;
+  /** 敌人列表（可能多个；`queryEnemy()` 取第一个还站着的） */
+  #enemies: Character[] = [];
+  /** 下一拍的调度句柄（停战 / 重排时取消） */
+  #attackHandle: TaskHandle | null = null;
+  /**
+   * 是否已经**死过**（`afterDeath` 收尾跑过）。`die()` 的**幂等判据**。
+   *
+   * ★ 为什么不是用 `hp<=0` 当判据（26 册 §54 订正，本批实测踩到）：
+   *   调用方（`#endAttack`）在调 `die()` **之前**已经用 `takeDamage` 把人打到 0 ——
+   *   那一刻 `isAlive` 已经是 false。若拿"hp<=0 就不做事"当守卫，
+   *   **收尾永不执行**：NPC 不消散（留一具"看不见的尸体"占着房间位）、
+   *   玩家收不到复活入口。这正是 wushen 不这么写的原因 ——
+   *   它的 `NPC.die` 守卫是 `!this.environment`、`USER.die` 干脆没有守卫，
+   *   都**不是** hp 判据（`os/char/npc.js:124`、`os/char/user.js:379`）。
+   *   ★ 不变式：`#dead === true ⇒ hp === 0`（由 `setHp` 维护，见那里）。
+   */
+  #dead = false;
+
   public per: number;
   public age: number;
   /** 性别三档（`Gender`，来源 `shared/constants.ts`）：1 男 / 2 女 / 0 无性 */
@@ -235,6 +329,8 @@ export abstract class Character extends Container implements PropHolder {
     );
 
     this.#output = init.output ?? new RecordingOutput();
+    this.#scheduler = init.scheduler;
+    this.#rand = init.rand ?? Math.random;
     this.skills = new SkillBook(init.skillRegistry ?? emptySkillRegistry(), this);
     this.#innate = {
       str: init.str ?? 20,
@@ -343,6 +439,75 @@ export abstract class Character extends Container implements PropHolder {
 
   public showItem(detail: ItemDetailView): void {
     this.#output.showItem(detail);
+  }
+
+  // ── 物品搬运（`defs.ts` 的 `CommandActor` 四原语）────────────────────────
+  //
+  // ★ 为什么内容层拿到的是**三个动词**而不是一个 `Container` 句柄：
+  //   位置一致性（`environment` ↔ `Container.items` 双向）必须由**一个**代码路径保证
+  //   （`base.ts` 的模块私有 `ENVIRONMENT` WeakMap 就是为此）。把句柄交出去，
+  //   内容层就能绕过 `moveTo` 直接改位置 —— 那正是 `base.ts` 花力气堵掉的那类失配。
+  //
+  // ★ 三处都用 `instanceof Item` 而不是"信调用方传的是物品"：
+  //   `ActorObject` 是**结构**视图，房间里的一切（NPC / 玩家 / 物品）都满足它。
+  //   一个 `spendItem(npc)` 若只靠鸭子类型会走到 `npc.count`（`undefined`），
+  //   而 `undefined < 1` 是 `false` —— 判据静默放行，随后 `addCount` 抛 TypeError。
+  //   同族的还有 `takeItem`：wushen 用 `if (obj.is_living())` 拦"背不动人"
+  //   （`get.js:32`），这里由类型（`instanceof Item`）直接挡掉。
+  //
+  // ★ 内容层视图 → 引擎对象的**转换点只有这里**：`ActorObject` 在运行时**就是**
+  //   那个 `Item` 实例（`findTarget` 返回的是 `env.items` 里的元素），
+  //   所以 `as unknown as` 不是"猜类型"，是"把已经持有的结构视图还原成具体类型"。
+  //   `instanceof` 同时充当这道转换的**运行时校验**。
+
+  /** 把内容层视图还原成引擎对象；不是 `Item` 则 `undefined`（见上方注释） */
+  #asItem(view: ActorObject): Item | undefined {
+    return view instanceof Item ? view : undefined;
+  }
+
+  public takeItem(view: ActorObject): boolean {
+    const item = this.#asItem(view);
+    if (item === undefined) return false;
+    if (this.isFull()) return false;
+    item.moveTo(this);
+    return true;
+  }
+
+  public dropItem(view: ActorObject): boolean {
+    const item = this.#asItem(view);
+    if (item === undefined) return false;
+    const env = this.environment;
+    if (env === null || env.isFull()) return false;
+    item.moveTo(env);
+    return true;
+  }
+
+  public spendItem(view: ActorObject, count = 1): boolean {
+    const item = this.#asItem(view);
+    if (item === undefined) return false;
+    if (!Number.isInteger(count) || count < 1) {
+      throw new CharacterError(`消耗数量必须是 ≥1 的整数，收到 ${String(count)}`);
+    }
+    if (item.count < count) return false;
+    item.addCount(-count);
+    // 归零即销毁：`Item` 的注释写着"恒 ≥ 1 —— 归零即应当被销毁，
+    // 而不是留一个 count=0 的幽灵"。销毁 = 从容器里摘掉（位置脱钩）。
+    if (item.isDepleted) {
+      this.removeItem(item); // 位置脱钩（从本容器摘掉）
+      // ★ T4（26 册 §55）：还要让世界把它忘掉并**释放 oid** ——
+      //   只 `removeItem` 的话 `world.items` 里会一直留着"已经不存在"的物品。
+      item.destroy();
+    }
+    return true;
+  }
+
+  public spendMoney(amount: number): boolean {
+    if (!Number.isInteger(amount) || amount < 1) {
+      throw new CharacterError(`支付金额必须是 ≥1 的整数，收到 ${String(amount)}`);
+    }
+    if (this.money < amount) return false;
+    this.money -= amount;
+    return true;
   }
 
   /**
@@ -518,6 +683,10 @@ export abstract class Character extends Container implements PropHolder {
       throw new CharacterError(`setHp 需要有限数值，收到 ${String(value)}`);
     }
     this.#hp = Math.max(0, Math.min(Math.trunc(value), this.maxHp));
+    // ★ 任何把气血抬回 >0 的写入都算"活过来了" ⇒ 清掉"已死"标记，
+    //   使 `die()` 重新可用（复活 / 治疗路径）。维护不变式 `#dead ⇒ hp===0`，
+    //   免得出现"复活了却再也死不了"这种要靠人记住的状态漂移。
+    if (this.#hp > 0) this.#dead = false;
   }
 
   public get mp(): number {
@@ -543,13 +712,345 @@ export abstract class Character extends Container implements PropHolder {
 
   /**
    * 承受伤害。返回**实际扣掉**的血量。
-   * 减伤公式（递减）在 `formula.ts`，这里不做算术。
+   *
+   * 完整减伤链路（伤害减免% → 忽视防御% → 递减减伤）在 `formula.ts#computeDamage`，
+   * 这里只负责"取我的派生值 → 调公式 → 装回去"。
+   *
+   * @param ignoreDefensePer 攻击方的**忽视防御%**（`DerivedCombat.ignoreDefensePer`）；缺省 0
    */
-  public takeDamage(raw: number): number {
-    const after = damageAfterDefense(raw, this.#derived.defense);
+  public takeDamage(raw: number, ignoreDefensePer = 0): number {
+    const dealt = computeDamage(
+      raw,
+      this.#derived.defense,
+      this.#derived.damageReductionPer,
+      ignoreDefensePer,
+      // ★ 第 ⑤ 步的固定减伤（`PROP.damageReduction` = `diff_sh`）。
+      //   它是**核心表里的 prop**，不是派生值 ⇒ 这里直读，不进 `computeDerived`
+      //   （wushen 同样是在 `damage()` 里 `query_prop("diff_sh")` 现取的）。
+      getProp(this.#holder, PROP.damageReduction),
+    );
     const before = this.#hp;
-    this.setHp(before - after);
+    this.setHp(before - dealt);
     return before - this.#hp;
+  }
+
+  // ── 战斗 ─────────────────────────────────────────────────────────────────
+  // 对照 wushen：`os/char/combat.js`（脚手架：开打 / 停手 / 选敌）、
+  // `world/extends/char/auto_combat.js`（攻击循环 `auto_attack`）、
+  // `world/extends/char/combat.js`（一次结算 `do_attack` / `end_attack`）。
+  //
+  // ★ 节拍由 `World.scheduler` 驱动（wushen 的 `this.call_out(...)`）：每出一招，
+  //   按**当时的** `attackSpeed` 排下一拍 —— 所以是"回调里再排"，不是固定 `every`
+  //   （攻速可能随状态变，固定周期读不到最新值）。
+  // ★ 全部判定走 `formula.ts` 的纯函数（单源），这里只"取数 → 调公式 → 播报 → 落账"。
+  // ★ 播报走 `sendRoom`（三视角）；受众是**房间里的玩家**（wushen `send_combat` 同）。
+
+  /** 当前战斗类型（`FIGHT_TYPE`：0 不在战斗 / 1 切磋 / 2 击杀） */
+  public get fightType(): number {
+    return this.#fightType;
+  }
+
+  public get isFighting(): boolean {
+    return this.#fightType !== FIGHT_TYPE.NONE;
+  }
+
+  /** 敌人列表（快照；诊断与测试用） */
+  public get enemies(): readonly Character[] {
+    return this.#enemies;
+  }
+
+  /** 现在时刻（读世界时钟；未注入时退回 `Date.now`） */
+  #now(): number {
+    return this.#scheduler?.now() ?? Date.now();
+  }
+
+  #isHere(other: Character): boolean {
+    const env = this.environment;
+    return env !== null && other.environment === env;
+  }
+
+  /**
+   * 从敌人表里剔除"已经不该打的"（死了 / 离开本房间 / 已停战），返回**当前该打的那个**。
+   * 对照 wushen `query_enemy`（`os/char/combat.js:123`）。
+   */
+  public queryEnemy(): Character | undefined {
+    this.#enemies = this.#enemies.filter((e) => e.isAlive && this.#isHere(e) && e.isFighting);
+    return this.#enemies[0];
+  }
+
+  /**
+   * 开战（内容层入口，`fight` / `kill` 指令的落点）。见 `defs.ts` 的 `FightStart`。
+   *
+   * ★ **双向**：wushen `do_kill` 里 `this.begin_attack(target,2)` 之后紧跟
+   *   `target.begin_attack(this,2)`（`os/char/combat.js:34-35`）—— 一次开战双方都进场。
+   * ★ 切磋要求双方"状态好"（wushen `fight.js:21-26` 的两条血量门槛）—— 那两条在
+   *   **这里**判，因为它们读的是角色内部血量，内容层看不到。
+   */
+  public beginFight(target: ActorObject, type: FightType): FightStart {
+    if (!(target instanceof Character)) return { ok: false, reason: 'not-actor' };
+    if (target === this) return { ok: false, reason: 'self' };
+    if (!target.isAlive) return { ok: false, reason: 'dead' };
+    if (this.#scheduler === undefined) {
+      throw new CharacterError('beginFight 需要世界时钟：构造时未注入 scheduler');
+    }
+    if (type === FIGHT_TYPE.FIGHT) {
+      if (this.hp < this.maxHp) return { ok: false, reason: 'self-wounded' };
+      if (target.hp < target.maxHp * 0.95) return { ok: false, reason: 'target-wounded' };
+    }
+    if (this.isFighting) {
+      return { ok: false, reason: this.#enemies.includes(target) ? 'self-fighting' : 'self-busy' };
+    }
+    // ★ "对方正在打"**只对切磋**是障碍（wushen `fight.js:33`）。
+    //   `kill` 里没有这条判据（`kill.js` 允许趁人交手时下杀手）。
+    if (target.isFighting && type === FIGHT_TYPE.FIGHT) {
+      return { ok: false, reason: 'target-fighting' };
+    }
+
+    this.#startFight(target, type);
+    target.#startFight(this, type);
+    return { ok: true };
+  }
+
+  /**
+   * **单向**进入战斗（wushen `begin_attack` 的主体，`os/char/combat.js:3`）。
+   *
+   * ★ `type` 只能**升**（1 切磋 → 2 击杀）；`type <= 当前` 时静默无操作（wushen 同）。
+   * ★ 首次进入战斗才排第一拍，且**错开**一个 `rand*attackSpeed` 的延迟
+   *   （wushen `call_out(auto_attack, Math.random()*gjsd)`）—— 否则两人互相 `kill`
+   *   会同刻出招、永远同刻。
+   */
+  #startFight(target: Character, type: FightType): void {
+    if (!this.#enemies.includes(target)) this.#enemies.push(target);
+    if (type <= this.#fightType) return;
+    const wasIdle = this.#fightType === FIGHT_TYPE.NONE;
+    this.#fightType = type;
+    if (wasIdle) {
+      this.sendCombatPhase('start');
+      this.#scheduleAttack(Math.trunc(this.#rand() * this.#derived.attackSpeed));
+    }
+  }
+
+  /** 停战（wushen `end_fight`，`os/char/combat.js:109`） */
+  public endFight(): void {
+    if (this.#attackHandle !== null) {
+      this.#scheduler?.cancel(this.#attackHandle);
+      this.#attackHandle = null;
+    }
+    this.#enemies.length = 0;
+    if (this.#fightType === FIGHT_TYPE.NONE) return;
+    this.#fightType = FIGHT_TYPE.NONE;
+    this.sendCombatPhase('end');
+  }
+
+  /** 排下一拍（先取消旧的，避免双句柄） */
+  #scheduleAttack(delayMs: number): void {
+    const scheduler = this.#scheduler;
+    if (scheduler === undefined) return;
+    if (this.#attackHandle !== null) scheduler.cancel(this.#attackHandle);
+    this.#attackHandle = scheduler.schedule(delayMs, () => {
+      this.#attackTick();
+    });
+  }
+
+  /**
+   * 一次出招（wushen `auto_attack` 的一轮，`world/extends/char/auto_combat.js:7`）。
+   *
+   * ★ 本批**未做**的 wushen 分支（都因输入还不存在）：`is_faint` 等待、
+   *   `release_time` 绝招硬直、忙乱时的自动 PFM（`auto_pfm` / `check_pfms`）。
+   *   忙乱那支做了（等忙完再打）—— 它是"不能动就别出招"的通用规则，不需要 PFM。
+   */
+  #attackTick(): void {
+    this.#attackHandle = null;
+    const target = this.queryEnemy();
+    if (this.hp <= 0 || target === undefined) {
+      this.endFight();
+      return;
+    }
+    const now = this.#now();
+    if (this.isBusy(now)) {
+      this.#scheduleAttack(Math.max(1, this.busyRemainingMs(now)));
+      return;
+    }
+    // ★★ 异常边界（2026-10-17 审查 **M3**）：`#doAttack` → `takeDamage` → `die()`
+    //   → `afterDeath`（NPC 掉落 / 内容层 `on_die` 钩子）跑的是**外挂进来的代码**，
+    //   抛错是可能发生的输入（例：`Npc` 声明了 `drops` 而世界没注入铸造器 ⇒ 刻意抛）。
+    //
+    //   不兜住的后果不是"这一拍失败"，而是**节拍永久停摆**：`#attackHandle`
+    //   已在 tick 开头置空、续排又没执行 ⇒ 再也不出招；而 `#fightType` 仍是 KILL、
+    //   `#enemies` 仍含已死目标、客户端收不到 `combat:end` —— 一边停战、一边永远
+    //   卡在战斗中，且**没有任何报错指向真正的原因**（异常只进了调度器的 stderr）。
+    //
+    //   ⇒ 兜住后必须**明确二选一**：目标已死 ⇒ 收尾停战；否则照常续排。
+    let keepGoing = false;
+    try {
+      this.#doAttack(target, now);
+      keepGoing = this.#endAttack(target);
+    } catch (error) {
+      this.#reportFightError(error);
+      keepGoing = target.isAlive && this.#fightType !== FIGHT_TYPE.NONE;
+      // 目标没了 ⇒ 把战斗状态收干净（否则"战斗中的死人"会一直挂在敌人列表里）
+      if (!keepGoing) this.endFight();
+    }
+    if (keepGoing) this.#scheduleAttack(this.#derived.attackSpeed);
+  }
+
+  /**
+   * 战斗回调里冒出来的异常：**写 stderr，不 rethrow**。
+   *
+   * ★ 为什么不用 `throw`：这一层已经没有更上的调用方了（`Scheduler.step` 只会
+   *   把它再吞一次），而节拍由下面的 `keepGoing` 明确决定 —— 责任的落点在
+   *   "还要不要继续打"，不是"要不要崩"。
+   */
+  #reportFightError(error: unknown): void {
+    let detail: string;
+    try {
+      detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    } catch {
+      detail = '<无法序列化的错误>';
+    }
+    process.stderr.write(`[fight] ${this.name} 出招时抛出异常（战斗按目标状态决定停/续）：${detail}\n`);
+  }
+
+  /**
+   * 结算一次攻击（wushen `do_attack` 的判定段，`world/extends/char/combat.js:27`）。
+   * 返回**实际造成的伤害**。
+   */
+  #doAttack(target: Character, now: number): number {
+    // 攻击动作先播（wushen 也是先 send_combat(attack_msg) 再判命中）
+    this.sendRoom(pick(ATTACK_ACTIONS, this.#rand), target);
+
+    const outcome = rollDefense(
+      {
+        hit: this.#derived.hit,
+        evasion: target.derived.evasion,
+        deflect: target.derived.deflect,
+        defenderBusy: target.isBusy(now),
+      },
+      this.#rand,
+    );
+    if (outcome.dodged) {
+      this.sendRoom(pick(DODGE_ACTIONS, this.#rand), target);
+      return 0;
+    }
+    if (outcome.parried) {
+      this.sendRoom(pick(PARRY_ACTIONS, this.#rand), target);
+      return 0;
+    }
+
+    const isCrit = rollCrit(this.#derived.crit, this.#rand);
+    let sh = this.#derived.attack;
+    if (isCrit) sh = applyCritDamage(sh);
+    const dealt = target.takeDamage(sh, this.#derived.ignoreDefensePer);
+    this.sendRoom(damageMessage(dealt, target.hp, isCrit), target);
+    this.sendRoom(queryStatusMessage(target.hp, target.maxHp), target);
+    return dealt;
+  }
+
+  /**
+   * 出招之后的分流（wushen `end_attack`，`os/char/combat.js:138`）。
+   * 返回 `true` = **继续打**（排下一拍）。
+   */
+  #endAttack(target: Character): boolean {
+    if (this.#fightType === FIGHT_TYPE.NONE) return false;
+    // 切磋：对方气血跌破 30% 自动收手
+    const ratio = target.maxHp > 0 ? target.hp / target.maxHp : 0;
+    if (this.#fightType === FIGHT_TYPE.FIGHT && ratio < 0.3) {
+      if (target.hp <= 0) target.setHp(1);
+      this.sendRoom(pick(WINNER_MESSAGES, this.#rand), target);
+      target.endFight();
+      this.endFight();
+      return false;
+    }
+    // 击杀：打到对方 die
+    if (target.hp <= 0 && target.die(this) !== false) {
+      target.endFight();
+      this.#enemies = this.#enemies.filter((e) => e !== target);
+      if (this.#enemies.length === 0) {
+        if (this.hp <= 0) this.setHp(1);
+        this.endFight();
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 死亡（wushen `NPC.prototype.die` / `USER.prototype.die`）。
+   * 返回 `false` = **没死**（`canDie` 钩子拦住了，气血被抬回 1）。
+   *
+   * ★ 共性收在这里（判钩子 → 归零 → 播报 → 停战 → `afterDeath`）；
+   *   "死之后怎样"（NPC 消散 / 玩家发复活入口 / 掉落）由子类在 `afterDeath` 里做。
+   *
+   * ★★ 幂等判据是 `#dead`（**不是** `!isAlive`，26 册 §54）：调用方在调 `die()` 前
+   *   已经把人打到 0 血，用 hp 判据会让收尾**永不执行**。见 `#dead` 字段的说明。
+   */
+  public die(killer?: Character): boolean {
+    if (this.#dead) return true;
+    if (!this.canDie(killer)) {
+      this.setHp(1);
+      return false;
+    }
+    this.setHp(0);
+    this.#dead = true;
+    this.sendRoom(pick(DIE_MESSAGES, this.#rand));
+    this.endFight();
+    this.afterDeath(killer);
+    return true;
+  }
+
+  /**
+   * 复活（气血归满、清忙乱 + 推 `die` 包族的 `relive:true` 帧）。
+   * 返回 `false` = **本来就没死**（调用方据此说"你还没死呢"）。
+   *
+   * ★ 对照 wushen `world/cmd/battle/relive.js`，本批取**简化档**：
+   *   原作有"去武庙复活（hp=1 + 换房间）"与"原地复活（消耗天师符，5 秒后满血）"两档，
+   *   前者依赖 `recover_room`、后者依赖 `cash/tianshifu` 道具与 `call_out` 延时 ——
+   *   这些前缀都不存在。本批让玩家**原地满血复活**（玩家死后本就留房间，见
+   *   `Player.afterDeath`）：先让"死亡→复活"闭环成立，避免死一次就永久卡死
+   *   （`die` 帧给了复活按钮，若没有这条指令，点下去只会得到"什么？"）。
+   *   ⚠️ 于是本批**没有死亡惩罚**；武庙 / 天师符 / 掉经验属后续批次。
+   *
+   * ★ `setHp(maxHp)` 顺带把 `#dead` 标记清掉（见 `setHp` 的不变式），
+   *   于是复活后能再次被打死 —— 不需要额外的复位步骤。
+   */
+  public revive(): boolean {
+    if (this.isAlive) return false;
+    this.setHp(this.maxHp);
+    this.clearBusy();
+    this.#output.revive();
+    return true;
+  }
+
+  /**
+   * 能不能死（子类覆写；`false` = 拦下这次死亡）。基类默认允许。
+   * ★ wushen 里对应 `on_die(killer) == false` 那一句（`os/char/npc.js:124`）。
+   */
+  protected canDie(_killer?: Character): boolean {
+    return true;
+  }
+
+  /** 死了之后的收尾（子类覆写：NPC 消散、玩家发复活入口、掉落…） */
+  protected afterDeath(_killer?: Character): void {
+    // 基类无收尾
+  }
+
+  /** 发一个 `combat` 帧（受保护：子类不必碰输出通道的细节） */
+  protected sendCombatPhase(phase: 'start' | 'end'): void {
+    this.#output.combat(phase);
+  }
+
+  /** 发一个 `die` 帧（带复活入口）；受保护，同上 */
+  protected sendDieFrame(commands: readonly CommandButton[]): void {
+    this.#output.die(commands);
+  }
+
+  /**
+   * 随机源（受保护）。让子类（`Npc` 的掉落 roll）与战斗判定**共用同一个**源
+   * —— 构造时注入的那一个（`init.rand ?? Math.random`），而不是各自再取一个
+   * `Math.random`（那会让"同一实例内两次 roll 的随机性对不上号"）。
+   */
+  protected get rand(): () => number {
+    return this.#rand;
   }
 
   // ── 忙碌（`busy`）────────────────────────────────────────────────────────
@@ -581,7 +1082,17 @@ export abstract class Character extends Container implements PropHolder {
    *   ② 地图 / 事件脚本里的定身 —— 对应 wushen `world/map/wudao/ta.js:98` 那种直接赋值。
    *   ②那种"上一条还没完又触发一次"的场景，若语义是**延长**而不是**重设**，请用 `addBusy`。
    */
-  public setBusy(ms: number, nowMs: number = Date.now()): void {
+  /**
+   * ★ 时间源（2026-10-17 审查 **L1**）：这四个入口的缺省时间原本是 `Date.now()`，
+   *   而战斗节拍读的是 `this.#now()`（= `world.scheduler.now()`）——
+   *   **同一个概念有两个时间源**。生产里两者恰好都是真实时钟才没出事；一旦注入时钟
+   *   （测试用 `makeClock`、将来的回放/存档续跑），`setBusy(10_000)` 写进去的
+   *   过期时刻是真实时间戳 `~1.7e12`，而 `isBusy(schedulerNow)` 拿 `0` 去比
+   *   ⇒ `rec.e <= nowMs` 恒假 ⇒ **忙乱永不结束**。
+   *
+   *   ⇒ 缺省一律走 `this.#now()`：有调度器就用世界的时钟，没有才退回 `Date.now()`。
+   */
+  public setBusy(ms: number, nowMs: number = this.#now()): void {
     this.#assertBusyMs(ms, 'setBusy');
     this.#armBusy(ms, nowMs);
   }
@@ -592,7 +1103,7 @@ export abstract class Character extends Container implements PropHolder {
    * ★ 没在忙时等价于 `setBusy(ms)` —— "剩余为 0"是正常起点，不是错误。
    * ★ 与 `setBusy` 的分工：`setBusy` = 从**现在**重新计时；`addBusy` = 在**已有剩余**上延长。
    */
-  public addBusy(ms: number, nowMs: number = Date.now()): void {
+  public addBusy(ms: number, nowMs: number = this.#now()): void {
     this.#assertBusyMs(ms, 'addBusy');
     this.#armBusy(this.busyRemainingMs(nowMs) + ms, nowMs);
   }
@@ -631,11 +1142,11 @@ export abstract class Character extends Container implements PropHolder {
    *   ⇒ 同一个概念只许有一个答案。取 `busyRemainingMs()` 那一版还顺带定下了
    *     "永不过期的 busy 视为**无效**"（僵直总有尽头，没有尽头的那个是脏数据）。
    */
-  public isBusy(nowMs: number = Date.now()): boolean {
+  public isBusy(nowMs: number = this.#now()): boolean {
     return this.busyRemainingMs(nowMs) > 0;
   }
 
-  public busyRemainingMs(nowMs: number = Date.now()): number {
+  public busyRemainingMs(nowMs: number = this.#now()): number {
     const left = this.temp.ttlRemainingMs(BUSY_KEY, nowMs);
     return Number.isFinite(left) ? left : 0;
   }

@@ -26,19 +26,21 @@ import {
   stateBlockedMessage,
 } from '../server/engine/command.js';
 import type { CommandEntry, GateState } from '../server/engine/command.js';
-import type { MoveResult } from '../shared/constants.js';
+import type { FightType, MoveResult } from '../shared/constants.js';
 import { Item } from '../server/engine/item.js';
 import { Npc } from '../server/engine/npc.js';
 import { Room } from '../server/engine/room.js';
 import { emptySkillRegistry } from '../server/engine/skill.js';
 import type {
   ActionDef,
+  ActorObject,
   CommandActor,
   CommandDef,
   CommandGateDecl,
   ItemDetailView,
   NpcDef,
   RoomDef,
+  FightStart,
 } from '../server/world/defs.js';
 import type { Channel, Direction } from '../shared/constants.js';
 import type { AttrBreakdown } from '../server/engine/formula.js';
@@ -158,6 +160,58 @@ class TestActor implements CommandActor {
   public go(direction: Direction): MoveResult {
     this.went.push(direction);
     return { ok: true };
+  }
+
+  /**
+   * `CommandActor.beginFight` 的桩（战斗批次新增）——**只记账，不真开战**。
+   * 真实开战（双方入场 / 排第一拍 / 命中判定）跑在 `tests/combat.test.ts`
+   * 的**真角色**上；本文件测的是分发与闸门，只需要满足接口的替身。
+   */
+  public readonly fightOps: string[] = [];
+
+  public beginFight(target: ActorObject, type: FightType): FightStart {
+    this.fightOps.push(`fight ${target.id} ${String(type)}`);
+    return { ok: true };
+  }
+
+  /** `CommandActor.revive` 的桩（复活批次新增）—— 同上，只记账 */
+  public readonly reviveOps: string[] = [];
+
+  public revive(): boolean {
+    this.reviveOps.push('revive');
+    return true;
+  }
+
+  /**
+   * `CommandActor` 的**物品搬运四原语**（B 批新增）——这里只记账。
+   *
+   * ★ 为什么是桩而不是真语义：真实语义（容量判定 / 双向绑定 / 归零销毁 / 扣钱）
+   *   跑在三处地方，各有真 `Character` 子类：
+   *     - `tests/engine-item.test.ts`（三原语本身）
+   *     - `tests/item-command.test.ts`（get/drop/give/use 四条指令）
+   *   本文件测的是**分发与闸门**，只需要一个满足接口的替身。
+   *   ⇒ 加成员在这里是**良性破坏**：它把"接口变了"变成一次编译期点名。
+   */
+  public readonly itemOps: string[] = [];
+
+  public takeItem(item: ActorObject): boolean {
+    this.itemOps.push(`take ${item.id}`);
+    return true;
+  }
+
+  public dropItem(item: ActorObject): boolean {
+    this.itemOps.push(`drop ${item.id}`);
+    return true;
+  }
+
+  public spendItem(item: ActorObject, count = 1): boolean {
+    this.itemOps.push(`spend ${item.id} ${String(count)}`);
+    return true;
+  }
+
+  public spendMoney(amount: number): boolean {
+    this.itemOps.push(`pay ${String(amount)}`);
+    return true;
   }
 
   /** `CommandActor.sendChannel` 的桩（受众裁决属会话层，这里只看"发了什么"） */
@@ -434,6 +488,14 @@ describe('engine/command · gateStateOf', () => {
       isBusy: () => false,
       userLevel: 0,
       attrBreakdowns: () => [],
+      // B 批新增的四个物品搬运原语（`gateStateOf` 用不到，但接口要求在场）
+      takeItem: () => true,
+      dropItem: () => true,
+      spendItem: () => true,
+      spendMoney: () => true,
+      // 战斗批次新增（`gateStateOf` 用不到，但接口要求在场）
+      beginFight: () => ({ ok: true }),
+      revive: () => true,
     };
     expect(gateStateOf(minimal, 1000)).toEqual({
       userLevel: 0,

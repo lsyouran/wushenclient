@@ -227,8 +227,23 @@ export const PROP = {
   hpPer: 'hp_per',
 
   // -- 透传给战斗层的修正 --
-  /** 伤害减免（百分比） */
+  /**
+   * 伤害减免（百分比）—— `computeDamage` 第 ③ 步。
+   *
+   * ★ 与下面的 `damageReduction` **同名不同物**：这个是"减百分之多少"，
+   *   那个是"固定减多少点"。wushen 两个都有（`combat.js` 里的
+   *   `diff_sh_per` 与 `diff_sh`），本项目一度只移植了百分比那一半。
+   */
   damageReductionPer: 'diff_sh_per',
+  /**
+   * **固定**伤害减免（`diff_sh`，"受到的伤害减少"）—— `computeDamage` 第 ⑤ 步。
+   *
+   * ★ 2026-10-17 审查 **M4**：这个键在核心表里**早就登记了**（`PROPERTIES.diff_sh`），
+   *   内容层与存档都能写，但 `computeDamage` 从头到尾不读它 ⇒ **写了静默失效**。
+   *   wushen `combat.js:228` 在递减减伤之后、`parseInt` 之前做
+   *   `sh = sh - this.query_prop("diff_sh")` —— 本实现补在同一位置。
+   */
+  damageReduction: 'diff_sh',
   /** 忽视对方防御（百分比） */
   ignoreDefensePer: 'diff_fy_per',
 } as const satisfies Record<string, PropKey>;
@@ -402,6 +417,26 @@ export const WEAPON_TYPE = {
 } as const;
 
 export type WeaponType = (typeof WEAPON_TYPE)[keyof typeof WEAPON_TYPE];
+
+/**
+ * 战斗类型（wushen `this.fight_type`，`os/char/combat.js:10`）。
+ *
+ * ★ 三个取值是 wushen 的原样（`0` = 不在战斗、`1` = 切磋、`2` = 击杀）：
+ *   - `FIGHT`（切磋）：`end_attack` 里对方气血跌破 **30%** 就自动收手
+ *     （`os/char/combat.js:145` `target.hp / target.max_hp < 0.3`）；
+ *   - `KILL`（击杀）：打到对方 `die()` 为止。
+ *   六道闸门的 `allow_fight` 读的就是"`fightType > 0`"（`server/engine/command.ts`）。
+ */
+export const FIGHT_TYPE = {
+  /** 不在战斗中 */
+  NONE: 0,
+  /** 切磋（点到为止） */
+  FIGHT: 1,
+  /** 击杀 */
+  KILL: 2,
+} as const;
+
+export type FightType = (typeof FIGHT_TYPE)[keyof typeof FIGHT_TYPE];
 
 // ===========================================================================
 // 4. 技能
@@ -762,6 +797,54 @@ export type DialogControlField = (typeof DIALOG_CONTROL_FIELDS)[number];
 
 export const MONEY_PER_SILVER = 100;
 export const MONEY_PER_GOLD = 10_000;
+
+/**
+ * 金额 → 可读串（wushen `os/util/util.js:49 moneyToStr`）。
+ *
+ * ★ 上面那行注释（"取自 wushen `os/util/util.js:49 moneyToStr`"）写了很久，
+ *   但**函数一直没搬过来** —— 于是 `MONEY_PER_SILVER` / `MONEY_PER_GOLD`
+ *   两个常量在这之前**一个消费者都没有**。`give <谁> <数目> money` 是它的第一个。
+ *
+ * ★ **照抄 wushen 的两个边界**（不改，但写下来，免得被当成 bug 去"修"）：
+ *   - `value >= 10000` 用 `>=`，而下面白银那一档是 `value > 100`（**不是** `>=`）：
+ *     于是 **恰好 100** 会落到铜板档，输出「100个铜板」而不是「1两白银」。
+ *   - `if (!value) return ''` —— 金额 0 / 负数输出**空串**，不是「0个铜板」。
+ *   ⇒ 本项目照抄：这是**显示**层，偏离只会让两边看起来不一样而没有收益。
+ *   （数值本身仍一律以铜板为单位的整数存储，见本节表头。）
+ *
+ * ★ 颜色标签 `<hiy>` / `<wht>` / `<yel>` 在前端白名单里
+ *   （`src/ui/markup.ts` 的 `KNOWN`，大小写不敏感），所以这些标签会**真的上色**。
+ */
+export function moneyToStr(value: number): string {
+  if (!value) return '';
+  const parts: string[] = [];
+  let rest = value;
+  if (rest >= MONEY_PER_GOLD) {
+    parts.push(`${String(Math.trunc(rest / MONEY_PER_GOLD))}两<hiy>黄金</hiy>`);
+    rest %= MONEY_PER_GOLD;
+  }
+  if (rest > MONEY_PER_SILVER) {
+    parts.push(`${String(Math.trunc(rest / MONEY_PER_SILVER))}两<wht>白银</wht>`);
+    rest %= MONEY_PER_SILVER;
+  }
+  if (rest > 0) {
+    parts.push(`${String(rest)}个<yel>铜板</yel>`);
+  }
+  return parts.join('');
+}
+
+/**
+ * `give <谁> <数目> money` 里那个保留字（wushen `world/cmd/obj/give.js:10`
+ * 的 `objid == "money"`）。
+ *
+ * ★ 为什么放在 `shared/`：它是**协议级**的字面量 —— 两个内容文件都要用它
+ *   （`world/command/item/give.ts` 产出它、`world/npc/pub/xiaoer.ts` 的
+ *   `on_accept` 按它分派）。各写一份字面量就是 24 册 §3 那种"第二份真相"
+ *   （改一处另一处静默不跟）。
+ * ★ 它同时是 `InteractHooks.onAccept` 的 `objId` 参数的一个取值
+ *   —— 那个参数**要么**是这个保留字，**要么**是物品的模板 id（`drug/yao#0`）。
+ */
+export const GIVE_MONEY_KEY = 'money';
 
 // ===========================================================================
 // 10. 存档 / 心跳 / 限流（200 人规模基线，见 23 册 §7）
