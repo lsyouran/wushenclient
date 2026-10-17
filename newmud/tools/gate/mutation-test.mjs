@@ -1084,11 +1084,16 @@ const ALL_MUTATIONS = [
     label: 'SKL(测试)',
     rule: 'SKL.1 记账式重算幂等（D2-B）',
     name: '重算前不先减旧账 —— 退回 wushen 的增量三角（每算一次就多累加一份，且不报错）',
+    // ★★ 2026-10-17：本样本一度**静默失效**（`server/engine/skill.ts 未被改动`
+    //   ⇒ 注入失败 ⇒ ERR ⇒ 被判"假绿"）。原因是 `recompute()` 被重构成先
+    //   `const contributed = ...` 再 `#absorb(contributed)`，而这里还在按**旧源文本**
+    //   匹配 —— 靠文本匹配的样本会被"搬走代码"打穿，这正是它存在的理由。
+    //   ⇒ 改按**当前**实现匹配。将来再动 `recompute()` 的这几行，本样本必须同步。
     apply: () =>
       patchFile('server/engine/skill.ts', (t) =>
         t.replace(
-          '  public recompute(): void {\n    this.#releaseLedger();\n    this.#absorb(this.contributedProps());',
-          '  public recompute(): void {\n    this.#absorb(this.contributedProps());',
+          '  public recompute(): void {\n    const contributed = this.contributedProps();\n    this.#releaseLedger();\n    this.#absorb(contributed);',
+          '  public recompute(): void {\n    const contributed = this.contributedProps();\n    this.#absorb(contributed);',
         ),
       ),
   },
