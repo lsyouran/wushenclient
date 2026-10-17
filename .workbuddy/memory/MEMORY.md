@@ -12,8 +12,8 @@ node node_modules/vitest/vitest.mjs run
 node tools/gate/run-all.mjs          # G2/G3/G5/G6/G12/G13/G14/G15
 node tools/gate/mutation-test.mjs    # 9–13min；动闸门/测试必跑
 ```
-node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文件 845 测试 · run-all PASS 无 SKIP · mutation 89/89**；双 tsc 0 错。
-★ 动源码/测试/样本/闸门 ⇒ 重跑；**未动 `tools/gate/*` ⇒ 不跑 mutation**。★ 长跑重定向再读（`| head/grep` 会 SIGPIPE）。★ vitest 与 run-all 别同跑。★ `static-web.test.ts` 偶发 2 红，单独复跑必绿（端口 flake）。
+node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-17，§55 后）：**47 文件 990 测试 · run-all PASS 无 SKIP · mutation 89/89**；双 tsc 0 错。（§54 时 978；§53 时 45/899。）
+★ 动源码/测试/样本/闸门 ⇒ 重跑。★★ **"未动 `tools/gate/*` ⇒ 不跑 mutation" 只在样本不匹配源码时成立** —— 变异样本**按源文本 `t.replace` 匹配**，**重构搬走被盯的代码就把样本变成假绿，样本自己不会报错**（§55 抓到 SKL.1：`skill.ts` 重构后样本失配）⇒ **动 `server/engine/*`（尤其 skill/formula/npc 等被样本盯着的）也要跑 mutation**。★ 长跑重定向再读（`| head/grep` 会 SIGPIPE）。★ vitest 与 run-all 别同跑。★ `static-web.test.ts` 偶发 2 红，单独复跑必绿（端口 flake）。
 
 ## 铁律
 1. **fix-before-assert**：先写会红的断言并**实证**再改。新判据答：①运行时够得着吗？②**谁在照它做？** ★★ 机检报 N 改 N =**抽样非收工**（还要问"有没有看不见的写法"）。
@@ -21,9 +21,13 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文�
 3. **单源真相**（`shared/ids|constants|protocol.ts`）；第二份清单就删。性别三档（0无/1男/2女），`call3()` 两档。
 4. 闸门规则自带 `dirs`（否则 FG-7 死规则）；证可红的样本也要证**守卫自己**可红；判据落在**区分性字段**。
 5. **注释/文档也是断言**（FG-19/20/21）；旧 T/FG 条目是**快照非现状**，动手前逐条复查。
+   ★★ 不只旧条目是快照，**连「✅ 已清 / 已清偿」的标注本身也是快照**。凡声明"某挂账已清偿"，
+   收工前必须 **grep 一次生产调用点**（不看定义/注释/测试）。实例：26 册 §54.1 与路线图三处声明
+   「已清偿 T4/T5」，实测 `OidSpace.release()` / `pruneTemp()` **仍双双零生产调用点**（§55）。
 6. **编号跨文件**：用号前全仓 grep；宁可顺延，不挪已引用的号。
 7. ★ "靠某值不存在"的判据脆；先问"我这一动，谁的前提被取消"。
 8. ★★ "不该改 X"的断言先问：**我什么都不做，这条也绿吗？** 假绿两型：① `before=读X(); expect(X).toBe(before)`；② 从未变的初值出发。修法：**哨兵值 + 起点人为拨到相反**。
+9. ★★ **"修复"自身也要按同一套纪律复验**：改动量大（多文件）的批次收工前，对**改动本身**再做一轮独立复查 —— 实例：§55 修了 17 条后，第二轮在**它自己的改动**里揪出 4 条回归（R1 直接违反写死的"限流在解析前"、R4 是"新写的测试本身假绿"）。**"我改了、我跑了、绿了" ≠ 收工**。★ 错误路径（端口占用/启动失败）必须**真起第二个进程**才证得了，第一版"看起来对了"常靠这条拆穿。
 
 ## 命名（四层）
 **① 代码名 ② 数据键（wushen 拼音） ③ 中文 ④ 技能 id/装配槽。** 派生 `character.derived.X`：`attack`/`defense`/`hit`/`evasion`/`deflect`/`crit`/`attackSpeed`/`maxHp`/`damageReductionPer`/`ignoreDefensePer`。
@@ -32,6 +36,7 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文�
 - ★★ **有效属性（§37）**：= 先天+后天，唯一口径 `formula.ts#effectiveAttr()`，**门槛读它**；**派生公式读分开值** ⇒「门槛=合成、公式=分开」。`Character.str/…` 返回**有效值**；裸先天只在 `innateSnapshot()`。`minProp`+`minInnate`→`minAttr`（29 册 §29.13）。
 - **三档读取口（§39）**：`attrBreakdowns()`→`{key,innate,bonus,total}`；消费者 `info/score.ts`；`AttrKey` 由 `ATTR_KEYS` 派生。★ 加 `CommandActor` 成员打穿所有 implements 替身（良性）。**不用 `enum`**。
 - ★★ 教训：引别名后 **G3.C 计数 22→0**（规则失去输入）⇒ **引间接层先问"哪个闸门原本靠直接形态在守？"**
+- ★★ **world id 保留字**：`shared/ids.ts#RESERVED_AREAS` 含**全部 `KINDS`** ⇒ 用 `item/`、`npc/` 等作**内容子目录**会 `parseWorldId` 返 null、`define*` 抛 `IdError`（B 批踩到：`world/command/item/` ⇒ **12 测试文件连锁崩**）。**给内容层造目录先查保留字**；`world/command/obj/` 是安全名。
 
 ## grep 自检（★★ 最高频）
 默认 BRE：`\s`/`\d` **不是**转义类 ⇒ 静默零命中；要 `-E`/`-P`。**"零命中"先用一个确知命中不了的串自检**。
@@ -50,6 +55,8 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文�
 ## 启动（§17）
 `npm start`（prestart 自动 build:web，默认 8123）/ `-- --port 9000`。入口链 `tools/start.mjs`→`server/cli.ts`→`main()`；`server/main.ts` 纯工厂**不能直跑**。
 ★ 静态与 WS **同端口**；根 `dist/web/`，`GET /` 302→`/src/index.html`；node ≥ 22.15.0。加载器 `tools/dev/ts-loader.ts`：**必须 transform**（ws-server 有参数属性）、候选表不含 `.d.ts`、别名表读 tsconfig。
+- ★★ `new WebSocketServer({ port })` **构造时就 listen**；其自建 http server 的 `'error'`（如 EADDRINUSE）**转发**到 `wss.emit('error')` ⇒ 必须**构造后立刻**挂 `wss.on('error')`。挂晚 = 无人接 = `uncaughtException` + Promise 永不 settle ⇒ **进程挂死**（§55 M2，第一版修法只加 Promise reject 无效）。
+- ★★ **错误路径（端口占用/启动失败类）不能只静态推理 —— 必须真起第二个进程才证得了**（fix-before-assert 对错误分支同样适用）。
 
 ## 闸门
 - 退出码四态（§27）：0 通过/1 违规/2 跳过/3 崩溃；`-1`=没起。`tools/gate/*.mjs` 入口显式 `installCrashGuard('<id>')`（"忘装"由 G6 R6.11 兜）。元闸门判据 `before∉{FAIL,CRASH} && after===expectAfter && restored===before && note===''`；崩溃正面声明 `expectAfter: EXIT_CRASH`。迭代 `--only=`，**取证不许带 `--only`**。窄口：R6.7 只认 `process.exit(` 紧跟数字；崩溃守卫不覆盖模块求值期。
@@ -67,7 +74,7 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文�
 
 ## 子系统（细则 `CONVENTIONS-engine.md`）
 - ★ **记账式重算**：`skill.ts` `recompute()` 先 `#releaseLedger()` 再 `#absorb()`（幂等）；三入口共用 `#attachSlot`/`#detachSlot`。（重构搬走代码会打穿靠源文本匹配的变异样本⇒假绿。）
-- ★ **数值偏离（权威 `docs/29` §29.4）**：① `max_hp` con 项 wushen 不除10、本项目除10（**未裁定**）；② 玩家背包 **50**（≠wushen 20；NPC 10/房间 50）；③ **`gj` 照抄 wushen**。★★ wushen `recount` 两套算法 ⇒ 统一走玩家那套。
+- ★ **数值偏离（权威 `docs/29` §29.4）**：① `max_hp` con 项 ⇒ ✅ **已闭合**：照抄 wushen（**不除** 10）（§35）；而 `defense` 里同一个 `prop(con)` **要除 10** ——「同一个 prop 两处算法不同，原作如此」。② 玩家背包 **50**（≠wushen 20；NPC 10/房间 50）；③ **`gj` 照抄 wushen**。★★ wushen `recount` 两套算法 ⇒ 统一走玩家那套。
 - ★ **播报**：房内 `sendRoom`（三视角/`warn`）；跨房 `sendChannel`（`CHANNEL_SCOPE`/`msg`）。★★ wushen `msg.ch` 只 7 种 ⇒ `CHANNELS` 无 `say`/`emote`。★ 输入 `$X` 被占位符吃掉。
 - ★ **背压两档**：① `MAX_OUTBOUND_QUEUE`(256)=hub 队列条数，恒≤1，**非运行时判据**；② `MAX_BUFFERED_BYTES`(1MiB)=`socket.bufferedAmount` ⇒ **运行时够得着**；超限 ⇒ `close()+forget()+false`，**不调 `onReject`**（递归）。★ `session.#send` 看返回值。
 - ★ **网络管线顺序**：量大小→限流→分诊→解析+**zod**（限流在解析前）；只有 `ws-server.ts` 碰 `ws`。
@@ -75,12 +82,14 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-16）：**43 文�
 - ★★ **活体 = `Actor.isAlive`**（§41）：从 `CommandActor` **上提到 `Actor`**（**属性**）；`allow_die` + 房间钩子共用。★★ 短路只放 `room.ts#hooked()` 开头。★ `Item` 非 `Actor` ⇒ 类型层挡。
 - ★★ **P0（§30）**：① 入站 try/catch+`onInternalError`；② `--host`+`WS_PATH='/ws'`+`isSameOriginRequest`；③ `isRoleName` 单源+`#byRoleId` 唯一。★ **N4/§50**：`MAX_CONNECTIONS_PER_IP`+`hub.admissionRefusal()`+`--max-connections-per-ip`，满员**关连接**。★★ **反代压平 `remoteAddress` ⇒ per-IP 退化"全体合计"**（31 册 §3.1）。★ 未做 **T12**。
 - ★★ **`admissionRefusal()` 把"判据"与"形态"分离**（返 `'full'|'per-ip'|null`，`accept()` 仍 `boolean`）——拒绝**原因**给客户端分档文案。
+- ★★ **`Item` 持 `def` + 派生 `interact`**（§53，B 批）：与 `Npc`/`Room` 同款 —— 实例持模板引用，构造时把钩子投影成 `InteractHooks`（字段**原样搬运、不归一**；判据留调用点写 `... === true`）。**搬运是 `CommandActor` 四原语** `takeItem`/`dropItem`/`spendItem`/`spendMoney`（**刻意避开 `Container.addItem`/`removeItem` 同名**）。`on_accept` 是**纯谓词**（无副作用）⇒ `give` 先问后扣（与 wushen 顺序相反、结果同）。★ `get`/`drop` 只做**整叠**（拆分要铸 oid，`CommandActor` 够不着 `OidSpace`）。
+- ★★ **战斗（§54，最小范围）**：① **时钟 = `World.scheduler`**（一个世界一个时钟；`bootstrapWorld` 造、`main.ts` `setInterval` 推进 `step()` + `sessions.afterTick()`）；角色 `beginFight` 缺它**抛错**。② **命中/躲闪/招架/暴击/伤害全在 `formula.ts`**（G6 R6.9 守）；★★ **躲闪/招架是线性对抗** `rand*(ds/2)+ds/2 > mz`（**不是**概率式），无加成时 `ds===mz` ⇒ **永远躲不开**（测试要命中该支只能真给 `prop.ds`/`prop.zj`）。③ **掉落**：`rollDrops()` 照抄 `create_by_odds` ⇒ `odds` 万分比、**`odds:0`=必掉**、`min`+`max` **覆盖** `count`；铸造器 `ItemSpawner` 由 `world.ts` 注入（`makeItem(path,count)`），**有 `drops` 无铸造器 ⇒ 抛 `NpcError`**。④ ★★ **`die()` 幂等判据是 `#dead` 标志，不是 `!isAlive`**（调用方先打到 0 血再调 `die()` ⇒ hp 判据会让收尾永不执行）。⑤ **叉 3：不搞尸体** —— NPC `moveTo(null)` 消散、掉落落房间地上；玩家**留房间**（灵魂 `hp=0`）+ `die` 帧；`relive` **原地满血**（无惩罚）。★ `relive` 指令**必带 `allow_die:true`**（否则死人唯一出路被闸门拦死）。
 
 ## 前端（`src/`，26 册 §15–§21；细则 `CONVENTIONS-web-ui.md`）
 原生 ESM + 纯 DOM，**不引框架/打包器**；外观照 wushen。两块顶层屏互斥（`#auth`/`#app`），切屏唯一落点 `ui/screens.ts`，由 `login` 帧驱动。
 ★ protocol 只 `import type`（G14）；`ui/dom.ts` **不提供 innerHTML 助手**；`ui/markup.ts` 用**标签白名单+createTextNode**（已摘掉 `CMD`）。★★ **"改前端"默认去 `D:/ts-mud/wushen/src/` 找组件移植，不是自己发明**。
 
 ## 未做
-**已办**：T1/T2/T15–T24（T23④ 未做）；P0；数值裁定（§32）；命名隔离（§34）；有效属性（§37）；版本控制（§38）；属性三档口+`score`（§39）；读档准入（E3/§40）；活体（E4/§41）；**S/F/E/L/N/D §42–§50 全收口**；**E12 非缺陷**。
-**仍未做（详见 `_roadmap-还差多少-2026-10-16.md`）**：**T12** 账号/存档/验签（28 册定稿）；**B 批** `get/drop/give/use`+`Item.def`；战斗/装备/服用；技能第三档 addin；知识·隐藏技能；门派薄壳；面板不可达；G9 对账闸门；真浏览器 e2e；T22④；图形化地图/选角 UI；G2.3 变异样本（T13）。
+**已办**：T1/T2/T15–T24（T23④ 未做）；P0；数值裁定（§32）；命名隔离（§34）；有效属性（§37）；版本控制（§38）；属性三档口+`score`（§39）；读档准入（E3/§40）；活体（E4/§41）；**S/F/E/L/N/D §42–§50 全收口**；**E12 非缺陷**；**B 批（§53）物品可交互 `get`/`drop`/`give`/`use` + `Item` 持 `def`**；**战斗最小范围（§54：调度器 + 命中/躲闪/招架 + `fight`/`kill`/`relive` + 不搞尸体 + 死亡掉落）**；**独立审查批（§55，17 条已全修：H1 假绿 / H2 静默跳过 / M1 JSON 控制字符 / M2+M6 错误路径 / M3 战斗节拍 / M4 `diff_sh` / M5 **真**清偿 T4/T5 / L1–L9）**。
+**仍未做（详见 `_roadmap-还差多少-2026-10-16.md` §九）**：**T12** 账号/存档/验签（28 册定稿）；**BUFF/状态/连招/门派/`perform`（绝招）—— 战斗的下一档**；交易（`buy/sell`+`sell_list`）/任务/装备；`on_kill` 钩子接线；技能第三档 addin；知识·隐藏技能；门派薄壳；面板不可达；G9 对账闸门；真浏览器 e2e；T22④；图形化地图/选角 UI；G2.3 变异样本（T13）；物品进出房间钩子（wushen `npc.js:160/208`）。
 ★ **E9 待专项**（`recount` 只钳 hp 不钳 mp ⇒ 原作空档）。★ **E 号多来源，引用带册号**：`loadTemp`=`NEVER_EXPIRES`（§44）、busy 上限（§49）、`loadProps` 无范围闸门（§48）、安全头（L1/§50）、per-IP（N4/§50）。
