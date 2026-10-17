@@ -5,5 +5,9 @@ defineRoom('yz/beidajie1', {
   desc: '街道两旁店铺林立，行人络绎不绝。',
   exits: { south: 'yz/guangchang' },
   objects: ['drug/yao#1'],
+  // ★ 木人桩（见 `world/npc/pub/muren.ts`）：可打死的练功靶子。
+  //   放在这里而不是广场，是因为广场 `no_fight: true`（`kill` 会在门口就被挡回来）。
+  //   规范上这就是"练功房该有的东西"，只是本项目还没有门派练功房这个房间。
+  npcs: ['pub/muren'],
   // 没有 on_leave：默认允许离开
 });

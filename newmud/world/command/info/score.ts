@@ -38,6 +38,12 @@ defineCommand('info/score', {
           : `${label}：${a.total}（先天 ${a.innate} + 后天 ${a.bonus}）`,
       );
     }
+    // ★ 成长面（26 册 §56）：经验抬高**技能等级上限**，潜能用来在 `practice` 里换等级。
+    //   这两行是关键引导 —— 没有它们，玩家打到经验也不知道"这个数有什么用"。
+    //   ★ NPC 的 `skillLimit()` 是 `Infinity`（它们不走这条曲线），显示成 ∞ 而不是天文数字。
+    const limit = me.skillLimit();
+    lines.push(`\n经验：${String(me.exp)}　潜能：${String(me.pot)}`);
+    lines.push(`技能等级上限：${Number.isFinite(limit) ? String(limit) : '∞'} 级`);
     me.notify(lines.join('\n'));
   },
 });

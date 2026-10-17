@@ -17,6 +17,7 @@ import './skill/base/sword.js';
 import './skill/wd/taijijian.js';
 import './item/drug/yao.js';
 import './npc/pub/xiaoer.js';
+import './npc/pub/muren.js';
 import './room/yz/guangchang.js';
 import './room/yz/beidajie1.js';
 import './command/action/look.js';
@@ -33,6 +34,7 @@ import './command/obj/use.js';
 import './command/combat/fight.js';
 import './command/combat/kill.js';
 import './command/combat/relive.js';
+import './command/train/practice.js';
 
 /**
  * 清单（相对 `world/` 的路径，顺序 = 加载顺序）。
@@ -45,6 +47,7 @@ export const CONTENT_MODULES: readonly string[] = [
   'skill/wd/taijijian.ts',
   'item/drug/yao.ts',
   'npc/pub/xiaoer.ts',
+  'npc/pub/muren.ts',
   'room/yz/guangchang.ts',
   'room/yz/beidajie1.ts',
   'command/action/look.ts',
@@ -61,4 +64,5 @@ export const CONTENT_MODULES: readonly string[] = [
   'command/combat/fight.ts',
   'command/combat/kill.ts',
   'command/combat/relive.ts',
+  'command/train/practice.ts',
 ];

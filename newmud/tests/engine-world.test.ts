@@ -30,13 +30,13 @@ const world = instantiateWorld();
 
 describe('engine/world · 真实内容的实例化统计', () => {
   it('各计数与注册表一致', () => {
-    // 内容：2 房间 / 1 NPC 实例 / 2 物品实例 / 1 区域 / 2 出口
+    // 内容：2 房间 / **2** NPC 实例（店小二 + 木人桩）/ 2 物品实例 / 1 区域 / 2 出口
     expect(world.stats.rooms).toBe(2);
-    expect(world.stats.npcs).toBe(1);
+    expect(world.stats.npcs).toBe(2);
     expect(world.stats.items).toBe(2); // drug/yao + drug/yao#1 各 1 个
     expect(world.stats.areas).toBe(1);
     expect(world.stats.exits).toBe(2); // 广场↔北大街 两条有向出口
-    expect(world.stats.oidsIssued).toBe(5); // 2 房间 + 1 NPC + 2 物品
+    expect(world.stats.oidsIssued).toBe(6); // 2 房间 + 2 NPC + 2 物品
     expect(world.stats.skills).toBe(3); // base/force + base/sword + wd/taijijian
   });
 
@@ -45,7 +45,7 @@ describe('engine/world · 真实内容的实例化统计', () => {
   });
 
   it('启动日志一行统计含指令数', () => {
-    expect(describeWorld(world.stats)).toContain('指令 14（别名 20）');
+    expect(describeWorld(world.stats)).toContain('指令 15（别名 22）');
   });
 
   it('起始房间取区域 first', () => {
@@ -210,8 +210,8 @@ describe('engine/world · id 空间可复用（读档恢复场景）', () => {
     const first = instantiateWorld({ oidSpace: shared });
     const second = instantiateWorld({ oidSpace: shared });
 
-    expect(first.stats.oidsIssued).toBe(5);
-    expect(second.stats.oidsIssued).toBe(10); // 同一个空间已累计 10
+    expect(first.stats.oidsIssued).toBe(6);
+    expect(second.stats.oidsIssued).toBe(12); // 同一个空间已累计 12
 
     const firstOids = new Set([...first.rooms.values()].map((r) => r.oid));
     for (const r of second.rooms.values()) expect(firstOids.has(r.oid)).toBe(false);
@@ -226,8 +226,8 @@ describe('engine/world · 指令表 + 真实内容的三级分发（全链路）
     //         + get / drop / give / use（各一个，与 wushen 的 `this.command` 同名，未起短写）
     //   ↑ `chat` 是 wushen 的原词（`world/cmd/channel/chat.js`），
     //     也是前端「世界」页签产出的命令名（26 册 §24.3）
-    expect(world.stats.commands).toBe(14);
-    expect(world.stats.commandAliases).toBe(20);
+    expect(world.stats.commands).toBe(15);
+    expect(world.stats.commandAliases).toBe(22);
     expect(world.commands.lookup('look')?.id).toBe('action/look');
     expect(world.commands.lookup('l')?.id).toBe('action/look');
     expect(world.commands.lookup('select')?.id).toBe('action/select');
