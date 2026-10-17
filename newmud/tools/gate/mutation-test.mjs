@@ -1268,6 +1268,65 @@ const ALL_MUTATIONS = [
       ),
   },
 
+  // ---- 成长闭环（26 册 §56 / 27 册 §13）----
+  // 这一组证明 tests/progression.test.ts 不是摆设：把三条"接线"各剪断一根，
+  // 对应断言必须变红。★ 上线顺序要点：三条链里任何一条断了，玩家都会得到
+  // "打了怪没反应 / 有潜能练不动 / 练一次就没了"，而这三种都不会报错。
+  {
+    kind: 'test',
+    file: 'tests/progression.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.13 经验决定技能等级上限',
+    name: '让技能上限退回只看模板 max_level —— 角色经验再也压不住技能等级（"经验决定上限"退化成注释）',
+    apply: () =>
+      patchFile('server/engine/skill.ts', (t) =>
+        t.replace(
+          '    return Math.min(tpl.maxLevel, this.#owner.skillLimit());',
+          '    return tpl.maxLevel;',
+        ),
+      ),
+  },
+  {
+    kind: 'test',
+    file: 'tests/progression.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.14 击杀奖励发给击杀者',
+    name: '删掉 `afterDeath` 里的 `#awardKiller(killer)` —— 打怪不再给经验/潜能（内容写了也没人发）',
+    apply: () => patchFile('server/engine/npc.ts', (t) => t.replace('    this.#awardKiller(killer);\n', '')),
+  },
+  {
+    kind: 'test',
+    file: 'tests/progression.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.15 NPC 重生排期',
+    name: '把 `onRespawn` 换成空函数 —— 怪死了就永远消失（"打怪 → 练技能"只能跑一次）',
+    apply: () =>
+      patchFile('server/engine/world.ts', (t) =>
+        t.replace(
+          '      onRespawn: () => {\n        respawnNpc(room, npcPath, npcDef.respawn_ms ?? DEFAULT_RESPAWN_MS);\n      },',
+          '      onRespawn: () => undefined,',
+        ),
+      ),
+  },
+  {
+    kind: 'test',
+    file: 'tests/progression.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.16 潜能是练技能的成本',
+    name: '让 `spendPot` 只判不扣 —— 技能白练，潜能越练越多',
+    apply: () =>
+      patchFile('server/engine/character.ts', (t) =>
+        t.replace(
+          '    if (this.pot < cost) return false;\n    this.pot -= cost;\n    return true;',
+          '    if (this.pot < cost) return false;\n    return true;',
+        ),
+      ),
+  },
+
   // ---- A 批（26 册 §28）：口径对账六项 —— 每条"我修好了"都必须能被改坏 ----
   // ★ 这六项里 FG-15 / FG-17 是**撤回不实陈述**（注释层面的修法），没有可执行的
   //   判据可变异 —— 它们的守卫是"注释不许再宣称不存在的东西"，
