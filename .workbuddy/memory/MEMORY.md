@@ -85,8 +85,15 @@ node 用托管版 `.../22.22.2-6/node.exe`。基线（2026-10-17，§55 后）�
 - ★★ **`Item` 持 `def` + 派生 `interact`**（§53，B 批）：与 `Npc`/`Room` 同款 —— 实例持模板引用，构造时把钩子投影成 `InteractHooks`（字段**原样搬运、不归一**；判据留调用点写 `... === true`）。**搬运是 `CommandActor` 四原语** `takeItem`/`dropItem`/`spendItem`/`spendMoney`（**刻意避开 `Container.addItem`/`removeItem` 同名**）。`on_accept` 是**纯谓词**（无副作用）⇒ `give` 先问后扣（与 wushen 顺序相反、结果同）。★ `get`/`drop` 只做**整叠**（拆分要铸 oid，`CommandActor` 够不着 `OidSpace`）。
 - ★★ **战斗（§54，最小范围）**：① **时钟 = `World.scheduler`**（一个世界一个时钟；`bootstrapWorld` 造、`main.ts` `setInterval` 推进 `step()` + `sessions.afterTick()`）；角色 `beginFight` 缺它**抛错**。② **命中/躲闪/招架/暴击/伤害全在 `formula.ts`**（G6 R6.9 守）；★★ **躲闪/招架是线性对抗** `rand*(ds/2)+ds/2 > mz`（**不是**概率式），无加成时 `ds===mz` ⇒ **永远躲不开**（测试要命中该支只能真给 `prop.ds`/`prop.zj`）。③ **掉落**：`rollDrops()` 照抄 `create_by_odds` ⇒ `odds` 万分比、**`odds:0`=必掉**、`min`+`max` **覆盖** `count`；铸造器 `ItemSpawner` 由 `world.ts` 注入（`makeItem(path,count)`），**有 `drops` 无铸造器 ⇒ 抛 `NpcError`**。④ ★★ **`die()` 幂等判据是 `#dead` 标志，不是 `!isAlive`**（调用方先打到 0 血再调 `die()` ⇒ hp 判据会让收尾永不执行）。⑤ **叉 3：不搞尸体** —— NPC `moveTo(null)` 消散、掉落落房间地上；玩家**留房间**（灵魂 `hp=0`）+ `die` 帧；`relive` **原地满血**（无惩罚）。★ `relive` 指令**必带 `allow_die:true`**（否则死人唯一出路被闸门拦死）。
 
-## 前端（`src/`，26 册 §15–§21；细则 `CONVENTIONS-web-ui.md`）
-原生 ESM + 纯 DOM，**不引框架/打包器**；外观照 wushen。两块顶层屏互斥（`#auth`/`#app`），切屏唯一落点 `ui/screens.ts`，由 `login` 帧驱动。
+## 成长闭环（§56 / 27 册 §13）
+- ★★ **`Character.addExp()` 是经验的唯一增加入口**（wushen 同名）；负数/NaN **抛错**（扣减走各自惩罚路径）。`NpcDef.exp/pot` 是**击杀奖励**，不是 NPC 自身经验（同名字段两个概念）。
+- ★★ **技能上限单点**：`skillLimit()=levelLimit(exp,level)` → `SkillBook.#capOf=min(maxLevel,skillLimit)` → `addExp` 封顶。`Npc.skillLimit()` 覆写 **`Infinity`**（NPC 不走这条曲线）。
+- ★ 上限是**动态的** ⇒ `addExp` 到顶**不清零**剩余经验（清零会吞进度）；`practice` 遇 `cost===0` 要**免费升级**且用 `addExp(id,0,untilLevel)` 钉住目标等级。
+- ★ `practice` 是**一次结算**（wushen `lianxi` 是持续状态，`Actor.state` 未落地）；1:1 兑换。`capped`（到上限）与 `reached`（到你指定目标）**分开**。
+- ★ 重生走 `world.ts#spawnNpc`（首次摆放与重生**同一条路**），`no_refresh` 不重生；排期走 `World.scheduler`，房间满**重试**。
+- ★★ **`skill` 是保留 area** ⇒ 内容子目录/指令 id 不能用它（`skill/practice` 会抛 `IdError`）⇒ 用了 `train/practice`。同一坑第二次（§53 是 `world/command/item/`）。
+
+## 前端（`src/`，26 册 §15–§21；细则 `CONVENTIONS-web-ui.md`）原生 ESM + 纯 DOM，**不引框架/打包器**；外观照 wushen。两块顶层屏互斥（`#auth`/`#app`），切屏唯一落点 `ui/screens.ts`，由 `login` 帧驱动。
 ★ protocol 只 `import type`（G14）；`ui/dom.ts` **不提供 innerHTML 助手**；`ui/markup.ts` 用**标签白名单+createTextNode**（已摘掉 `CMD`）。★★ **"改前端"默认去 `D:/ts-mud/wushen/src/` 找组件移植，不是自己发明**。
 
 ## 未做
