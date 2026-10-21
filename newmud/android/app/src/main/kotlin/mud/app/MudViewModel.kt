@@ -1,11 +1,10 @@
 package mud.app
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mud.core.ChatChannel
@@ -25,17 +24,38 @@ import mud.core.normalizeWsUrl
  *
  * ★ 为什么 `ViewModel` 而不是把 `MudClient` 塞进 Activity：转屏 / 后台回来时
  *   Activity 会重建，而**连接不该跟着重建**（否则每次转屏都掉线重登）。
+ *
+ * ★ 为什么是 `AndroidViewModel` 而不是 `ViewModel` + 一个静态 context：
+ *   这里要读写"上次连成功的地址"（[ConnectionPrefs]），而那需要 `Context`。
+ *   静态持有 context 是老式写法里的泄漏源；`AndroidViewModel` 由框架注入
+ *   **Application**，生命周期到进程为止 —— 不存在"Activity 泄漏"这一档。
+ *   `viewModel()` 认出 `(Application)` 这个构造签名，不需要额外写 Factory。
  */
-class MudViewModel : ViewModel() {
+class MudViewModel(app: Application) : AndroidViewModel(app) {
     private val client = MudClient(OkHttpTransport())
 
     val state: StateFlow<UiState> = client.state
 
-    private val serverUrlState = MutableStateFlow(DEFAULT_URL)
-    val serverUrl: StateFlow<String> = serverUrlState.asStateFlow()
+    /** 「上次连成功」的地址与角色名（见 [ConnectionPrefs]） */
+    private val prefs = ConnectionPrefs(app, DEFAULT_URL)
+
+    /** 地址框的初值：上次连成功的那个；没有就是 [DEFAULT_URL] */
+    val initialUrl: String get() = prefs.url
+
+    /** 角色名框的初值：上次连成功的那个（空串 = 没成功过，界面留空） */
+    val initialRole: String get() = prefs.role
 
     /** 连上之后要发的登录包（`onOpen` 与 `login` 之间隔着一次异步，这里存着） */
     private var pendingLogin: Pair<String, String>? = null
+
+    /** 本次尝试规整后的地址 —— 成功时用它回写，而不是让界面把输入框再传一遍 */
+    private var attemptUrl: String? = null
+
+    /** 本次尝试的角色名（同上；`pendingLogin` 在 `onOpen` 时就被置空了，不能拿它取） */
+    private var attemptRole: String = ""
+
+    /** 「这一轮已经回写过」：状态流每次发射都会进来，不拦一道就是每帧写一次盘 */
+    private var persisted = false
 
     init {
         // 等"连上了"再发登录：`login` 发在 `onOpen` 之前会被服务端按"未连接"丢掉。
@@ -46,6 +66,16 @@ class MudViewModel : ViewModel() {
                     pendingLogin = null
                     client.login(pending.first, pending.second)
                 }
+                // ★★ 回写点在这里（进游戏之后），不在点"连接"时：
+                //   否则"输错一个地址 → 连不上 → 下次打开还回到那个错地址"，
+                //   等于把错误也一起记住了。
+                if (s.phase == Phase.InGame && !persisted) {
+                    persisted = true
+                    attemptUrl?.let { prefs.url = it }
+                    if (attemptRole.isNotBlank()) prefs.role = attemptRole
+                }
+                // 断线之后可以再连一次，下一轮成功时要重新回写
+                if (s.phase == Phase.Closed) persisted = false
             }
         }
         // 应用层心跳：协议里有 `ping` 包，服务端按 `t` 算延迟、也用它判"还活着"。
@@ -58,6 +88,11 @@ class MudViewModel : ViewModel() {
     }
 
     fun connect(url: String, token: String, roleId: String) {
+        // ★ 点"连接"= 新的尝试，先把**上一轮**的服务端错误清掉。
+        //   不清的后果是实测出来的：这轮栽在格式校验（下面三个 `return`），
+        //   `client.connect()` 根本不会被调用，于是一个小时前那句"令牌太短"
+        //   还挂在屏幕上，玩家以为这次也是同一个错。
+        client.clearAuthMessage()
         // ★ 地址在这里**规整**而不是校验：服务端 `--lan` 打印的是 `http://…/`，
         //   安卓端要的是 `ws://…/ws`。照抄那一行是第一次用就会踩的坑
         //   ⇒ 让 App 认 http/https/裸主机 三种写法（`normalizeWsUrl` 有单测）。
@@ -74,7 +109,8 @@ class MudViewModel : ViewModel() {
             client.note("角色名不能为空")
             return
         }
-        serverUrlState.value = target
+        attemptUrl = target
+        attemptRole = roleId
         pendingLogin = token to roleId
         runCatching { client.connect(target) }
             .onFailure { client.note("连接失败：${it.message ?: it::class.simpleName}") }
@@ -166,12 +202,18 @@ class MudViewModel : ViewModel() {
 
     companion object {
         /**
-         * 默认地址。
+         * 默认地址 = 这台开发机的**局域网**地址。
          *
-         * ★ `10.0.2.2` 是**安卓模拟器**里代表宿主机的地址（模拟器自己的 `127.0.0.1`
-         *   指的是模拟器本身）。真机要填电脑的局域网 IP，例如 `ws://192.168.1.5:8123/ws`。
+         * ★★ 为什么不是 `10.0.2.2`：那个地址只对**安卓模拟器**有效（模拟器里的 `10.0.2.2`
+         *   指向宿主机）。而这个包的实际用途是**装到真手机上连本机后端**，
+         *   真机上 `10.0.2.2` 是一个不存在的主机 —— 首次打开就必然失败。
+         *   模拟器仍然可用：把 10.0.2.2 填进地址框，之后它会被记住（[ConnectionPrefs]）。
+         *
+         * ★ 只写 `host:port`、不写协议和 `/ws`：`normalizeWsUrl` 会补
+         *   （`core/Url.kt`，有单测）。这样地址框里显示的就是**玩家能照着敲**的最短形式，
+         *   而不是一个必须逐字符抄对的 `ws://…:8123/ws`。
          */
-        const val DEFAULT_URL: String = "ws://10.0.2.2:8123/ws"
+        const val DEFAULT_URL: String = "192.168.1.2:8123"
 
         private const val PING_INTERVAL_MS = 20_000L
 

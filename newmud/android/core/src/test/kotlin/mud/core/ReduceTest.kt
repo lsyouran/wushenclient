@@ -8,6 +8,7 @@ import mud.protocol.DialogPacket
 import mud.protocol.ItemPacket
 import mud.protocol.ItemsPacket
 import mud.protocol.ItemsPacketItemsItem
+import mud.protocol.LoginPacket
 import mud.protocol.RoomPacket
 import mud.protocol.RoomPacketCommandsItem
 import mud.protocol.ScPacket
@@ -282,5 +283,38 @@ class ReduceTest {
         )
         assertEquals("你：有人吗", s.log.single().text)
         assertEquals(LogKind.CHAT, s.log.single().kind)
+    }
+
+    /**
+     * ★★ 登录成功 = 新会话开始，上一轮的东西必须清干净。
+     *
+     * 这条是真机反馈出来的："每次登入日志区要重置，不是现在这样我**之前失败的信息还在里面**"。
+     * 不清的后果不是"多一行" —— 是玩家分不清**哪些错误是这次发生的**，
+     * 于是把上一次的"连接被拒绝"当成这次的病因去查。
+     */
+    @Test
+    fun `重新登录会清掉上一轮的消息流与残留弹窗`() {
+        val dirty = UiState(
+            phase = Phase.Connected,
+            log = listOf(LogLine(LogKind.ERR, "上一次：连接被拒绝")),
+            panel = PanelState(
+                title = "上一轮的面板",
+                id = "x",
+                rows = listOf("旧内容"),
+                baseRows = listOf("旧内容"),
+                cmds = emptyList(),
+                roundStarted = false,
+            ),
+            prompt = PromptState(text = "上一轮的提示", cmds = emptyList()),
+            unreadChat = 5,
+        )
+        val next = reduce(dirty, LoginPacket(id = "我", level = 3))
+
+        assertEquals(Phase.InGame, next.phase)
+        assertEquals("上一轮的日志还在：${next.log.map { it.text }}", emptyList<LogLine>(), next.log)
+        assertNull("上一轮的面板还挂着", next.panel)
+        assertNull("上一轮的提示框还挂着", next.prompt)
+        assertEquals("未读数该归零", 0, next.unreadChat)
+        assertEquals("新会话的等级要写进去", 3, next.me?.level)
     }
 }

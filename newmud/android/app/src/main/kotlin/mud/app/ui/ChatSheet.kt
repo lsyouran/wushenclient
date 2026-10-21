@@ -1,22 +1,21 @@
 package mud.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,22 +80,33 @@ fun ChatSheet(
 
     Surface(
         color = MudColors.Surface,
-        shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+        shape = MudShapes.Sheet,
+        // ★ 上沿一道亮线：浮层和消息流同色（都是 Surface/Background 一系），
+        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉
+        border = BorderStroke(1.dp, MudColors.AccentDeep),
         modifier = modifier.fillMaxWidth().imePadding(),
     ) {
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            // 顶部那道小横杠：告诉玩家"这块可以收起"，也是底部浮层的通用语言
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(bottom = 8.dp)
+                    .width(36.dp)
+                    .height(3.dp)
+                    .background(MudColors.Border, MudShapes.Soft),
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 for (channel in ChatChannel.entries) {
-                    ChannelChip(
+                    MudAction(
                         label = channel.label,
-                        selected = channel == state.chatChannel,
                         onClick = { onChannel(channel) },
+                        selected = channel == state.chatChannel,
                     )
+                    Box(modifier = Modifier.width(6.dp))
                 }
                 Box(modifier = Modifier.weight(1f))
-                TextButton(onClick = onClose) {
-                    Text("收起", color = MudColors.Dim, style = MaterialTheme.typography.bodySmall)
-                }
+                MudAction(label = "收起", onClick = onClose)
             }
 
             // 私语对象只在这一档有意义；未指定时用错误色提醒，否则点发送只会得到一句提示
@@ -115,21 +125,20 @@ fun ChatSheet(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                OutlinedTextField(
+                MudField(
                     value = text,
                     onValueChange = { text = it; hint = null },
                     modifier = Modifier.weight(1f).focusRequester(focus),
                     // 占位符随频道变（「对本房说话…… / 对世界喊话…… / 对某人耳语……」），
                     // 文案住在 `ChatChannel.hint`，这里不另写一份
-                    placeholder = { Text(state.chatChannel.hint, color = MudColors.Dim) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Text),
+                    placeholder = state.chatChannel.hint,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                 )
-                TextButton(onClick = send) { Text("发送", color = MudColors.Accent) }
+                MudAction(label = "发送", onClick = send)
             }
 
             hint?.let {
@@ -139,35 +148,9 @@ fun ChatSheet(
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         }
-    }
-}
-
-/** 频道页签（网页端 `.channel-box > span` / `.sel`） */
-@Composable
-private fun ChannelChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .padding(end = 8.dp)
-            .background(
-                color = if (selected) MudColors.SurfaceAlt else MudColors.Surface,
-                shape = RoundedCornerShape(4.dp),
-            )
-            .border(
-                width = 1.dp,
-                color = if (selected) MudColors.Accent else MudColors.Border,
-                shape = RoundedCornerShape(4.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    ) {
-        Text(
-            text = label,
-            color = if (selected) MudColors.Accent else MudColors.Dim,
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }

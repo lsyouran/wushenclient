@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  像素风徽记：一把朝上的剑（与 `ui/Widgets.kt#PixelMark` **同一份 16×16 设计**）。
+
+  ★ 为什么是"几个矩形"而不是一条曲线路径：
+    像素画的语义就是格子 —— 每个色块是整数格，边界要么全占要么不占。
+    用 `M`/`h`/`v`/`z` 的矩形路径画出来的就是硬边，不会像曲线那样在缩放时变糊。
+  ★ 为什么手写坐标而不生成：这份图只用一次，生成器的成本远超两个文件。
+    代价是**改设计要改两处**（这里 + `PixelMark`），这一点在两处注释里都写明了。
+
+  坐标系：108×108 是 adaptive icon 的标准画布，其中只有中间 72×72 可见、
+  66×66 保证不被各种形状（圆形/方圆形/水滴）裁掉。
+  ⇒ 16 格 × 4px = 64px，居中后左上角在 (22,22)，全部内容落在 34..74 × 22..86 之间。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 剑尖 y0..1 -->
+    <path
+        android:fillColor="#D3B168"
+        android:pathData="M50,22h8v4h-8z" />
+    <!-- 剑身 x7..9 / y1..9 -->
+    <path
+        android:fillColor="#7FB3A3"
+        android:pathData="M50,26h8v32h-8z" />
+    <!-- 护手 x3..13 / y9..11 -->
+    <path
+        android:fillColor="#D3B168"
+        android:pathData="M34,58h40v8h-40z" />
+    <!-- 剑柄 x7..8 / y11..14 -->
+    <path
+        android:fillColor="#3E5B53"
+        android:pathData="M50,66h8v12h-8z" />
+    <!-- 剑首 x6..10 / y14..16 -->
+    <path
+        android:fillColor="#D3B168"
+        android:pathData="M46,78h16v8h-16z" />
+</vector>

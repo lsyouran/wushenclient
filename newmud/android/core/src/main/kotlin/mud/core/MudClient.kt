@@ -133,6 +133,18 @@ class MudClient(private val transport: Transport) {
         mutable.update { systemLine(it, text) }
     }
 
+    /**
+     * 清掉上一轮的登录错误文案。
+     *
+     * ★ 谁需要这个口子：界面上**点"连接"的那一刻**。`connect()` 自己也会清，
+     *   但它可能根本走不到 —— 地址/令牌/角色名的格式校验在 `:app` 里先拦下了，
+     *   那时 `connect()` 不会被调用，而上一轮服务端回的"令牌太短"还挂在屏幕上，
+     *   看起来像"这次也失败了"。清在这里只有一处写入点。
+     */
+    fun clearAuthMessage() {
+        mutable.update { it.copy(authMessage = "") }
+    }
+
     private fun send(text: String) {
         transport.send(text)
     }

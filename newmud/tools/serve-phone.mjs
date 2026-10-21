@@ -250,9 +250,9 @@ async function main(argv) {
     lines.push(`  先拿手机浏览器开一下：http://${good[0]}:${String(port)}/`);
     lines.push('  （能打开页面 = 网络与防火墙都通了，再装 APK 就基本不会有连接问题）');
     lines.push('');
-    lines.push(`  ★ 安卓端默认值 ${WS_SCHEME}://10.0.2.2:${String(port)}/ws 只对**安卓模拟器**有效，`);
-    lines.push('    真机要在登录屏的地址框里改成上面那一行。');
-    lines.push(`    （偷懒只填 ${good[0]}:${String(port)} 也行 —— App 会自动补协议和 /ws，见 core/Url.kt）`);
+    lines.push(`  ★ 登录屏的地址框只填「${good[0]}:${String(port)}」就够了`);
+    lines.push('    —— 协议前缀与 `/ws` 由 App 自己补（`core/Url.kt#normalizeWsUrl`，有单测）。');
+    lines.push('    连成功一次之后这个地址会被记住，下次打开不用再填。');
     if (good.length > 1) {
       lines.push(`  ★ 这台机器有多块网卡（${good.join(' / ')}）：挑**和手机同一网段**的那个。`);
     }

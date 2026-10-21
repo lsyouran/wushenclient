@@ -1,5 +1,6 @@
 package mud.app.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -10,6 +11,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import mud.core.ColorToken
 
@@ -51,6 +53,34 @@ object MudColors {
 
     /** 私聊 */
     val Tell = Color(0xFFC678DD)
+
+    /**
+     * 压暗的强调色：面板外框、像素徽记的剑柄。
+     *
+     * ★ 存在的理由是"全用 [Accent] 就分不出层次"：边框和标题一个亮度，
+     *   眼睛会自动把整块面板当成一个色块，反而看不清哪里是边界。
+     */
+    val AccentDeep = Color(0xFF3E5B53)
+
+    /** 金色：只给徽记与房间标题的装饰，**不用于正文** —— 它比正文亮，用多了很吵 */
+    val Gold = Color(0xFFD3B168)
+}
+
+/**
+ * 全站两种形状。
+ *
+ * ★ `Sharp` = 2dp。手机屏上 2dp 只有几个物理像素，看上去就是直角 ——
+ *   配合像素风图标，整站是"方块世界"；而 Material 默认的 8–28dp 大圆角
+ *   放在同一个抽屉里会像另一个 App 的组件。
+ * ★ `Soft` 只留给"贴边一整块"的东西（聊天浮层的顶角、未读角标），
+ *   它有个圆角是为了不让人觉得被裁掉了。
+ */
+object MudShapes {
+    val Sharp = RoundedCornerShape(2.dp)
+    val Soft = RoundedCornerShape(8.dp)
+
+    /** 贴底浮层的形状：只圆上面两角（下沿贴着屏幕，圆了反而露出底色） */
+    val Sheet = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
 }
 
 /** 全站唯一一档字号（wushen 的 14px） */

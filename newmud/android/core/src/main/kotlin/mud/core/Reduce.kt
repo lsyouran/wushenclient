@@ -53,10 +53,19 @@ fun reduce(state: UiState, packet: Packet): UiState = when (packet) {
         state.copy(roles = packet.roles.map { RoleBrief(it.id, it.name, it.title) })
 
     is LoginPacket ->
+        // ★★ 登录成功 = **新会话开始**，上一轮的东西必须清掉。
+        //   不清的后果是实测出来的：断线重连后，屏幕上还挂着上回的
+        //   "连接被拒绝 / 令牌太短"——玩家分不清哪些是这次发生的。
+        //   清的是"属于那一次会话的"：消息流、残留弹窗、未读数；
+        //   房间/出口/在场者**不清**（服务端登录后会重新发，清空反而先闪一屏空白）。
         state.copy(
             phase = Phase.InGame,
             me = MeState(id = packet.id, level = packet.level),
             authMessage = "",
+            log = emptyList(),
+            panel = null,
+            prompt = null,
+            unreadChat = 0,
         )
 
     is LoginerrorPacket ->
