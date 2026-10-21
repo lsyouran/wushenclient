@@ -174,16 +174,22 @@ fun MudPanel(
 }
 
 /**
- * 像素风徽记：一把朝上的剑。
+ * 像素风徽记：一个戴斗笠、佩剑的侠客。
  *
  * ★★ 坐标表与 `res/drawable/ic_launcher_foreground.xml` **同一份设计**
- *   （16×16 网格，剑身 x7–8 / 护手 y8–9 / 剑柄 y10–13 / 剑首 y14–15）。
- *   两处都手写坐标是没办法的事（一处是 Compose 的 `drawRect`，一处是 VectorDrawable 的
- *   `pathData`），但**改了这里就要改那里** —— 这是唯一一处刻意重复，因为它换来的是
+ *   （16×16 网格；斗笠 y1–2、脸 y3–4、肩 y5、两袖 y6–7、腰带 y8、下摆 y9–10、
+ *   腿 y11–12、足 y13，佩剑在右侧 x12–15）。两处都手写坐标是没办法的事
+ *   （一处是 Compose 的 `drawRect`，一处是 VectorDrawable 的 `pathData`），
+ *   但**改了这里就要改那里** —— 这是唯一一处刻意重复，因为它换来的是
  *   "图标与 App 内的标识是同一个东西"。图标没有运行时判据可依赖，这点重复躲不掉。
+ *
+ * ★★ 为什么是"一个人"而不是"一把剑"：剑在 16×16 里只能是一条竖线，缩到 44dp
+ *   和一条分隔线长得一样（第一版就是这样，认不出）。人形有**斗笠的横檐 + 肩膀 +
+ *   腰带**三道横线，缩到最小也还是个人。佩剑是配件，不是主体。
  *
  * ★ 用若干**方块**而不是 `drawPath`：像素画的语义就是"格子"，方块之间不留缝、
  *   抗锯齿也关不掉，但 2dp 圆角已经交待在 [MudShapes.Sharp] 里了 —— 这里画的是直角。
+ * ★ 绘制顺序 = 图层顺序：剑先画（压在人形后面），手最后画（压在剑柄上）。
  */
 @Composable
 fun PixelMark(side: Dp, modifier: Modifier = Modifier) {
@@ -196,16 +202,25 @@ fun PixelMark(side: Dp, modifier: Modifier = Modifier) {
                 size = Size(w * u, h * u),
             )
         }
-        // 剑身
-        block(7, 1, 2, 8, MudColors.Accent)
-        // 剑尖（上端收窄一格，读起来才像"尖"而不是"柱"）
-        block(7, 0, 2, 1, MudColors.Gold)
-        // 护手
-        block(3, 9, 10, 2, MudColors.Gold)
-        // 剑柄
-        block(7, 11, 2, 3, MudColors.AccentDeep)
-        // 剑首
-        block(6, 14, 4, 2, MudColors.Gold)
+        // ── 佩剑（先画，压在人形后面）──
+        block(13, 1, 2, 6, MudColors.Dim)      // 剑身
+        block(12, 7, 4, 1, MudColors.Gold)     // 护手
+        block(13, 8, 2, 2, MudColors.Gold)     // 剑柄
+        // ── 斗笠 ──
+        block(5, 1, 6, 1, MudColors.Gold)      // 笠顶
+        block(3, 2, 10, 1, MudColors.Gold)     // 笠檐（宽出去，才认得出是斗笠）
+        // ── 人形 ──
+        block(6, 3, 4, 2, MudColors.Text)      // 脸
+        block(5, 5, 6, 1, MudColors.Accent)    // 肩
+        block(4, 6, 8, 2, MudColors.Accent)    // 两袖
+        block(4, 8, 8, 1, MudColors.Gold)      // 腰带
+        block(5, 9, 6, 2, MudColors.Accent)    // 下摆
+        block(5, 11, 2, 2, MudColors.AccentDeep) // 左腿
+        block(9, 11, 2, 2, MudColors.AccentDeep) // 右腿
+        block(4, 13, 3, 1, MudColors.AccentDeep) // 左足
+        block(9, 13, 3, 1, MudColors.AccentDeep) // 右足
+        // 最后画手：压住剑柄一格，看起来才是"握着"而不是"站在旁边"
+        block(12, 8, 1, 1, MudColors.Text)
     }
 }
 
