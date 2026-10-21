@@ -55,8 +55,11 @@ if not "%EXITCODE%"=="0" (
 )
 
 popd
-endlocal
-exit /b %EXITCODE%
+rem  ** %EXITCODE% must be expanded BEFORE endlocal erases it **
+rem  On two separate lines, endlocal runs first and wipes the variable, so
+rem  `exit /b %EXITCODE%` degrades to `exit /b` (returns 0) and the failure
+rem  becomes invisible to anything calling this script. Same line = one parse.
+endlocal & exit /b %EXITCODE%
 
 :no_node
 echo [ERROR] `node` was not found on PATH.
