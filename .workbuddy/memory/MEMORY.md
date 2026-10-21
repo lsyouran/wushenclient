@@ -22,6 +22,7 @@ tools/gen-protocol-fixtures.mjs --list              # 样本缺口必须**有解
 - `npm start` 构建一次（默认 8123，`-- --port 9000`）；`node tools/start.mjs` **不构建**。链 `tools/start.mjs`→`server/cli.ts`→`main()`；`server/main.ts` 纯工厂不能直跑。
 - 构建只有一处 `tools/build-web.mjs` —— **别再往别处拼 tsc 参数**。端口不猜：读 `READY {"port":N}`。
 - 静态与 WS **同端口**；`GET /` 302→`/src/index.html`。默认 `127.0.0.1`，对外 `--host 0.0.0.0`。`--lan` 打印 `http://IP:8123/`（给浏览器），App 要 `ws://IP:8123/ws`。
+- ★★ **手机联调一律 `npm run start:phone`**（26 册 §88）：印**可拨的** ws 地址 + 真拨一次握手自检。`--lan` 的两行都不能照抄给安卓端 —— `ws://0.0.0.0:8123/ws` 里的 `0.0.0.0` 是通配地址不是能拨的地址。★ 自检绿**证不到**手机能连（防火墙不拦本机到本机）⇒ 真判据是**手机浏览器**打得开 `http://IP:8123/`。安卓登录屏有地址框，只填 `IP:8123` 也会被 `core/Url.kt#normalizeWsUrl` 补成 `ws://…/ws`。
 - ★★ WS 路径 **`/ws`** —— 少了它握手 **400**。★ `new WebSocketServer({port})` **构造时即 listen** ⇒ 必须**构造后立刻**挂 `wss.on('error')`，否则进程挂死（§55 M2）。
 - ★★ e2e 里**"可见"≠"可用"**：`#auth` 是静态 HTML，点击必须等 `#serverLabel` 被填掉。
 
