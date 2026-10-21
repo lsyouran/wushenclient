@@ -54,6 +54,7 @@ tools/gen-protocol-fixtures.mjs --list              # 样本缺口必须**有解
 - `fetch` 归一化 `%2e%2e` ⇒ 测路径穿越发**原始 HTTP**；`http.Server.close()` 不等连接 ⇒ 先 `closeAllConnections()`。
 - ★ 有代理 ⇒ 复核本机服务 `--noproxy '*'`、无头浏览器 `--no-proxy-server`；无头 Chrome 最小宽≈522、别传 `--timeout`、`/tmp`→`D:/tmp`。★ 两进程可绑同端口 ⇒ 先 `netstat -ano -p tcp`。★ jsdom 无布局 ⇒ 改 DOM 后跑无头探针。
 - ★ `better-sqlite3` ABI 不匹配 ⇒ 本项目用内置 `node:sqlite`；起 wushen 用**系统 Node 24**（托管 22 会 ERR_DLOPEN）。
+- ★★ **`.bat` 三坑**（26 册 §88.5）：① **必须纯 ASCII**（有中文又 `chcp 65001` ⇒ 解码错位、注释被当命令执行）；② **CRLF**（LF 时 `goto :label` 失效；仓库 `* -text` 不改行尾）；③ ★★ **`endlocal & exit /b %CODE%` 写同一行**（分两行时 `endlocal` 清空变量 ⇒ 退出码退化成 0 ⇒ **失败看起来成功**）。闸门扫不到 `.bat`，判据只有"真跑一遍"。
 
 ## 闸门（细则在 26 册 §27/§70/§71/§76）
 - 退出码四态 0/1/2/3，`-1`=没起。元闸门判据 `before∉{FAIL,CRASH} && after===expectAfter && restored===before && note===''`。**取证不许带 `--only`**。
