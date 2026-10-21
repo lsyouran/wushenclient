@@ -150,8 +150,16 @@ fun placeExits(dirs: List<String>): List<PlacedExit> {
         slotOf[dir] = slot
     }
 
+    // ★★ 输出阶段必须**按方向再去一次重**。
+    //   分配阶段的 `slotOf.containsKey(dir)` 只挡住"再给它分一格"，**挡不住这个循环
+    //   把同一个方向按输入次数重发一遍** —— 于是 `placeExits(listOf("north","north"))`
+    //   返回两个 `north`，界面上就是两个完全叠在一起的格子（后画的把先画的盖掉）。
+    //   这条是 CI 首跑抓到的（26 册 §87.6）：本地没有 JDK，这段代码从写下到那时候
+    //   一次都没被执行过。
     val out = ArrayList<PlacedExit>(slotOf.size)
+    val emitted = HashSet<String>(slotOf.size)
     for (dir in dirs) {
+        if (!emitted.add(dir)) continue
         val slot = slotOf[dir] ?: continue
         out.add(PlacedExit(dir, slot))
     }

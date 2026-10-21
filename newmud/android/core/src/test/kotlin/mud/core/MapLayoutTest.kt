@@ -156,7 +156,13 @@ class MapLayoutTest {
         val north = connectorOf("north", Slot.N)
         assertEquals(MAP_CX, north.x1, 0.001)
         assertEquals(MAP_CX, north.x2, 0.001)
-        assertEquals(Slot.N.y - MAP_CELL_H / 2, north.y1, 0.001)
+        // ★★ 这里是 `+`，不是 `-`。北格在中心**上方**（y 更小），所以它"靠中心的那条边"
+        //   是**下沿** = `Slot.N.y + H/2` = 38。原来写成 `-`（= 12 = 北格的**上**沿），
+        //   等于要求连线从北格上沿一直画到中心格上沿 —— 那是**穿过整个北格**，
+        //   与这条测试自己的名字（"不穿格子"）相反。这个错法是照着下面 east 那几行
+        //   抄过来的：东侧的 `x - W/2` 确实就是靠中心的边，纵向要把符号翻过来。
+        //   它在本地一次都没跑过（没有 JDK），是 CI 首跑抓出来的（26 册 §87.6）。
+        assertEquals(Slot.N.y + MAP_CELL_H / 2, north.y1, 0.001)
         assertEquals(MAP_CY - MAP_CELL_H / 2, north.y2, 0.001)
         assertFalse("北不是上下楼，不该画成虚线", north.stairs)
 
@@ -165,6 +171,35 @@ class MapLayoutTest {
         assertEquals(MAP_CY, east.y2, 0.001)
         assertEquals(Slot.E.x - MAP_CELL_W / 2, east.x1, 0.001)
         assertEquals(MAP_CX + MAP_CELL_W / 2, east.x2, 0.001)
+    }
+
+    /**
+     * 四个**轴对齐**方向的连线，两端都必须落在"两格之间那段空隙"里。
+     *
+     * ★ 为什么还要有这条（上一条不是已经钉住了吗）：
+     *   上一条是"把期望值写成某个算式"——**算式抄对了才成立**，而上一版恰恰是算式抄错。
+     *   这一条的期望值是**手写的空隙矩形**（不从 `sign()` 推），判据是"端点必须落在这个矩形内"。
+     *   同一个错误（纵向符号抄反）在这里会以"北的端点落在 y=12，空隙是 [38,51] ⇒ 不在里面"
+     *   的形式红掉，而且报错说得出"它穿过了格子"这个**几何事实**，不是一个莫名的数字。
+     */
+    @Test
+    fun `四个正方向的连线端点都落在两格之间的空隙里`() {
+        val hw = MAP_CELL_W / 2
+        val hh = MAP_CELL_H / 2
+        fun assertInGap(dir: String, slot: Slot, x0: Double, x1: Double, y0: Double, y1: Double) {
+            val line = connectorOf(dir, slot)
+            for ((px, py) in listOf(line.x1 to line.y1, line.x2 to line.y2)) {
+                assertTrue(
+                    "$dir 的连线端点 ($px,$py) 不在空隙 x[$x0..$x1] y[$y0..$y1] 里 —— 说明它穿过了格子",
+                    px >= x0 - 0.001 && px <= x1 + 0.001 && py >= y0 - 0.001 && py <= y1 + 0.001,
+                )
+            }
+        }
+        // 空隙矩形四个方向**各写一遍**（不从 sign() 推），这样"抄错符号"不会一起错
+        assertInGap("north", Slot.N, MAP_CX - hw, MAP_CX + hw, Slot.N.y + hh, MAP_CY - hh)
+        assertInGap("south", Slot.S, MAP_CX - hw, MAP_CX + hw, MAP_CY + hh, Slot.S.y - hh)
+        assertInGap("east", Slot.E, MAP_CX + hw, Slot.E.x - hw, MAP_CY - hh, MAP_CY + hh)
+        assertInGap("west", Slot.W, Slot.W.x + hw, MAP_CX - hw, MAP_CY - hh, MAP_CY + hh)
     }
 
     @Test
