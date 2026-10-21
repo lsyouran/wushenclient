@@ -99,38 +99,44 @@ jobs:
           set -o pipefail
           gradle :protocol:test :core:test -PskipApp --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      # ★★ 为什么要这一步：Actions 的原始日志只有仓库 owner 能下载（匿名打 `/logs` 是 403），
-      #   而 **check-runs annotations 是公开只读的**。把 Kotlin 编译错行复制成注解之后，
-      #   任何人（包括没有账号的构建助手）都能定位"红在哪个文件第几行"，不必登录下载。
-      #   `e: file:///.../X.kt:12:34 消息` 是 Kotlin 编译错的固定格式。
-      - name: 把失败原因做成注解（公开只读）
+      # ★★ 为什么要这一步：Actions 的**原始日志**只有仓库 owner 能下载（匿名打 `/logs` 是 403），
+      #   `::error::` 注解又有条数上限、在页面上还会被折叠。而 **step summary 是公开只读、
+      #   写在 job 页面正文里、没有条数限制** ⇒ 把"编译错 + 日志尾 + JUnit 失败用例"
+      #   都灌进 summary，任何人都能定位"红在哪一行"。
+      - name: 失败诊断（写进 step summary，公开可读）
         if: failure()
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          S="$GITHUB_STEP_SUMMARY"
           log="$RUNNER_TEMP/build.log"
-          if [ ! -f "$log" ]; then
-            echo "::error::日志文件不存在 —— 说明红在 gradle 启动之前（下载/配置阶段），不是编译错"
-            exit 0
-          fi
-          # ★ `<<< ""` 会喂进一行空串，于是 n=1、去不了 fallback 分支 —— 所以先判非空
-          errs="$(grep -E '^e: ' "$log" 2>/dev/null || true)"
-          n=0
-          if [ -n "$errs" ]; then
-            while IFS= read -r line; do
-              echo "::error::$line"
-              n=$((n + 1))
-              if [ "$n" -ge 40 ]; then break; fi
-            done <<< "$errs"
-          fi
-          if [ "$n" -eq 0 ]; then
-            echo "::error::没有 Kotlin 编译错行（不是编译错），下面是**滤掉框架栈**之后的尾部："
-            # ★ 只贴栈尾没用：Gradle 的 stacktrace 最后 20 行全是框架内部
-            #   （DefaultBuildWorkGraph / DefaultWorkerLeaseService…），而根因在
-            #   "What went wrong" 那一段 —— 实测第一版 fallback 只贴出一堆 at org.gradle.*
-            filtered="$(grep -vE '^[[:space:]]+at (org\.gradle|java\.|jdk\.|sun\.|kotlin\.|com\.sun|worker\.org)' "$log" | tail -n 45 || true)"
-            [ -n "$filtered" ] || filtered="(日志已空，说明失败发生在很少的输出之后)"
-            while IFS= read -r line; do echo "::error::$line"; done <<< "$filtered"
-          fi
+          {
+            echo '### 失败诊断'
+            echo ''
+            if [ -f "$log" ]; then
+              echo '**Kotlin 编译错（`e: ` 开头）**'
+              echo '```'
+              grep -E '^e: ' "$log" | sed -n '1,30p' || true
+              echo '```'
+              echo ''
+              echo '**日志最后 40 行**'
+              echo '```'
+              tail -n 40 "$log"
+              echo '```'
+            else
+              echo '日志文件不存在 —— 红在 gradle 启动之前（下载 / 配置阶段）'
+            fi
+            echo ''
+            echo '**JUnit 失败用例（期望 vs 实际）**'
+            echo '```'
+            for f in "$GITHUB_WORKSPACE"/newmud/android/*/build/test-results/test/*.xml; do
+              [ -f "$f" ] || continue
+              echo "== ${f##*/}"
+              grep -B1 -E '<failure ' "$f" | cut -c1-400 | sed -n '1,20p'
+            done
+            echo '```'
+          } >> "$S"
+          # 注解只留一两条当"指路牌"，真正的细节在 summary 里
+          echo "::error::失败详情见本页 summary（编译错 / 日志尾 / JUnit 失败用例）"
 
       - name: 失败时把构建日志传上来
         if: failure()
