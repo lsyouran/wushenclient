@@ -29,7 +29,21 @@ import type {
 import type { ObjKind } from '../engine/base.js';
 import type { ViewSubject } from '../engine/view-text.js';
 import type { AttrBreakdown } from '../engine/formula.js';
+import type { AttrView, SkillsView } from '@shared/protocol.js';
 import type { WorldId } from '@shared/ids.js';
+
+/**
+ * `AttrView` 的**形状**住在 `shared/protocol.ts`（它是线上载荷，前端也要读），
+ * 这里只是把名字转出去，好让内容层写 `showAttr(view: AttrView)` 时
+ * 不用同时记两个模块。★ 不是第二份定义 —— `defs.ts` 里再写一遍就等于两份真相。
+ */
+export type { AttrView, AttrCombatView, AttrValueView } from '@shared/protocol.js';
+
+/**
+ * `SkillsView` 同理：形状住在 `shared/protocol.ts`（线上载荷，前端 `src/ui/skills.ts`
+ * 直接 import），这里只转名字。★ 再写一遍就等于第二份真相。
+ */
+export type { SkillsView, SkillEntryView } from '@shared/protocol.js';
 
 /** 内容层书写的引用 id（注册时统一校验，见 define.ts） */
 export type RefId = string;
@@ -106,7 +120,24 @@ export interface Actor {
    *   这就把 wushen 用 `if (obj.hp)` 拦"物品进出误触发钩子"那一半，交给了**类型系统**。
    */
   readonly isAlive: boolean;
+  /** 给本人看一行文本，落在**消息流**（安全默认，见 `notifyInPanel`） */
   notify(text: string): void;
+  /**
+   * 给本人看一行文本，落在**某块物件面板**里。
+   *
+   * ★★ 为什么内容层需要这条（2026-10-21 §80）：点 NPC 打开面板之后，
+   *   后续交互的文本（"你想打听什么？"、"你身上没有那么多的钱"）属于
+   *   **这段对话**，留在面板；而房间播报、战报属于"发生了什么"，进消息流。
+   *   以前这个区分没有表达渠道 —— 内容层两条都只能 `notify`，
+   *   由前端拿启发式去猜，猜错了就是真机上那句
+   *   "和木人切磋，数据写在木人的操作框里"。
+   *
+   * ★ 用法：`panelId` 就是刚 `showItem` 出去的那个 `id`
+   *   （`me.showItem({ id: target.id, … }); me.notifyInPanel(target.id, '…')`）。
+   *   两者不同源的话，前端会因为 id 对不上而**退回消息流** ——
+   *   那是安全的一侧（文本不会丢，只是没进面板）。
+   */
+  notifyInPanel(panelId: string, text: string): void;
   /**
    * 向**本房间**广播一句话（wushen `CHARACTER.prototype.send_room`，
    * `os/char/character.js:71`）。
@@ -134,6 +165,27 @@ export interface Actor {
    * **不是** `.dialog` 面板 —— wushen 的 `Process.item` 就是 `ReceiveMessage`。
    */
   showItem(detail: ItemDetailView): void;
+  /**
+   * 把**属性面板**的数据发给本人（wushen `score` 指令的 `{type:"dialog", dialog:"score"}`
+   * 那一支，见 `world/cmd/dialog/score.js`）。
+   *
+   * ★ 为什么与 `showItem` 分成两条而不是一个 `showPanel(x)`：
+   *   两者的**落点不同** —— `showItem` 进消息流（wushen `Process.item` 也是
+   *   `ReceiveMessage`），而属性是一张**会一直开着、随时能翻**的面板快照。
+   *   混成一个方法会让调用点必须自己带"这次该走哪条"的标记，那正是
+   *   本仓库在 `PracticeResult` 上刚收掉的形状（判别联合优于布尔开关）。
+   */
+  showAttr(view: AttrView): void;
+  /**
+   * 把**技能面板**的数据发给本人（wushen `cha` 指令的
+   * `{type:"dialog",dialog:"skills",items:[…]}` 那一支，见 `world/cmd/dialog/cha.js`）。
+   *
+   * ★ 与 `showAttr` 并列而不是合并成 `showPanel(dialog, view)`：
+   *   合并就得把 `dialog` 名字当参数传，而**帧的 `dialog` 字段是分支的唯一判据**
+   *   （前端 `ui/panel.ts` 按它选 `build`）。两个独立方法让"发错面板"变成
+   *   编译期问题（`showSkills` 收不到 `AttrView`），而不是运行时排查。
+   */
+  showSkills(view: SkillsView): void;
   /**
    * 往某个**频道**发一条（说 / 喊 / 私聊…）。
    *
@@ -186,11 +238,26 @@ export interface InteractHooks {
    */
   readonly onUse?: ((me: Actor, par?: string) => boolean | void) | undefined;
   /**
+   * 这本书教哪门技能（`ItemDef.studySkill` 的投影，wushen `book.skill`）。
+   * 消费者：`world/command/train/study.ts`。**没有它就"不能研读"** ——
+   * 与 `onUse` 同一条判据：能力由数据/钩子的**存在性**决定，不另立开关。
+   */
+  readonly studySkill?: string | undefined;
+  /** 这本书能教到的等级上限（`ItemDef.studyMaxLevel`，缺省 100） */
+  readonly studyMaxLevel?: number | undefined;
+  /** 研读时每拍的内容钩子（wushen `book.on_study`；`study.js:119-121` 已注释掉，本项目保留） */
+  readonly onStudy?: ((me: Actor) => boolean | void) | undefined;
+  /**
    * 别人**给我**东西时的准入（wushen `target.on_accept(player, objId, count)`）。
    *
    * ★ `objId` 是物品的**模板 id**（`drug/yao#0`）或字符串 `'money'`
    *   —— 与 wushen 一致（它的 money 分支就是拿 `objid == "money"` 判的）。
    * ★ 返回**真**才收下；`void` / `false` 都算拒收（wushen `&&` 短路）。
+   *
+   * ★★ **"纯谓词"的边界：不许播报结果**（26 册 §57，真机反馈抓到的矛盾消息）。
+   *   引擎的顺序是 `onAccept(...)` → 扣减 → 播报结果。所以这里说"收下了"是**抢跑**：
+   *   一旦后续扣减失败（钱不够 / 物品不够），玩家会先看到"收下了"再看到"你没有那么多"。
+   *   允许在这里说的只有**拒收的理由**（"住店要 1000 文钱"），因为那句与返回值同真同假。
    */
   readonly onAccept?:
     | ((me: Actor, objId: string, count: number) => boolean | void)
@@ -214,6 +281,22 @@ export interface ActorObject {
   /** 该对象自己的"可点击动作"（房间 / NPC 有；物品暂无） */
   readonly actions?: readonly ActionDef[] | undefined;
   /**
+   * **拒绝切磋**（wushen `target.no_fight`，`world/cmd/battle/fight.js:41`）。
+   *
+   * ★ 与房间的 `noFight` 是两道不同的闸：
+   *   - 房间 `noFight` = "这块地方不许动手"（广场 / 武馆）；
+   *   - 这个人 `noFight` = "这个人不想跟你动手"（老师、店主）。
+   *   两者任一为真，「比试」按钮都不出现，指令也拒绝。
+   */
+  readonly noFight?: boolean | undefined;
+  /**
+   * **不可击杀**（wushen `kill.js:11` 的 `!target.do_kill` 等价物）。
+   *
+   * ★ 为真时「击杀」按钮不出现，`kill` 指令也拒绝 —— 用于老师 / 店主这类
+   *   "杀掉了内容就断了"的 NPC。玩家角色不实现这一面（`undefined` = 可杀）。
+   */
+  readonly noKill?: boolean | undefined;
+  /**
    * 交互面（物品的 `no_get` / `on_use`…，NPC 的 `on_accept`）。
    * 由引擎从模板派生（`Item.interact` / `Npc.interact`）；玩家角色没有。
    */
@@ -223,6 +306,75 @@ export interface ActorObject {
    * 房间一定有；NPC 与物品可能有。缺省 = 没有可看的描述。
    */
   readonly desc?: string | undefined;
+  /**
+   * **某技能的等级**（0 = 不会）。只有**角色**有这一面；房间 / 物品没有 ⇒ 可选。
+   *
+   * ★ 用途只有一个：`learn <技能> from <目标>` 判"这个人教不教得了"
+   *   （wushen `xue.js:38` 的 `target.skills[sk]`、`:191` 的等级比较）。
+   *   本项目的 NPC 用与玩家同一套 `SkillBook`（27 册决策 D9，`Npc` 继承 `Character`），
+   *   于是它天然满足这个形状 —— **不需要为教学单开一个接口**。
+   *
+   * ★ 为什么写成可选方法而不是 `readonly skills?: SkillBook`：
+   *   后者会把整个技能簿（含 `learn/forget/enable` 这些**变更**入口）交到内容层手上，
+   *   等于给指令一把能改别人技能簿的钥匙。这里只开"读等级"这一个口。
+   */
+  readonly skillLevel?: ((id: string) => number) | undefined;
+  /**
+   * **这个人会哪些技能**（只读清单，`skills <目标>` 用）。
+   *
+   * ★ 与 `skillLevel` 同族的窄口：只给"名字 / 等级 / 占哪个槽"，
+   *   不给 `SkillBook` 句柄（那会连 `learn` / `forget` 一起交出去）。
+   * ★ 可选：房间 / 物品没有这一面 —— 读不到就是"没有技能清单"，正是我们要的语义。
+   */
+  readonly skillList?: (() => readonly SkillBrief[]) | undefined;
+}
+
+/**
+ * 一条"他会这门技能"的只读记录（`ActorObject.skillList` 的元素）。
+ *
+ * ★ 为什么不复用 `SkillsView` 的元素：那份带 `progress` / `skillLimit` / `pot`，
+ *   全是"对自己才有意义"的字段。看别人"会什么"不需要它们。
+ */
+export interface SkillBrief {
+  readonly id: string;
+  readonly name: string;
+  readonly level: number;
+  /** 基本功占哪个槽（`force` / `sword`…）；特殊武学没有这一项 */
+  readonly slot?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 持续状态（wushen `me.state` · `os/char/state.js`）
+// ---------------------------------------------------------------------------
+
+/** 状态在界面上的样子（与协议 `StatePacket` 同构） */
+export interface StateView {
+  readonly id: string;
+  readonly title: string;
+  readonly desc: string;
+}
+
+/**
+ * 起一个持续状态的**规格**（`CommandActor.startState` 的入参）。
+ *
+ * ★ 心跳间隔 `intervalMs` 缺省 5 秒，照 wushen：
+ *   `lianxi` / `study` / `dazuo` 的 `on_enter` 都是每 5 秒跑一次
+ *   （`WORLD` 的 `set_state` 心跳，见 `world/cmd/skill/lianxi.js:167` 的 `do_learn`）。
+ *
+ * ★ `tick` 返回 `false` ⇒ 状态**自动结束**（wushen 的 `on_enter` 返回 false
+ *   同样是"这次不做了、退出状态"）。返回其它值（含 `undefined`）⇒ 继续下一拍。
+ */
+export interface StateSpec {
+  /** 状态 id（`study` / `lianxi` / `dazuo`…）—— 用于"我正在做同一件事吗"的判定 */
+  readonly id: string;
+  /** 显示名（"读书" / "练习技能"），闸门拦人时读它（`stateBlockedMessage`） */
+  readonly title: string;
+  /** 状态进行中的一句播报（wushen `state.desc`） */
+  readonly desc?: string;
+  /** 心跳间隔（毫秒），缺省 5000 */
+  readonly intervalMs?: number;
+  /** 每一拍要做的事。返回 `false` = 结束状态 */
+  readonly tick: (me: CommandActor) => boolean | void;
 }
 
 /**
@@ -260,8 +412,10 @@ export interface ActorEnvironment extends ActorObject {
   readonly desc?: string | undefined;
   /**
    * 这个环境**禁止战斗**（wushen `room.no_fight`，`world/cmd/battle/fight.js:14`）。
-   * ★ 只有**房间**有这个概念（`Room.noFight`）；背包 / 容器缺省 `undefined`
+   * ★ 房间用它表达"这块地方禁武"（`Room.noFight`）；背包 / 容器缺省 `undefined`
    *   （= 不禁止）。`fight` / `kill` 指令读它给"这里不允许战斗。"。
+   * ★ 另有一道**不在这里**的闸：NPC 模板自己可以声明 `no_fight` / `no_kill`
+   *   （见 `ActorObject.noFight`）—— 那道闸管的是"这个人"，不是"这块地方"。
    */
   readonly noFight?: boolean | undefined;
 }
@@ -293,6 +447,32 @@ export type FightStart =
         | 'self-busy'
         /** 对方正在和别人打（wushen "对方正在切磋…"） */
         | 'target-fighting';
+    };
+
+/**
+ * 脱战的结果（`escape` / `flee` / 战斗中 `go` 的落点）。
+ *
+ * ★ 与 `FightStart` 同一取向：失败给**原因**，成功给**该往哪退**。
+ *   wushen `do_escape`（`os/char/chara_move.js:105-121`）成功时只返回布尔，
+ *   真正"跑掉"靠调用方接着 `go`（`go.js:24`）；把方向一起返回，
+ *   内容层就不用自己想办法从房间出口表里挑一个（那是引擎的随机源）。
+ */
+export type EscapeResult =
+  | {
+      readonly ok: true;
+      /**
+       * 撤到哪个方向；`null` = 本房间没有出口（能脱战，但没地方跑）。
+       * ★ `go` 指令会忽略它（它已经有一个明确方向），`flee` 用它。
+       */
+      readonly dir: Direction | null;
+    }
+  | {
+      readonly ok: false;
+      readonly reason:
+        /** 本来就没在战斗 */
+        | 'not-fighting'
+        /** 被对手缠住（wushen 判定失败会加 `busy`，`chara_move.js:113-118`） */
+        | 'blocked';
     };
 
 /**
@@ -370,6 +550,165 @@ export interface PracticeDone {
  *   `switch (r.reason)` 里每一支的字段都是精确的（漏一支编译不过）。
  */
 export type PracticeResult = PracticeDone | PracticeRefused;
+
+/**
+ * 一次**读书**的结果（`CommandActor.studySkill`）—— 对照 wushen `study.js`。
+ *
+ * ★★ 读书与"跟师父学"是**两条不同的路**，不是同一条的两种说法：
+ *   - 学（`learn`）要**有老师、有潜能**，一次结算，等级受**老师等级**压着；
+ *   - 读（`study`）要**有书**，不花潜能，按智力每拍涨经验，等级受**书的上限**压着。
+ *   ⇒ 结果类型也分开：读书没有"老师太低"这一支，但多了"书太浅"。
+ *
+ * ★ `blocked` 这一支复用 `LearnRefused`：**读书不能绕过基本功门槛**。
+ *   wushen `study.js:105-113` 的 `check_skill` 做的正是同一件事 ——
+ *   少了它，"基本功 30 级才能学太极剑法"会被一本书直接绕过去。
+ */
+export type StudyResult =
+  /** 没有这个技能（书里写的 id 在注册表里找不到 —— 内容层写错了） */
+  | Refused<{ readonly reason: 'unknown' }>
+  /** 书太浅：你已经到（甚至超过）这本书能教的等级（wushen `study.js:96-97`「这本书上的内容对你来说太浅了」） */
+  | Refused<{
+      readonly reason: 'too-shallow';
+      readonly name: string;
+      readonly level: number;
+      readonly bookMax: number;
+    }>
+  /** 准入不满足（与 `learn` 同一份拒绝清单，见上面的注释） */
+  | { readonly kind: 'blocked'; readonly refusal: LearnRefused }
+  /** 读进了一段经验（`gained` 可能是 0：还没攒够一级） */
+  | {
+      readonly kind: 'ok';
+      readonly name: string;
+      readonly gained: number;
+      readonly level: number;
+      readonly limit: number;
+    };
+
+// ── 学技能 / 遗忘 / 装配（27 册 §14 · 26 册 §64）─────────────────────────────
+//
+// ★★ 三组结果都做成**判别联合**，与 `PracticeResult` 同一条纪律（26 册 §56.8）：
+//   `kind` 是唯一判据，`switch` 不写 `default`，漏一支编译失败。
+//   ⚠️ 别退回"布尔 + 可选原因"—— 那会允许"成功却带拒绝原因"这种状态存在。
+
+/**
+ * 学技能被拒的原因。
+ *
+ * ★ 每一支都对应**玩家该做的下一件事不同**，这不是"文案细分"而是**决策树**：
+ *   去打怪（`no-pot`）、去练基本功（`slot`）、去涨经验（`capped`）、换个人教（`no-teacher`）。
+ *   合并任意两支，玩家就会收到一条"不知道该怎么办"的提示。
+ */
+export type LearnRefused =
+  /** 没有这个技能（id 与中文名都没命中） */
+  | Refused<{ readonly reason: 'unknown' }>
+  /** 已经会了（wushen `xue.js` 对已学技能是**继续教**，所以这一支只在"建档"路径上出现） */
+  | Refused<{ readonly reason: 'already'; readonly name: string }>
+  /** 装配槽门槛：`minSlot`（wushen「基本功火候未到」） */
+  | Refused<{
+      readonly reason: 'slot';
+      readonly slot: EnableSlot;
+      readonly need: number;
+      /** 该槽**当前生效技能**的名字（`基本剑法`）；槽空着时退回槽名（`sword`） */
+      readonly name: string;
+    }>
+  /** 属性门槛（`minAttr`，读**有效属性**：先天 + 后天加成） */
+  | Refused<{ readonly reason: 'attr'; readonly key: PropKey; readonly need: number; readonly name: string }>
+  /** 内力上限门槛（`minMaxMp`） */
+  | Refused<{ readonly reason: 'max-mp'; readonly need: number; readonly name: string }>
+  /** 性别门槛（三档，`GENDER_LABELS`） */
+  | Refused<{ readonly reason: 'gender'; readonly gender: Gender; readonly name: string }>
+  /** 老师不会这门（`teacherLevel === 0`）—— wushen `xue.js:38`「X不会这个技能」 */
+  | Refused<{ readonly reason: 'no-teacher'; readonly name: string }>
+  /**
+   * 你的程度已经不低于老师（wushen `xue.js:191`「已经不输你师父了」）。
+   * ★ 不带老师的名字：引擎只收到一个等级数字（老师的名字是内容层的事），
+   *   名字由指令层从 `findTarget` 的结果里说 —— 引擎不该知道"老师长什么样"。
+   */
+  | Refused<{ readonly reason: 'master-lower'; readonly teacherLevel: number; readonly name: string }>
+  /** 自己到了**技能等级上限**（经验决定的那条曲线），老师再高也学不动 */
+  | Refused<{ readonly reason: 'capped'; readonly name: string; readonly level: number; readonly limit: number }>
+  /** 潜能不够这一次的量（wushen 是"全有或全无"，不是花到光 —— 见 27 册 §14.3） */
+  | Refused<{ readonly reason: 'no-pot'; readonly name: string; readonly need: number }>
+  /** 内容层的 `on_learn` 钩子否决 */
+  | Refused<{ readonly reason: 'hook'; readonly name: string }>;
+
+/** 学一次成功：`spent` 与 `gained` 在这里才有意义 */
+export interface LearnDone {
+  readonly kind: 'learned';
+  readonly id: string;
+  readonly name: string;
+  /** 学完之后的等级 */
+  readonly level: number;
+  /** 花掉的潜能（wushen 一拍的量，见 27 册 §14.3 的 `count_speed`） */
+  readonly spent: number;
+  /** 涨了几级（可能是 0：经验只累进去，没够升级） */
+  readonly gained: number;
+}
+
+/** 一次"学技能"的结果（`CommandActor.learnSkill`） */
+export type LearnResult = LearnDone | LearnRefused;
+
+/**
+ * 遗忘被拒的原因。
+ *
+ * ★ `base` / `knowledge` 两条规则**在引擎里**（不在指令里）：
+ *   wushen 写在 `fangqi.js:10-12`，但它照抄的是"基础知识不能丢"这条**领域规则**。
+ *   放指令里就等于每个未来会遗忘的入口（GM 指令、面板、脚本）都要重抄一遍。
+ */
+export type ForgetRefused =
+  | Refused<{ readonly reason: 'unknown' }>
+  | Refused<{ readonly reason: 'not-learned'; readonly name: string }>
+  | Refused<{ readonly reason: 'base'; readonly name: string }>
+  | Refused<{ readonly reason: 'knowledge'; readonly name: string }>;
+
+export interface ForgetDone {
+  readonly kind: 'forgotten';
+  readonly id: string;
+  readonly name: string;
+  /** 忘掉之前被装配在哪个槽（null = 本来就没装配）；文案用它说"已经卸下" */
+  readonly wasEnabled: EnableSlot | null;
+}
+
+/** 一次"遗忘"的结果（`CommandActor.forgetSkill`） */
+export type ForgetResult = ForgetDone | ForgetRefused;
+
+/**
+ * 装配被拒的原因。
+ *
+ * ★ 与 `SkillBook.enable()` 的关系：那一层在**调用方写错**时抛 `SkillError`
+ *   （非法槽名、`can_enables` 配置矛盾），那是程序员的错；
+ *   这里只描述**玩家会犯的错**（没学、装错槽）。
+ *   ⇒ 先在这里判一遍，通过后再调 `enable()`，于是玩家看到的是提示而不是 500。
+ */
+export type EnableRefused =
+  | Refused<{ readonly reason: 'unknown' }>
+  | Refused<{ readonly reason: 'not-learned'; readonly name: string }>
+  /** 基本技能 / 知识类不可装配（只有 `type === SKILL` 的武功可以） */
+  | Refused<{ readonly reason: 'not-enablable'; readonly name: string }>
+  /** 这门武功装不到这个槽（`can_enables` 不含它） */
+  | Refused<{
+      readonly reason: 'slot-mismatch';
+      readonly name: string;
+      readonly slot: EnableSlot;
+      readonly allows: readonly EnableSlot[];
+    }>
+  /** 内容层的 `on_enable` 钩子否决 */
+  | Refused<{ readonly reason: 'hook'; readonly name: string }>;
+
+export interface EnableDone {
+  readonly kind: 'enabled';
+  readonly id: string;
+  readonly name: string;
+  readonly slot: EnableSlot;
+  /**
+   * 被顶下来的那个技能的**显示名**（null = 这个槽本来是空的，或你装的就是它自己）。
+   * ★ 是名字不是 id：这一格只被文案用（"原先的X已卸下"），而玩家不该看到 `wd/taijijian`。
+   *   面板要"取消装配"时用的是**自己这条**的 id，与这里无关。
+   */
+  readonly replaced: string | null;
+}
+
+/** 一次"装配"的结果（`CommandActor.enableSkill`） */
+export type EnableResult = EnableDone | EnableRefused;
 
 export interface CommandActor extends Actor {
   /** 我在哪个容器里（房间 / 背包）。不在任何容器里则为 null */
@@ -455,6 +794,18 @@ export interface CommandActor extends Actor {
    */
   spendPot(amount: number): boolean;
   /**
+   * **直接发放经验 / 潜能**（`addxp` 等测试、补偿指令的唯一合法写入通道）。
+   *
+   * ★ 为什么这条写入口可以存在，而 `money` 仍然只能"花"：
+   *   经验与潜能**本来就只有一个增加入口**（`Character.addExp`），
+   *   这里只是把它转出来；而钱的增加要分掉落 / 任务 / 卖店三种审计点，
+   *   不能给一个笼统的 `addMoney`。
+   *
+   * ★★ **权限不在引擎判**：调用方（指令）自己判 GM 等级或测试开关。
+   *   引擎不认识"测试模式"这种运营概念。
+   */
+  grantExp(exp: number, pot?: number): void;
+  /**
    * 当前**技能等级上限**（与 `SkillActor.skillLimit` 是同一个数）。
    *
    * ★ 为什么这里再声明一次：`CommandActor` 与 `SkillActor` 是**两条平行的契约**
@@ -475,6 +826,63 @@ export interface CommandActor extends Actor {
    */
   practiceSkill(idOrName: string, targetLevel?: number): PracticeResult;
 
+  /**
+   * **读书**一次（`study` 指令的每一拍落点）：给某门技能加 `exp` 点经验。
+   *
+   * ★ 与 `practiceSkill` 的差别只在**账从哪来**：练是 `pot → 技能经验`（1:1），
+   *   读是**凭空加**（wushen `study.js:128`：`exp = (int + int加成) × 2`）。
+   *   两者最后都落到 `SkillBook.addExp`（上限钳制、升级、重算被动都在那一处）。
+   *
+   * @param bookMax 书能教到的等级上限：到顶就返回 `too-shallow`，
+   *   而不是"继续加但加不进去"（后者玩家会以为书坏了）。
+   */
+  studySkill(idOrName: string, exp: number, bookMax: number): StudyResult;
+
+  // ── 技能簿的另外三个动作（27 册 §14 · 26 册 §64）────────────────────────
+  //
+  // ★★ 为什么这几个也收进引擎、而不是让指令自己调 `me.skills.learn(...)`：
+  //   ① `SkillBook` 是**引擎对象**，内容层拿不到（`CommandActor` 上没有 `skills` 字段）；
+  //   ② 三条动作都有**规则**（学习条件 / 基础不可忘 / 只能装到 `can_enables` 的槽），
+  //      规则散进内容层就等于每个入口各抄一遍（`forget` 将来还会有 GM 与面板两个入口）；
+  //   ③ 它们都要在**同一个原子操作里**改状态并 `recompute()`，内容层做不到这一点。
+
+  /**
+   * **学一次**（wushen `xue <技能> from <老师>` 的一次结算）。
+   *
+   * 前两道闸：① 未学会时走 `learnCondition`（`minSlot` / `minAttr` / `minMaxMp` / `gender`）；
+   * ② 老师得会这门（`teacherLevel > 0`）且**你的等级低于老师**。
+   * 结算照抄 wushen 的 `count_speed`（27 册 §14.3）：**全有或全无** ——
+   * 潜能不够这一次的量就整笔拒绝，不做"花到光为止"（那是 `practice` 的行为）。
+   *
+   * @param idOrName    技能 id 或中文名
+   * @param teacherLevel 老师的这门技能等级（由指令层从 `ActorObject.skillLevel` 取）；
+   *                     `0` = 老师不会。★ 传数字而不是传 `ActorObject`：
+   *                     引擎不该知道"老师长什么样"，它只需要那一个数。
+   */
+  learnSkill(idOrName: string, teacherLevel: number): LearnResult;
+  /**
+   * **遗忘**一个技能。基础技能与知识类不可遗忘（wushen `fangqi.js:10-12`）。
+   * 若它正被装配，一并卸下（`SkillBook.forget` 内部已保证）。
+   */
+  forgetSkill(idOrName: string): ForgetResult;
+  /**
+   * 把一门武功**装配**到某个槽（wushen `enable <基本技能> <技能>`）。
+   *
+   * ★ `SkillBook.enable()` 是"先判后卸"的：被拒不损害既有装配
+   *   （wushen 是先卸旧、再问新技能，新的被拒则槽空着 —— 见那里的注释）。
+   */
+  enableSkill(slot: EnableSlot, idOrName: string): EnableResult;
+  /** 卸下某槽的武功。返回 `false` = 那个槽本来就没装东西 */
+  disableSkill(slot: EnableSlot): boolean;
+  /**
+   * **技能面板的整张快照**（`skills` 指令的取数口，见 `SkillsView`）。
+   *
+   * ★ 与 `attrView()` 同一条纪律：技能等级 / 经验 / 装配关系 / 上限都在引擎里，
+   *   一次取全，于是"面板显示的值"与"练习真正用的上限"不可能有两条取数路径。
+   *   `progress` 也在这里算 —— 经验公式只有 `skill.ts` 一份。
+   */
+  skillView(): SkillsView;
+
   // ★ `isAlive`（活体判据）**已上提到 `Actor`** —— 全项目单源，理由见 `Actor` 上的注释（E4）。
   /**
    * 四维的**三档读数**（先天 / 后天加成 / 合计）—— 面板与诊断用。
@@ -487,14 +895,43 @@ export interface CommandActor extends Actor {
    * ★ 只覆盖受"先天 + 加成"双影响的四维；`max_mp` 没有"加成"这一路，不在其中。
    */
   attrBreakdowns(): readonly AttrBreakdown[];
+  /**
+   * **属性面板的整张快照**（`score` 指令的取数口，见 `AttrView`）。
+   *
+   * ★★ 为什么收成引擎原语、而不是让 `score.ts` 自己拼：
+   *   面板要的 `attack` / `defense` / `crit` 在 `Character.#derived` 里，
+   *   `hp` / `mp` 也是角色私有状态 —— 内容层看都看不到。散着开一堆 getter
+   *   会让"面板显示的值"与"战斗真正用的值"有两条取数路径（本项目刚在
+   *   §37 把属性合成一条）。这里一次取全，两个读者读的是同一份快照。
+   *   与 `practiceSkill` 同一条纪律：账目在引擎里算，内容层只负责摆。
+   */
+  attrView(): AttrView;
   /** 是否忙碌中（带 TTL；见 `engine/temp.ts`） */
   isBusy(nowMs?: number): boolean;
   /** GM 等级（wushen `user_level`）：0 = 普通玩家。`allow_level` 按它判定 */
   readonly userLevel: number;
   /** 战斗类型；0 = 不在战斗中（wushen `fight_type`） */
   readonly fightType?: number | undefined;
-  /** 当前状态（打坐 / 疗伤…）；null = 无（wushen `state`） */
-  readonly state?: { readonly title: string } | null | undefined;
+  /** 当前状态（读书 / 练习 / 打坐…）；null = 无（wushen `state`） */
+  readonly state?: StateView | null | undefined;
+  /**
+   * 开始一个**持续状态**（wushen `me.set_state({...})`，`os/char/state.js`）。
+   *
+   * ★★ 为什么必须收进引擎：wushen 的"练习 / 读书 / 打坐"**没有一个是一次结算的** ——
+   *   `lianxi.js:55` / `study.js:61` / `dazuo.js` 都是 `set_state` 之后由心跳每 N 秒
+   *   调一次 `on_enter`（`do_learn`）。做成"敲一次涨 N 级"就丢掉了三件事：
+   *   ① **可以中断**（`stop`）；② **有过程**（屏幕上一句"你对X似乎有些心得"）；
+   *   ③ **消耗是渐进的**（潜能一点点花，不会一次点掉一半）。
+   *   这三条也正是"技能系统做了一半"的那半 —— 见 26 册 §75。
+   *
+   * @returns 是否真的开始了；`false` = 已经在某个状态里（先 `stopState`）
+   */
+  startState(spec: StateSpec): boolean;
+  /**
+   * 结束当前状态（wushen `me.clear_state()` / `stopstate` 指令）。
+   * @returns 是否确实停掉了一个状态
+   */
+  stopState(): boolean;
   /** 是否昏迷（wushen `is_faint`） */
   readonly isFaint?: boolean | undefined;
   /**
@@ -533,6 +970,17 @@ export interface CommandActor extends Actor {
    * 失败不改变任何状态，只返回**原因**。
    */
   beginFight(target: ActorObject, type: FightType): FightStart;
+
+  /**
+   * **尝试脱离战斗**（wushen `do_escape`，`os/char/chara_move.js:105`）。
+   *
+   * ★ 判定读的是角色私有派生值（躲闪 vs 对方命中），内容层看不到 ——
+   *   所以必须收进引擎，内容层只读**结果**。
+   * ★ 成功时**立刻停战**（发 `combat:end`）并返回一个可选撤退方向；
+   *   失败时会给自己加一段忙乱（wushen `add_status({id:'busy'})`），
+   *   于是"连续猛点逃跑"不会变成无限重试。
+   */
+  escape(): EscapeResult;
 
   /**
    * **复活**（`relive` 指令的落点）。返回 `false` = 本来就没死。
@@ -761,6 +1209,10 @@ export interface NpcDef extends BaseDef, PropMap, EnterLeaveHooks {
   readonly skills?: readonly SkillMapEntry[];
   readonly drops?: readonly DropDef[];
   readonly no_refresh?: boolean;
+  /** 拒绝切磋（见 `ActorObject.noFight`；wushen `fight.js:41`） */
+  readonly no_fight?: boolean;
+  /** 不可击杀（见 `ActorObject.noKill`；老师的"杀掉了就没人教了"闸） */
+  readonly no_kill?: boolean;
   readonly on_master?: boolean;
   readonly on_checkskill?: boolean;
   readonly actions?: readonly ActionDef[];
@@ -802,6 +1254,15 @@ export interface ItemDef extends BaseDef, PropMap {
   readonly on_get?: (me: Actor) => boolean | void;
   readonly on_use?: (me: Actor, par?: string) => boolean | void;
   readonly on_study?: (me: Actor) => boolean | void;
+  /**
+   * 这本书教**哪门技能**（wushen `book.skill`，见 `world/cmd/skill/study.js:16`）。
+   * 消费者：`world/command/train/study.ts`。
+   * ★ 与 `on_study` 的分工：这个字段是**数据**（读它涨哪门），
+   *   `on_study` 是**钩子**（内容层想在读书时插一手时用）。有前者才进"研读"状态机。
+   */
+  readonly studySkill?: RefId;
+  /** 这本书能教到的等级上限（wushen `book.max_level`，缺省 100） */
+  readonly studyMaxLevel?: number;
   readonly on_open?: (me: Actor) => boolean | void;
 }
 
@@ -839,7 +1300,7 @@ export interface SkillLearnCondition {
    * ⚠️ 内力上限不在这一路（wushen 的 `max_mp` 是独立一支）⇒ 走 `minMaxMp`。
    *
    * 拒绝文案用 `PROPERTIES` 的中文名（与 wushen `os/skill/skill.js:235` 同口径），
-   * 于是玩家不会看到 `str` / `gj` 这种拼音键。
+   * 于是玩家不会看到 `str` / `attack` 这种键名。
    */
   readonly minAttr?: Readonly<Partial<Record<PropKey, number>>>;
   /** 内力上限下限（wushen 的 `max_mp`） */

@@ -1,10 +1,23 @@
 /* ============================================================================
-   style.css — 深色武侠皮肤
+   style.css — 深色武侠皮肤（**配色与尺寸以 wushen 为唯一来源**）
    ============================================================================
    形状与分区照 wushen 的 `styles/global.css` + `styles/main.css`：
      黑底 · 绿字 · 无滚动条 · ≥768px 定宽居中 · 纵向 flex
      （房间区 → 聊天预览 → 消息流 → **工具条 → 动作栏** —— 最后两行的先后
       以 wushen 为准：工具条在上、动作栏在下，见 src/index.html 文件头）
+
+   ★ 三档色板（**自己调出来的中间色只允许出现在这三档里**）：
+       ① 正文/主色 `#008000` · 房名/名号 `#ffff00` · 分隔 `#343434`
+       ② 凹面 `#111`（状态条 / 提示框）· 功能键 `#808080` 底 + `#111` 字
+       ③ 服务端文本的上色走 `<hir>` 那一族标签（文件末），不在这里写第二份
+     三档之外的颜色只剩两类，都是 wushen 的**原文**、不是新配色：
+       · 输入带 `#bebebe` / `#ababab` / `#c0c0c0`（`.chat-panel` 那套，逐值照抄）
+       · 状态色 `#ff0000`（错误 = wushen 的 `<hir>` / `.input-error` 的红）·
+         `#ffa500`（气血告急 = `<hio>`）/ `#00ffff`·`#ff00ff`（频道，
+         即 wushen 的 `<hic>` / `<him>`）
+     "看着不协调"最常见的来源是**同一屏出现两种绿 / 三种字号**：
+     正文曾是 `#00a000`（比标签表里的 `<nor>`/`<gre>` 亮一档）、
+     按钮曾是 11.2px 而正文 15px。现在全部收在 `:root` 与 14px 一个基准上。
 
    现代化的三处（其余一律不动）：
      ① 配色与尺寸收进 CSS 变量（一处改，全局跟；原来颜色散写在几十条规则里）
@@ -14,17 +27,38 @@
 
 :root {
   --bg: #000000;
-  --fg: #00a000;              /* 正文：wushen 是 #008000，纯黑上偏暗，提一档 */
-  --dim: #6a6a6a;             /* 次要文字 */
-  --faint: #505050;           /* 分割线 / 占位 */
+  /* ---- 调色板：**逐值照 wushen**，一个都不自己调 ----------------------------
+     `#008000` 是 wushen `global.css` 的 `body { color }`，也是它所有未上色文本
+     的颜色。曾经写成 `#00a000`（"纯黑上偏暗，提一档"）—— 那是审美判断，而代价是
+     服务端文本里 `<nor>` / `<gre>`（= `#008000`）的那一半比正文**暗一档**，同一屏
+     出现两种绿：正文比"暗绿标签"还亮，"正常"这个词自己就不正常了。
+     正文回到 #008000 之后，标签表里的 `NOR/GRE` 与正文是同一个色（见文件末），
+     绿只有"暗绿=正文 / 亮绿=<hig>"两档，像 wushen 一样分得开。 */
+  --fg: #008000;              /* 正文 / 主色（wushen body） */
+  --dim: #808080;             /* 次要文字（wushen 的 `gray`） */
+  --faint: #505050;           /* 更弱：占位 / 关闭键（wushen 的 `blk`） */
+  /* 错误 / 告警红。**取 wushen 的 `<hir>`**（`global.css:264-266` 是 `#FF0000`，
+     也是 `.input-error { color: red }` 那个红、`get_hpnum` 最危档的红）——
+     原先用的是 `#ff5555`，一个 wushen 色板里没有的自调色。 */
+  --err: #ff0000;
+  --hair: #343434;            /* 分隔线 / 轨道边（wushen `.progress` 的边色，它的"发丝线"） */
+  --panel: #111111;           /* 凹面底：状态条 / 提示框（wushen `.state-bar` / `.warn-dialog`） */
+  --key: #808080;             /* 功能键底（wushen `.tool-bar>.tool-item` 的 `gray`） */
+  --key-ink: #111111;         /* 功能键字（wushen 的 `#111`） */
+  --key-hover: #999999;       /* 大按钮悬停（wushen `.panel_item:hover { background:#999 }`）：
+                                 工具键的悬停是另一回事（变暗到 #666），见 `.tool-item:hover` */
   --cyan: #008080;            /* line / 出口 */
-  --yellow: #ffff00;          /* 房名 */
-  --line: #3a3a3a;            /* 命令标签 / 输入框的细边（全站同一个灰） */
+  --yellow: #ffff00;          /* 房名 / 名号 */
+  --line: #808080;            /* 内容动作的细边（wushen `border: solid 1px gray`） */
   --hp: darkred;              /* 血条：wushen `main.css:162` 的字面值（不是自己调的亮度） */
   --mp: darkblue;             /* 内力条：wushen `main.css:171` 的字面值 */
   --gap: 0.5em;
-  --radius: 2px;
-  --fs: 15px;
+  --radius: 4px;              /* wushen `.act-item` 的 `border-radius: 4px` */
+  /* ★ 14px 是 wushen 的全部字号（`global.css` 的 `body { font-size: 14px }`）：
+     它的按钮 35px、行高 17.5px、输入框 2.8em 全是从这个数推出来的。
+     这里写 15px 时，同一套 em 会整体放大 7%，工具键变 37.5px、行高 22.5px ——
+     "看着不一样"的根源很多都在这一格。 */
+  --fs: 14px;
 
   /* ---- 底部两行的高度（单源）------------------------------------------------
      wushen 的顺序是「工具条在上、动作栏在下」（见 src/index.html 文件头）。
@@ -68,7 +102,12 @@ body {
   color: var(--fg);
   font-family: "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
   font-size: var(--fs);
-  line-height: 1.5em;
+  /* ★ 这里用**无单位**的 1.5，不用 `1.5em`：`em` 行高在 body 上会**算成一个固定长度**
+     （1.5 × 14 = 21px）并**按长度继承**给所有后代 —— 于是登录页那个 2.2em（30.8px）
+     的标题只分到 21px 的行盒，字压住副标题、桌面端看是"两行挤在一起"。
+     无单位值按**各自的 font-size** 重算，这才是"行距"该有的语义。
+     游戏界面的紧凑行高不在 body 上：那是 `.container` 的 1.25em（照 wushen）。 */
+  line-height: 1.5;
 }
 
 /* wushen 就是不要滚动条：MUD 是"读最近几行"，不是"翻长文档" */
@@ -112,109 +151,155 @@ body {
   overflow: auto;
   padding: 0 1.2em;
   padding-bottom: env(safe-area-inset-bottom);
+  /* ★ 垂直居中用**弹性盒 + margin:auto**，不用 `align-items:center`：
+     后者在内容比视口高时会把顶部裁掉且滚不到（移动端横屏 / 键盘弹出时真实发生，
+     而且 `overflow:auto` 也救不了 —— 溢出的方向不是滚动方向）。
+     `margin:auto` 在 flex 容器里是"有空间就居中、没空间就贴边并正常滚"。 */
+  display: flex;
+  flex-direction: column;
 }
 
 .login-wrap {
+  width: 100%;
   max-width: 22em;
-  margin: 0 auto;
-  padding-top: 3rem;
+  /* 上下自动 → 垂直居中；左右 auto → 水平居中 */
+  margin: auto;
+  padding: 2.5em 0;
 }
 
 .login-title {
   color: var(--yellow);
   text-align: center;
-  font-size: 2.4rem;
+  font-size: 2.2em;
   letter-spacing: 0.3em;
-  margin: 0 0 0.2em;
-  font-weight: 600;
+  margin: 0 0 0.25em;
+  /* wushen 给"标题"加粗的地方是 `.dialog-title`（`font-weight: bold`）——
+     登录页的标题属于同一族，加粗；正文一律不加。 */
+  font-weight: bold;
+  /* `letter-spacing` 会在**最后一个字后面**也留一格，居中时整体偏左半格；
+     `text-indent` 补半格抵回来（0.3em / 2）。 */
+  text-indent: 0.15em;
 }
 
 .login-sub {
   text-align: center;
-  color: var(--dim);
-  margin: 0 0 2rem;
-  font-size: 0.85rem;
+  color: var(--faint);
+  margin: 0 0 2em;
+  font-size: 0.85em;
   letter-spacing: 0.2em;
 }
 
+/* 两个页签 = wushen 的频道 tab（`.chat-panel>.channel-box`）那一套语言：
+   选中 = 浅底黑字，未选中 = 黑底灰字细边。**同一个控件在登录页和聊天浮层里
+   长一样**，这是"协调"最省力的做法 —— 不要为登录页再发明第三种按钮。 */
 .login-tabs {
   display: flex;
-  border-bottom: 1px solid var(--faint);
+  gap: 0.35em;
+  margin-bottom: 1.2em;
 }
 
 .ltab {
   flex: 1;
   background: transparent;
-  border: none;
-  color: var(--dim);
-  padding: 0.6em 0;
-  font-size: var(--fs);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.ltab.on {
-  color: var(--yellow);
-  border-bottom: 2px solid var(--yellow);
-}
-
-.login-panel {
-  padding-top: 1.2em;
-}
-
-.lb {
-  display: block;
-  color: var(--dim);
-  font-size: 0.85rem;
-  margin-bottom: 0.4em;
-}
-
-.tb {
-  width: 100%;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: var(--fs);
-  padding: 0.4em 0.2em;
-  outline: none;
-}
-
-.tb:focus {
-  border-bottom-color: var(--fg);
-}
-
-/* 主按钮也走命令标签那套皮肤（黑底 + 细边），字色用主色 --fg 保住重量 */
-.btn {
-  width: 100%;
-  margin-top: 1.2em;
-  background: var(--bg);
   border: 1px solid var(--line);
-  color: var(--fg);
+  color: var(--dim);
+  padding: 0.5em 0;
+  font-size: 1em;
   font-family: inherit;
-  font-size: var(--fs);
-  padding: 0.7em 0;
+  line-height: 1.5;
   border-radius: var(--radius);
   cursor: pointer;
 }
 
-.btn:hover {
+.ltab:hover {
+  color: var(--fg);
   border-color: var(--fg);
-  background: #0d0d0d;
+}
+
+.ltab.on {
+  background: #bebebe;
+  border-color: #bebebe;
+  color: #343434;
+  font-weight: bold;
+}
+
+.login-panel {
+  padding-top: 0.2em;
+}
+
+/* ★ 选择器**必须带 `.login` 前缀**：状态条里「气血 / 内力」两个格子用的也是
+   `class="lb"`（`<i class="lb">气血</i>`）。不带前缀时这里的三条会落到它们身上
+   —— `.vital` 本身已经是 0.85em，字号会**叠成 0.7225em（10px）**，
+   外加一个 `margin-bottom: 0.4em`。同一个 class 两个语义，是本文件唯一一处撞名；
+   这里用前缀收口，HTML 不动（`<i>` 那个是状态条的格子，改名要连着测试一起动）。 */
+.login .lb {
+  display: block;
+  color: var(--dim);
+  font-size: 0.85em;
+  margin-bottom: 0.4em;
+}
+
+/* 输入框照 wushen `.textbox`：透明底 + **一条底边**（`border-bottom: solid 1px #888`），
+   没有外框。上一版底边用的是 `--line`（当时的 #3a3a3a），在黑底上等于没有边 ——
+   输入框看起来像一行裸文字，玩家不知道该点哪。 */
+.tb {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #888888;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 1em;
+  line-height: 1.5;
+  padding: 0.4em 0.2em;
+  outline: none;
+}
+
+.tb::placeholder {
+  color: var(--faint);
+}
+
+.tb:focus {
+  border-bottom-color: var(--yellow);
+}
+
+/* 主按钮 = wushen 的**功能键**（工具条那颗灰块黑字）：
+   整站"能按的东西"只有两族语言 —— 功能键（灰块黑字）与内容动作（黑底灰字细边）。
+   登录按钮属于前者。上一版做成黑底绿字细边，既不像按钮、也不像链接。 */
+.btn {
+  width: 100%;
+  margin-top: 1.4em;
+  background: var(--key);
+  border: 1px solid #222222;
+  color: var(--key-ink);
+  font-family: inherit;
+  font-size: 1em;
+  font-weight: bold;
+  line-height: 1.5;
+  padding: 0.5em 0;
+  border-radius: 0.5em;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--key-hover);
+}
+
+.btn:active {
+  background: #666666;
 }
 
 .fhint {
-  color: var(--dim);
-  font-size: 0.8rem;
-  margin: 0.8em 0 0;
+  color: var(--faint);
+  font-size: 0.85em;
+  margin: 0.9em 0 0;
 }
 
 .login-status {
   min-height: 1.5em;
   margin: 1.2em 0 0;
   color: var(--dim);
-  font-size: 0.9rem;
+  font-size: 0.9em;
 }
 
 .login-status.busy {
@@ -222,13 +307,16 @@ body {
 }
 
 .login-status.error {
-  color: #ff5555;
+  /* wushen 的错误红：`<hir>` = `#FF0000`（`global.css:264-266`），
+     与它登录失败走的那条 `.input-error { color: red }` 同一个色。 */
+  color: var(--err);
 }
 
 .login-server {
   color: var(--faint);
-  font-size: 0.75rem;
+  font-size: 0.8em;
   text-align: center;
+  margin-top: 2.5em;
 }
 
 .login-server>b {
@@ -246,6 +334,11 @@ body {
   flex-direction: column;
   position: relative;
   padding: 0 var(--gap);
+  /* ★ 游戏界面的行距在**这里**，不在 body 上（wushen 的 `main.css:32` 就是这条）。
+     1.25em = 17.5px：一屏能读的行数靠它，而不是靠"看着差不多"。
+     浮层（`.pop` / `.dialog` / `.warn-dialog`）在 `#layers` 里、**不在** `.container`
+     之内，所以各自持有自己的行高（见 `.dialog-content` 的 1.5）。 */
+  line-height: 1.25em;
 }
 
 /* ---- ① 房间区 ----
@@ -262,22 +355,31 @@ body {
      （26 册 §20.6）。按"从 wushen 找、不自己加布局"的口径，收敛回它的形态：
      房间区不设限，物件区那一层照旧滚。 */
 .content-room {
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid #1c1c1c;
+  padding-bottom: 0.35em;
+  /* ★ 唯一一条分隔线：房间区与消息流之间。原来 `#1c1c1c` 在纯黑上等于不存在
+     （对比度约 1.1:1），既没形成分隔、又让人怀疑"这里是不是有根线没渲染"。
+     换成 wushen 自己的"发丝线"色 `#343434`（它拿来画 `.progress` 的边和
+     `.dialog-score h3` 的上下线），一条就够，其余极暗的线全部删掉。 */
+  border-bottom: 1px solid var(--hair);
 }
 
+/* 房名：**与正文同字号**（wushen 的 `.room-name` 一条规则都没有，它继承 body 的 14px，
+   份量全靠黄色 + 1.875em 行高）。上一版写成 1.05rem（16.8px）—— 于是全屏唯一的
+   "大字号"出现在这里，看着像网页小标题，而 wushen 的界面里**没有任何一处**
+   比正文大（除了登录页的标题）。 */
 .room-title {
   color: var(--yellow);
-  font-size: 1.05rem;
-  line-height: 1.9em;
+  line-height: 1.875em;
 }
 
+/* 地图图标照 wushen `main.css:466-473`：`color: gray; padding: 0 1em; float: right;
+   line-height: 1.875em`（没有 font-size —— 与文字同大，靠灰色退到后面）。 */
 .map-icon {
   float: right;
   color: var(--dim);
   cursor: pointer;
-  padding: 0 0.6em;
-  font-size: 0.85rem;
+  padding: 0 1em;
+  line-height: 1.875em;
 }
 
 .room_desc {
@@ -291,6 +393,13 @@ body {
   padding-bottom: 0.3em;
 }
 
+/* 没有出口时的那句话：wushen 用 `<HIK>`（#808080）写"这里没有明显的出口"。
+   这里由 `room.ts` 挂 `.muted`，但之前**没有对应规则** —— 它一直是正文色，
+   读起来像"有出口但没写出来"。 */
+.room_exits>.muted {
+  color: var(--faint);
+}
+
 /* 出口项：**只有颜色**，照 wushen 的 `.room_exits>.exits-item { color: #FFFF00 }`
    （main.css:418）—— 曾经自己加了 `border-bottom: 1px dotted`，看着像超链接、
    而且换行时那根虚线会跟着断成两截；分隔由文本（`、` / ` 和 `）承担，
@@ -298,6 +407,15 @@ body {
 .exits-item {
   color: var(--yellow);
   cursor: pointer;
+}
+
+/* ★ 悬停给一条下划线，**静态形态仍然是"只有颜色"**（那是 wushen 的规则，
+   也是 `tests/web-ui.test.ts` 的契约：`.exits-item` 本体不许有边框/外边距）。
+   加它的理由：这一行是纯文本，`cursor: pointer` 在触屏上等于不存在 ——
+   玩家不知道「北」可以点。悬停时出现下划线是"这是链接"的最省语言，
+   而且不改变静止时的观感。 */
+.exits-item:hover {
+  text-decoration: underline;
 }
 
 /* 房间里**唯一**的滚动器（照 wushen `game/main.js:36` 的 inline
@@ -321,26 +439,35 @@ body {
 }
 
 .room-item:hover {
-  background: #0d0d0d;
+  background: var(--panel);
 }
 
 .room-item>.item-name {
   margin-left: 2em;
 }
 
-.room-item.pl>.item-name {
-  color: #40c040;
-}
+/* ★ 这里**没有** `.room-item.pl>.item-name { color: … }`（曾经是 `#40c040`）。
+   wushen 的 `.room-item>.item-name` **不设颜色**（`main.css:429-432` 只有 `margin-left`），
+   玩家与 NPC 的名字都继承 body 的 `#008000`，靠服务端塞进名字里的称谓前缀区分。
+   `#40c040` 是自调的"中间绿"、不在 wushen 的 32 色表里 —— 同一屏再冒出一个绿，
+   正是本文件开头说的"两种绿"那类不协调。
+   `.pl` 这个 class 仍然保留：它是 `ui/room.ts:89` 标记"这一行是玩家自己"
+   并供 `hooks.pick` 判定的**语义标记**，只是不再挂专属色。 */
 
 /* ★ 这里**不再是** `inline-flex` + `gap` 的并排 —— 那是我自己发明的写法。
    wushen 是右浮的 `inline-block`，里面两条 `.progress` 各自 `display:block`，
    于是自然**上下两行**（hp 在上、mp 在下）。
-   真机实测（`_probes/probe14.mjs`，420px 宽、本仓库 1em = 15px 下同页对量）：
+   真机实测（`_probes/probe14.mjs`，420px 宽、**当时** 1em = 15px 下同页对量；
+   绝对值随 `--fs` 等比缩放，比例结论不变）：
      并排 **154.5px** → 上下两行 **95.8px**（横占 −38%，而单条轨道 75 → 95.8px 反而更长）；
      `.item-status` 高 7.3 → 17px，但**行高 25.5px 不变**（浮层没撑高列表）。 */
 .room-item>.item-status {
   display: inline-block;
   float: right;
+  /* ★ 两条条子总高 17px，而这一行是 1.7em（= 23.8px）：**浮动的盒子贴在行盒顶部**，
+     于是条子比名字高出 3px 左右 —— 真机截图里看起来像"两条彩线浮在名字上方"。
+     `horizontal-align` 对 float 无效，只能给它自己一点上边距把它压到视觉中线上。 */
+  margin-top: 0.2em;
 }
 
 /* 血条 / 内力条：**逐值照抄** wushen `main.css:161-193`（`.progress-bar` = 这里的 `.bar`）。
@@ -358,13 +485,15 @@ body {
   box-sizing: content-box;
 }
 
-/* ★ `float: right` 是 wushen 的观感特征：条子**钉在右边**，
-   掉血时长出来的是**左边**的空档，不是从左往右缩回去。
-   `border: 1px solid transparent` 也是它的 —— 让填充区比轨道内缩 1px。 */
+/* ★★ 与 wushen 的**刻意差别**（2026-10-18 真机反馈）：wushen 的
+   `.progress-bar` 是 `float: right` —— 掉血时长出来的是**左边**的空档，
+   真机上被读成"血条只有一半、还跑到右边去了"。
+   ⇒ 这里改成**从左往右**填充：血从左端长出来，掉血从右端退回去，
+   与状态条（`.fill`）的方向一致。轨道尺寸/边色/内缩 1px 仍照抄 wushen。 */
 .progress>.bar {
   height: 100%;
   border: 1px solid transparent;
-  float: right;
+  float: left;
 }
 
 /* 过渡只给 hp（wushen 里 mp 没有过渡），三段写成 wushen 的长写形式，便于逐行对账 */
@@ -382,35 +511,29 @@ body {
 /* ---- 小地图 ----
    ★ 位置：这里让它**独占一行**（`.content-room` 的兄弟），wushen 是把它塞进
      `.content-room` 当第一个子元素。看着一样（都在房名上方、都占满宽度），
-     差别在"谁负责滚"：塞进房间区的话，地图要从房间区那个 42% 上限里**分走
-     133px**，房间描述与物件列表的可见高度反而缩水。见 src/index.html 的 ④。
+     差别在"谁负责滚"：`.content-room` 现在**不设限高**（见上一条），地图塞进去
+     就会跟着一起长高、把 `flex: 1` 的消息流顶薄；分开之后地图有自己的
+     `max-height` 和自己的滚动器。见 src/index.html 的 ④。
    ★ `max-height` 必须装得下 `#mapSvg` 的**最坏**高度，否则南向格子**开机就被裁
-     掉半截** —— 全站 `scrollbar-width: none`，没有滚动条提示"下面还有东西"，
-     玩家得先想到"这里能滚"才会去滚（`overflow: auto` 本身是能滚的，
-     问题是一屏画不全、且看不出被裁了）。
-     ★ 框现在是**自适应**的（`map.ts` 按"画了哪些格子"算 viewBox，照 wushen 的
-     `height`/`t`）—— 但最坏情况仍是满三行 96 单位：
-     `max-width`(20em=300px) × 96/216 ≈ 133px。原来写 8em(=120px) 时实测
-     `scrollHeight 142 > clientHeight 119`，最下一行格子只露出上半截。
-     9em(=135px) 是能装下**满框**的最小值（方向少时实际远低于它）。 */
+     掉半截** —— 全站 `scrollbar-width: none`，没有滚动条提示"下面还有东西"。
+     ★ 渲染是 **1:1 像素**（照 wushen：svg 不缩放），尺寸取 wushen 的 1.3 倍
+       （见 `map.ts#CANVAS_W`）：满三行 = 行距 39×2 + 格高 26 + 上下留白 4×2 = 112px，
+       加本条上下 padding 0.3em×2 ≈ 120px ⇒ 9em(=126px) 是能装下**满框**的最小
+       整数档（方向少时实际远低于它）。 */
 .map-panel {
   flex: none;
   max-height: 9em;
   overflow: auto;
   padding: 0.3em 0;
-  border-bottom: 1px solid #1c1c1c;
+  border-bottom: 1px solid var(--hair);
 }
 
-/* 地图按比例缩放并居中。
-   ★ `max-width` 定的其实是**比例**（1 个 viewBox 单位 = 20em/216 ≈ 0.0926em）：
-     `map.ts` 只给 `viewBox`（画到哪儿），屏幕尺寸由这一条推出来 —— 于是框跟着
-     方向多少收放时，**格子与字号的大小一点都不变**（真机实测恒为 1.39px/单位）。
-     若宽度铺满 768 会画成一片巨大的格子（高度超面板、被裁掉一半）—— 限宽比限高稳。 */
+/* 1:1 渲染：viewBox 单位 = CSS 像素（wushen 的 svg 也不缩放）。
+   宽度 = `map.ts` 的 `CANVAS_W`(276)，格子 78×26、字号 16px。 */
 #mapSvg {
   display: block;
   margin: 0 auto;
-  width: 100%;
-  max-width: 20em;
+  width: 276px;
   height: auto;
 }
 
@@ -418,13 +541,19 @@ body {
   cursor: pointer;
 }
 
-.ceg rect {
-  fill: #171717;
-  stroke: #2c2c2c;
+/* 格子本体与文字的颜色在 `map.ts` 里按 wushen 原文写成 SVG 属性
+   （`#232323` 底 · gray 边 · dimgrey 字；中心格 `dimgrey` 底深字）。
+   这里只补 wushen 没有的悬停反馈：亮一档，让人知道格子能点。 */
+.ceg:hover rect {
+  fill: #2e2e2e;
 }
 
-.ceg:hover rect {
-  fill: #262626;
+.ccg {
+  cursor: pointer;
+}
+
+.ccg:hover rect {
+  fill: #7a7a7a;
 }
 
 /* 格子文字：**故意不写 `font-size`** —— 字号是**全图一个**（`map.ts` 的
@@ -432,18 +561,6 @@ body {
    `cellLabel()` 截成「前几字 + …」。此处再配一份就是第二个来源，
    会出现"按一个数算、按另一个数画"的静默越界
    （`tests/web-ui.test.ts` 有一条断言钉着这里不许再出现 `font-size`）。 */
-.ceg text {
-  fill: var(--dim);
-}
-
-.ccg rect {
-  fill: #241f10;
-  stroke: var(--yellow);
-}
-
-.ccg text {
-  fill: var(--yellow);
-}
 
 /* ---- ② 聊天预览（wushen 的 .channel） ---- */
 .channel {
@@ -451,7 +568,6 @@ body {
   max-height: 5em;
   overflow-y: auto;
   padding: 0.2em 0;
-  border-bottom: 1px solid #161616;
   cursor: pointer;
 }
 
@@ -464,7 +580,17 @@ body {
   flex: 1;
   overflow-y: auto;
   position: relative;
-  padding: 0.3em 0;
+  /* ★ 照 wushen `styles/main.css:35-39`（`.container>.content-message` 的第三条）。
+     补它的理由不止是"对齐"：本文件的注释里一直**引用**着这条属性来解释下方
+     padding 的余量，而它其实从未声明过 —— 注释描述了一个不存在的实现。
+     要么删注释、要么补属性；补上更划算，因为 MUD 是"一行行掉下来"的阅读节奏，
+     新消息贴底时硬跳一格会打断视线。
+     ★ 代价也要认：刷屏很快时平滑滚动会"追不上"，视觉上像延迟。
+       所以 `prefers-reduced-motion` 那一档必须把它一起关掉（见文件末）。 */
+  scroll-behavior: smooth;
+  /* 上沿留一点、下沿多留一点：贴着动作栏的最后一行文字读起来像被切掉，
+     而 `scroll-behavior: smooth` 贴底时也需要这点余量。 */
+  padding: 0.35em 0 0.6em;
 }
 
 .ln {
@@ -482,50 +608,73 @@ body {
 }
 
 .ln.err {
-  color: #ff5555;
+  /* 错误行 = wushen 的 `<hir>` / `.input-error` 的那个红（`#FF0000`） */
+  color: var(--err);
 }
 
+/* ★ `.ln.fight` 是**本项目自己的分档**（wushen 没有这一档：它的战斗播报是服务端
+   带 `<hir>` / `<hiy>` 这类标签下来的，前端不分类）。既然要分，色就必须从 wushen
+   的色表里挑：这里用**橙 `<hio>`**（`global.css:280-282` 的 `#FFA500`），也就是它
+   给"告警 / 高品"的那个槽位 —— 与 `.ln.err`（红 `<hir>`）分得开，也不跟
+   `.ln.gain`（`--yellow` = `<hiy>`）撞。
+   ★ 原先的 `#ff8080`（灰粉）是自调色，wushen 色板里没有对应值。 */
 .ln.fight {
-  color: #ff8080;
+  color: #ffa500;
 }
 
 .ln.gain {
   color: var(--yellow);
 }
 
+/* 说话人名 = wushen 的 `<hig>`（#00ff00）：一屏里"谁在说"最该跳出来，
+   而 `<hig>` 正是它给"高亮绿"的槽位。 */
 .ln.chat>.who {
-  color: #00d000;
+  color: #00ff00;
   margin-right: 0.3em;
 }
 
 /* 没有 `.ln.chat.say`：房间里说话不是频道消息（26 册 §24）。
    它走服务端的房间广播，落进主消息流，由 `.ln` 的常规样式负责。 */
 
+/* 频道配色回到 wushen 的调色板：世界 = `<hic>`，私语 = `<him>`。
+   ★ 上一版是 `#3aa0d0`（钢蓝）与 `#d070d0`（灰紫）—— 两个都**不在** wushen 的
+     32 色表里，等于在同一屏里塞进两个外来色相；而蓝在这个绿字界面里会被读成
+     "第二个主色"（`CMD` 那条注释里已经踩过一次同样的坑）。 */
 .ln.chat.wor {
-  color: #3aa0d0;
+  color: #00ffff;
 }
 
 .ln.chat.pri {
-  color: #d070d0;
+  color: #ff00ff;
 }
 
-.rule {
-  border-top: 1px solid #1c1c1c;
-  margin: 0.5em 0;
-}
+/* ★ 2026-10-20 §74：`.rule`（换房间的分隔线）已随 `stream.ts#pushRule` 一起删除。
+   wushen 的 `.content-message` 里没有这个元素 —— 见 `src/process.js:297-306`，
+   换房间只播一句"你来到了X。"。 */
 
 /* 回到底部浮标（wushen 的 .scroll-flag）*/
+/* ★ 底色/字色/尺寸**逐值照抄** wushen `main.css:46-57`：`#222` 底 · `#555` 字 ·
+   2.5em 方块 · 0.5em 圆角。
+   ⚠️ 这里原先挂的是 `--panel`（#111）+ `--dim`（#808080）+ 2.2em，属于**归错了色族**：
+      wushen 的 `#222` 是**标题带**那一档（`.dialog-header` / `.dialog-footer` 同色），
+      不是"凹面"那一档（`#111` 是 `.state-bar` / `.warn-dialog`）。浮标是浮在
+      消息流之上的**提示**，与提示框同族 —— 挂到凹面色上，它在黑底上会淡到几乎
+      看不见，而它恰恰是"下面有新消息"这个要紧信息唯一的入口。
+   ★ 定位**不照抄**：wushen 没有写 `right`/`bottom`，而是由 JS 在 `scroll2end()`
+     里现算 `top`（`message.js:81`），且算的时候用的是**全局 `window.screenTop`**
+     （窗口到屏幕顶的距离，不是元素偏移）—— 窗口不贴顶时浮标会飘走。
+     这里直接交给 CSS 贴右下角，省掉那个偏差。 */
 .scroll-flag {
   position: absolute;
   right: 0.4em;
   bottom: 0.4em;
-  width: 2.2em;
-  height: 2.2em;
-  line-height: 2.2em;
+  width: 2.5em;
+  height: 2.5em;
+  line-height: 2.5em;
   text-align: center;
-  background: #222;
-  color: #888;
-  border-radius: 50%;
+  background-color: #222222;
+  color: #555555;
+  border-radius: 0.5em;
   cursor: pointer;
   z-index: 5;
 }
@@ -550,30 +699,33 @@ body {
   display: none;
 }
 
-/* ★ 所有"可点的命令标签"共用**一套皮肤**：黑底 · 细边 · 暗字。
-   动作栏 / 招式栏 / 工具条按钮 / 快捷 chip 长得一样，界面才像同一个东西 ——
-   之前工具条是亮灰实心块（像手机 App 图标），动作栏是黑底细边，
-   两种皮肤同屏，一眼就看出来是两套人做的。
-   冷却那条渐变也共享：`background-size` 由战斗状态推进（见 `.act-item` 的注释）。 */
-/* ★ 这里只放**内容动作**（wushen 的 `.room-commands>.act-item`）：
-   透明底 · 灰字 · 灰细边。它和工具条的"功能键"是**两套皮肤**（wushen 本来如此），
-   混成一套两边都不像 —— 本批次前两版就是这么错的。 */
+/* ★ 「能按的东西」在 wushen 里有**两族皮肤**，这里**照样是两族**：
+     ① 内容动作 = `.act-item` / `.pfm-item` / `.chip`：黑底 · 灰细边 · 灰字
+        （wushen `main.css:345-365` 的 `.room-commands>.act-item`）；
+     ② 功能键 = 工具条那颗 `.tool-item`：灰实心块 · 黑字 · 0.5em 圆角
+        （wushen `main.css:232-239`）。
+   两族的**分工**是"当前能做什么" vs "随时能按的固定入口"，服务端与玩家心智
+   都是这么分的；曾经把工具条也改成黑底细边去"统一"，结果既不像 wushen、
+   也让常驻入口看起来像临时按钮，本批改回。
+   ★ 冷却那条渐变（`background-size` 由战斗状态推进）只属于本族。 */
 .act-item,
 .pfm-item,
 .chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid gray;
+  border: 1px solid var(--line);
   background-color: var(--bg);
-  color: gray;
+  color: var(--dim);
   cursor: pointer;
   border-radius: var(--radius);
   min-width: 2.5em;
   min-height: 2em;
-  padding: 0 0.6em;
-  font-size: 0.8rem;
-  line-height: 1;
+  /* 14px（= 1em）是 wushen 内容动作的字号 —— 它整站没有 12px 这一级。
+     上一版写 0.8rem(=11.2px)：按钮比正文小一档，一屏里就有三种字号。 */
+  font-size: 1em;
+  line-height: 2em;
+  padding: 0 0.5em;
   position: relative;
   background-image: linear-gradient(to top, rgba(128, 128, 128, 0.45) 0%, rgba(128, 128, 128, 0.45) 100%);
   background-size: 0% 100%;
@@ -597,8 +749,8 @@ body {
 .act-item:active,
 .pfm-item:active,
 .chip:active {
-  background-color: gray;
-  color: #111;
+  background-color: var(--line);
+  color: var(--key-ink);
 }
 
 /* ---- ④ 工具条（在动作栏**之上**） ----
@@ -616,16 +768,24 @@ body {
   position: relative;
 }
 
-/* 状态条：照 wushen 的 `.state-bar`（`#111` 底 · 圆角 · 左侧 2px 竖线 ·
-   高度 **2.5em = 工具键同高**）。高度一致是"同一行"的观感来源，
-   之前做成 2.2em 让按钮比它高一截，一行看着就散了。 */
+/* 状态条：照 wushen 的 `.state-bar`（`#111` 底 · 圆角 · **左侧 2px 竖线** ·
+   高度 **2.5em = 工具键同高**）。高度一致是"同一行"的观感来源。
+   ★ 竖线颜色：wushen 那条 `border-left-style/width` **没写颜色**，走 `currentColor`
+     = 它 body 的绿。这里上一版写的是 `--faint`（灰）—— 状态条是"人"的地方，
+     灰竖线把它读成了禁用态。改成主色绿，与它同一个来源。 */
 .state-bar {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
   overflow-x: auto;
-  background: #111;
-  border-left: 2px solid var(--faint);
+  /* ★ 照 wushen `main.css:484`：横向可滚、**竖向钳死**。
+     这一条是补保险：状态条高度写死 `--tool-h`(2.5em)，内部又全是 `nowrap` 的行内块，
+     正常情况下竖向不溢出；但血条/数值一旦因为字号变化（用户放大字体）撑过行盒，
+     缺这条就会冒出竖向滚动条 —— 而全站 `scrollbar-width: none`，
+     于是变成"看着像被切了一截，却没有任何提示"。 */
+  overflow-y: hidden;
+  background: var(--panel);
+  border-left: 2px solid var(--fg);
   border-radius: 0.5em;
   height: var(--tool-h);
   line-height: var(--tool-h);
@@ -636,30 +796,47 @@ body {
   padding-left: 0.5em;
 }
 
+/* 状态条内部用的是 `<i>` / `<span>` 做格子：`<i>` 默认**斜体**，
+   中文没有斜体字形，浏览器要么摊平要么伪斜 —— 一律归正。 */
+.state-bar i {
+  font-style: normal;
+}
+
 .state-bar>.who {
   color: var(--yellow);
-  max-width: 6em;
+  /* 不参与收缩：flex 项默认 `min-width: auto`，一挤就把名号缩成「像素…」，
+     而它是这一格里最该读全的东西。挤不下时让外层横向滚（本来就 overflow-x: auto）。 */
+  flex: none;
+  max-width: 8em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .state-bar>.lv {
+  flex: none;
   color: var(--dim);
-  font-size: 0.8rem;
+  font-size: 0.85em;
 }
 
 .state-bar>.vital {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 0.25em;
-  font-size: 0.75rem;
+  gap: 0.35em;
+  font-size: 0.85em;
   color: var(--dim);
 }
 
+/* 「气血 / 内力」两个字是**标签**，不抢数值的注意力 → 用最弱的一档灰 */
+.state-bar .lb {
+  color: var(--faint);
+}
+
 .state-bar .track {
-  width: 3.2em;
+  width: 5em;
   height: 0.4em;
-  border: 1px solid var(--faint);
+  border: 1px solid var(--hair);
+  background: #0a0a0a;
   display: inline-block;
 }
 
@@ -679,6 +856,26 @@ body {
   transition: width 0.6s ease-out;
 }
 
+/* 数值：默认是"不需要看"的弱色；掉到一半 / 两成以下才上色。
+   ★ 阈值与配色照 wushen `process.js:259-265` 的 `get_hpnum()` ——
+     它按 hp/max 分四档上色（>0.8 黄、>0.5 橄榄、>0.2 红、更少 亮红）。
+     这里只用"危险"两档（<=50% 橙、<=20% 红）：满血时数值不该是彩色的，
+     否则一屏里最显眼的东西是"我还满血"这件没事的信息。 */
+.state-bar .num {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.state-bar .num.warn {
+  color: #ffa500;
+}
+
+.state-bar .num.danger {
+  /* wushen `get_hpnum()` 最危那一档就是 `<hir>`（`process.js:264` 的
+     `return "<hir>" + hp + "</hir>"`）—— 不再是自调的 `#ff5555`。 */
+  color: var(--err);
+}
+
 /* 工具键：**逐值照抄 wushen** 的 `.tool-bar>.tool-item`。
    实测它的规格（`getComputedStyle`，不是肉眼估）：
      35×35px 方块 · 底 `gray`(#808080) · 字 `#111` · 加粗 700 ·
@@ -687,12 +884,12 @@ body {
    照抄它，一行里"打坐"和"聊天"才各自成立。 */
 .tool-bar>.tool-item {
   text-align: center;
-  background-color: gray;
-  color: #111;
+  background-color: var(--key);
+  color: var(--key-ink);
   cursor: pointer;
   font-weight: bold;
   position: relative;
-  border: solid 1px #222;
+  border: solid 1px #222222;
   display: block;
   flex: none;
   width: var(--tool-h);
@@ -702,13 +899,20 @@ body {
 }
 
 .tool-bar>.tool-item:hover {
-  background-color: #666;
+  /* wushen `main.css:242-245`：工具键悬停**变暗**到 `#666`（不是变亮）。 */
+  background-color: #666666;
 }
 
+.tool-bar>.tool-item:active {
+  background-color: #666666;
+}
+
+/* 图标**不给 font-size**：wushen 的 `.tool-icon` 只有 `line-height: 1.25em`，
+   字号继承 14px —— 于是"图标 17.5px + 文字 11.2px"正好塞满 35px 的键。
+   上一版写 0.9em(=12.6px)，图标比 wushen 小一档、下方留出一截空隙。 */
 .tool-item>.tool-icon {
   display: block;
   line-height: 1.25em;
-  font-size: 0.9em;
 }
 
 .tool-item>.tool-text {
@@ -728,7 +932,7 @@ body {
   min-width: 1.1em;
   height: 1.1em;
   line-height: 1.1em;
-  font-size: 0.6rem;
+  font-size: 0.7em;
   padding: 0 0.2em;
 }
 
@@ -794,7 +998,7 @@ body {
   border-top-right-radius: 3px;
   background-color: black;
   color: var(--dim);
-  font-size: 0.85rem;
+  font-size: 1em;
   cursor: pointer;
 }
 
@@ -864,7 +1068,11 @@ body {
      底边只留 3.2em 会正好压在工具条上（见 `:root` 的说明）。 */
 .dialog {
   position: fixed;
-  bottom: calc(var(--bottom-chrome) + 0.5em);
+  /* ★ 位置由 `ui/panel.ts` 的 `panelTop()` 算好后写在 **inline style** 上：
+     面板要贴**被点的那一行**下面（真机反馈：原先写死 `bottom`，点在屏幕上方、
+     操作却在屏幕下方，一只手够不着两头）。这里的 `top` 只是**没算出来之前**
+     的兜底（比如 jsdom 里没有布局，量不到高度）。 */
+  top: 20vh;
   left: 50%;
   transform: translateX(-50%);
   width: var(--shell);
@@ -873,16 +1081,15 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--hair);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
-/* 标题带：**逐值照抄 wushen `dialog.css` 的 `.dialog>.dialog-header`**
-   （`#222` 底 · 高 2.5em · 左内边距 0.5em · 无下边框）。
-   wushen 还有一条 `.dialog-footer`（同样 `#222`）放命令按钮；这里没有那个元素
-   —— 命令按钮渲染在 `.dialog-content` 里（见 `ui/panel.ts` 的 `cmdRow`），
-   所以只有上带没有下带。 */
+/* 上带（标题）：**逐值照抄 wushen `dialog.css:20-27` 的 `.dialog>.dialog-header`**
+   （`#222` 底 · 高 2.5em · 左内边距 0.5em）。
+   ★ 下带（命令按钮）在下面单独一条 `.dialog-footer` —— 与这里同样 `#222`、同样 2.5em，
+     wushen 的面板就是"上带标题 / 下带动作 / 中间正文"这个三段式。 */
 .dialog-header {
   display: flex;
   align-items: center;
@@ -918,10 +1125,16 @@ body {
 
 .dialog-content {
   padding: 0.6em 0.8em;
-  max-height: 60vh;
+  /* ★ 40vh（原 60vh）：面板是**贴在物件列表下面**的对话框，不是日志区 ——
+     长到六成屏高就把房间区整个盖住了（真机反馈：面板一路顶到屏幕顶）。
+     装不下的老回显在里面滚，新内容始终在视野里。 */
+  max-height: 40vh;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  /* 正文是 1.25em（17.5px）—— 那是给**消息流**的密度；面板里是成段的说明文字，
+     1.5 倍行距才不至于挤成一坨。这一条只影响面板，不动消息流。 */
+  line-height: 1.5;
 }
 
 .dialog-content>.row {
@@ -932,6 +1145,214 @@ body {
   color: var(--dim);
 }
 
+/* ---- 下带：**逐值照抄 wushen `dialog.css:77-106`** 的 `.dialog > .dialog-footer` ----
+   它是与 `.dialog-content` **并列**的一条 `#222` 横带（不是正文里的最后一行），
+   命令按钮在带上**右浮**。这就是 wushen 面板的形状：上带标题、下带动作、
+   中间正文自己滚 —— 三者各管一段，正文再长也不会把按钮顶出视野。
+   ★ 空着时整条隐藏（`:empty`，`#dlgFoot` 空 = 没按钮）：数据面板（属性 / 技能）的按钮属于正文，
+     不能凭空多出一条空灰带。wushen 那边下带总有内容，不需要这条；
+     本项目两类面板共用同一个 `.dialog`，所以补这一条只为"没按钮时不画空带"。 */
+.dialog-footer {
+  background-color: #222;
+  white-space: nowrap;
+  height: 2.5em;
+  user-select: none;
+  line-height: 2.5em;
+  flex: none;
+}
+
+.dialog-footer:empty {
+  display: none;
+}
+
+/* ★ 下带里的 `.item-commands` 要**压掉**本文件那条通用规则
+   （`display:flex; flex-wrap:wrap; gap:.35em; margin-top:.4em`）：
+   wushen 在带里用的是 `float:right` + 逐颗 `margin-left:1em` 的横排。
+   两套并存的后果是"按钮换行到第二行、把 2.5em 的带撑高"。 */
+.dialog-footer>.item-commands {
+  float: right;
+  display: block;
+  margin-top: 0;
+  margin-right: 2px;
+  padding-bottom: 0;
+  height: 2.5em;
+  line-height: 2.5em;
+}
+
+.dialog-footer>.item-commands>span {
+  height: 2em;
+  line-height: 2em;
+  padding: 0 0.5em;
+  margin: 0 0 0 1em;
+  /* 垂直居中：带上 2.5em、按钮 2em ⇒ 上下各留 0.25em（wushen 靠行内基线做到，
+     这里显式写出来，免得 `line-height` 与 `vertical-align` 打架） */
+  vertical-align: middle;
+}
+
+/* ==== 数据面板（`dialog:score` 这类结构化快照，§62）=========================
+   ★ 形态来自 wushen：它的 `.dialog` 与 `.content-room` 是**同一个布局位**
+     （`dialog/base.js` 的 `init()` 把 `.content-room` 加 `hide`，`.dialog` 顶上），
+     **没有遮罩**。于是属性卡不是浮窗 —— 它"换掉了"房间区那一块，
+     消息流 / 聊天预览 / 工具条照常可见可点。
+     几何（top/left/width/max-height）由 `ui/panel.ts#place()` 按房间区的
+     矩形写在 inline style 上；这里只管"万一没算出来"时的兜底与皮肤。 */
+.dialog.is-data {
+  /* 物件面板那一套是 `left:50% + translateX(-50%)`（居中浮层）。
+     数据面板对齐房间区，两条都要撤掉，否则会右移半个身位。 */
+  transform: none;
+  max-width: none;
+  /* 房间区不够高时在面板**内部**滚（wushen 那边是固定 `height:29em`） */
+  overflow-y: auto;
+}
+
+.dialog.is-data .dialog-content {
+  /* ★ 必须覆盖 `pre-wrap`：属性卡靠 `inline-block` / grid 排两列，
+     保留空白会把每个换行当成可见空白，列就错位了。
+     `max-height` 交给 `.dialog.is-data` 那一层（房间区高度），这里放开。 */
+  white-space: normal;
+  max-height: none;
+  overflow-y: visible;
+  padding: 0.5em 0.6em;
+}
+
+/* 属性卡本体：五段竖排（形状逐条对照 wushen `styles/dialog.css:146-179`） */
+.dialog-score {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+/* `.score-section`：灰色左竖线 + `#111` 凹底 + 4px 圆角 —— wushen 的原值。
+   ★ 抄了 `white-space: nowrap` 与 `overflow-x: auto`：窄屏（320px）下
+     这一段可以横滑，而不是把「先天 20 + 后天 5」折成两行读不出来。 */
+.dialog-score>.score-section {
+  border-left: 2px solid var(--dim);
+  border-radius: var(--radius);
+  background-color: var(--panel);
+  padding: 0.4em 0.5em;
+  white-space: nowrap;
+  overflow-x: auto;
+  /* 两列。wushen 是 `.title{width:4.375em}` + `.value{width:6em}` 的定宽 inline-block
+     （靠 `<br>` 每行两个）。这里用 grid 取**同一视觉效果**，但列宽随内容自适应:
+     `max-content` 让整列对齐到段内最宽的那个 —— 「【技能上限】」比「【臂力】」宽，
+     两个都能对齐，不必给长标签单独写 inline `width`。 */
+  display: grid;
+  grid-template-columns: max-content max-content;
+  column-gap: 1.4em;
+  row-gap: 0.2em;
+}
+
+.dialog-score .cell {
+  display: flex;
+  align-items: baseline;
+  gap: 0.15em;
+}
+
+/* `.title` / `.value` 的 `line-height: 1.25em` 是 wushen 的原值
+   （`dialog.css:169-179`）；列宽不再定死，见上面对 grid 的说明。 */
+.dialog-score .title,
+.dialog-score .value {
+  line-height: 1.25em;
+}
+
+/* 括号里的"先天 X + 后天 Y"用正文绿（`<nor>`），与 wushen 的
+   `<NOR>(+<span>5</span>)</NOR>` 同一档；主值才是亮色。 */
+.dialog-score .value>nor {
+  color: var(--fg);
+}
+
+/* ==== 技能面板（`dialog:skills`，26 册 §64.10）===============================
+   ★ 三段：页签 / 列表 / 动作栏。行的形状逐条对照 wushen `src/dialog/skills.js`
+     的 `skills_css`（理由与取舍见 `ui/skills.ts` 头部）：
+     `line-height:2em` · `padding-left:1.5em` · 左边框 2px · `#111` 底 ·
+     `white-space:nowrap` + `overflow-x:auto`（窄屏横滑而不是折行读不出来）·
+     `.skill-level { float:right }`。
+   ★★ 七档阶位色 = wushen `global.css:166-199` 的 `.grade0`–`.grade6`（逐值照抄）。
+     它们只声明一个变量；本文件把 `--border-color` 用在技能行的左边框上。
+     ★ 不给 `--border-color` 全局兜底值：wushen 也没有。没有 `gradeN` 的元素
+       凭空获得一个边框色，会让"忘了加类"看起来像"样式正常"。 */
+.grade0 { --border-color: #c0c0c0; }
+.grade1 { --border-color: #00ff00; }
+.grade2 { --border-color: #00ffff; }
+.grade3 { --border-color: #ffff00; }
+.grade4 { --border-color: #912cee; }
+.grade5 { --border-color: #ffa500; }
+.grade6 { --border-color: #ff4500; }
+
+.dialog-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+/* 页签：**不套按钮皮肤**。它改的是"看哪一页"，不发任何命令 ——
+   形状上就该与下面的动作栏（那一族才是"按下去会发命令"的）分开，
+   这正是 §63.5 判定的"页签与动作不共用容器"。 */
+.skill-tabs {
+  display: flex;
+  gap: 1em;
+  border-bottom: 1px solid var(--hair);
+  padding-bottom: 0.2em;
+}
+
+.skill-tab {
+  color: var(--dim);
+  line-height: 1.75em;
+  cursor: pointer;
+}
+
+.skill-tab.is-on {
+  /* 黄是这套界面里"注意这里"的颜色（房名 / 名号 / 焦点环同款） */
+  color: var(--yellow);
+  font-weight: bold;
+}
+
+.skill-item {
+  line-height: 2em;
+  padding-left: 1.5em;
+  border-left: 2px solid var(--border-color, var(--dim));
+  border-radius: var(--radius);
+  background-color: var(--panel);
+  white-space: nowrap;
+  overflow-x: auto;
+  cursor: pointer;
+}
+
+/* 选中项：`outline` 而不是加粗/换色 —— 行的颜色已经被**阶位**占用了，
+   再拿颜色表达"选中"就是两个含义抢同一个通道。 */
+.skill-item.is-on {
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+}
+
+/* 已装配的行左边让出位置给 ✓（wushen 的 `.enable { padding-left: 0 }`） */
+.skill-item.has-flag {
+  padding-left: 0;
+}
+
+.skill-flag {
+  padding: 0 0.25em;
+}
+
+.skill-level {
+  float: right;
+  margin-right: 0.625em;
+}
+
+/* 空列表 / 动作栏缺席 / 底部统计：都是**说明文字**，压暗一档。
+   ★ 不给它们套 `.item-commands>span` 的皮肤 —— 那是"能按的"的样子。 */
+.skill-empty,
+.skill-tip,
+.skill-meta {
+  color: var(--dim);
+  line-height: 1.75em;
+  margin: 0;
+}
+
+.skill-meta {
+  text-align: right;
+}
+
 .item-commands {
   display: flex;
   flex-wrap: wrap;
@@ -940,13 +1361,19 @@ body {
 }
 
 /* 面板里的命令按钮也是**同一个皮肤** */
+/* 几何照 wushen 的 `.item-commands>span`（`min-width: 2.5em; padding: 0.25em 1em;
+   border-radius: 0.25em`）收一档：它的 padding 是给**单独一行**的按钮用的，
+   塞进面板的换行流里会撑成一大排。字号统一到 1em，不再有 12px 这一级。 */
 .item-commands>span {
   border: 1px solid var(--line);
-  color: #8a8a8a;
+  color: var(--dim);
   background: var(--bg);
   border-radius: var(--radius);
-  padding: 0.1em 0.6em;
-  font-size: 0.8rem;
+  min-width: 2.5em;
+  text-align: center;
+  padding: 0.15em 0.7em;
+  font-size: 1em;
+  line-height: 1.6em;
   cursor: pointer;
 }
 
@@ -980,7 +1407,7 @@ body {
   min-width: 20em;
   max-width: 26em;
   padding: 0.5em;
-  background: #111;
+  background: var(--panel);
   border-radius: 6px;
   overflow: hidden;
   border-top: 4px solid var(--fg);
@@ -1027,10 +1454,12 @@ body {
 }
 
 .glyphicon-search:before { content: "\e003"; }        /* 环顾 */
+.glyphicon-user:before { content: "\e008"; }          /* 属性（wushen 的 score 格） */
 .glyphicon-edit:before { content: "\e065"; }          /* 指令 */
 .glyphicon-volume-down:before { content: "\e037"; }   /* 聊天 */
 .glyphicon-send:before { content: "\e171"; }          /* 发送 */
 .glyphicon-map-marker:before { content: "\e062"; }    /* 地图 */
+.glyphicon-th-large:before { content: "\e010"; }      /* 面板（中性图标，不是地图针） */
 .glyphicon-remove-circle:before { content: "\e088"; } /* 关闭 */
 
 /* ============================================================================
@@ -1137,24 +1566,24 @@ line::after { right: 0; }
 FLA {}
 
 /* ----------------------------------------------------------------------------
-   ★ wushen 的 `.grade0`–`.grade6`（七档品质边框色）**故意不抄**。
+   ★ wushen 的 `.grade0`–`.grade6`（七档品质边框色）**已抄**（2026-10-18，26 册 §64.10）。
    ----------------------------------------------------------------------------
-   wushen 确实在用：`src/dialog/skills.js` 的 `createSkillItem` 会往 class 上拼
-   `'grade' + item.grade`，背包 / 书架的物件条目也一样。但那套机制的前提是
-   **有技能面板、有背包面板、物件条目带 `grade` 字段** —— 这三样这里都还没有
-   （26 册 §16.8 的 T 系列）。`ItemBrief` 里根本没有 `grade`（`shared/protocol.ts`），
-   房间物件列表也就不可能带上 `gradeN`。
-   抄进来的话是七条**没有元素会匹配**的死规则，而本文件对图标字体那一段刚刚
-   写过"只声明真的用到的"——两处标准得一样。等到技能 / 背包面板落地时，
-   从 wushen `global.css` 那段照抄即可（它们同时会补上 `--border-color` 变量）。
+   原来这里写的"等技能 / 背包面板落地时再抄"**已经到期**：技能面板落地了，
+   七条规则随它一起抄在 `.dialog-score` 那一段后面（技能行用它给左边框上色）。
+   ★ 那句「等落地时照抄即可」现在只剩背包一半没兑现 —— 背包面板还没有，
+     `ItemBrief` 里也仍然没有 `grade`，所以**物件条目**还带不上 `gradeN`。
+     别照着技能面板的样子去给物件加，先看 `shared/protocol.ts` 有没有那个字段。
    注：服务端给"高品物件名"上色走的是 `<ord>` / `<hig>` 这类**标签**（见上面
    `ORD` 那条），与 `.gradeN` 是两条互不相干的路。 */
 
 /* ============================================================================
    可访问性 / 动效偏好 / 窄屏
    ============================================================================ */
+/* 焦点环用黄色而不是主色绿：`#008000` 与正文同色，键盘用户在消息流里
+   根本分不出"这一圈是焦点"还是"这行字本来就绿"。黄色是这套界面里
+   "注意这里"的颜色（房名 / 名号）。 */
 :focus-visible {
-  outline: 2px solid var(--fg);
+  outline: 2px solid var(--yellow);
   outline-offset: 1px;
 }
 
@@ -1175,19 +1604,45 @@ FLA {}
     /* ★ 原来只关了 transition —— 而 `.blink` 走的是 animation，
        动效敏感的玩家照样会看到一闪一闪。两条一起关才算兑现承诺。 */
     animation: none !important;
+    /* ★ 第三条：`.content-message` 的 `scroll-behavior: smooth`（2026-10-21 对账补的）。
+       它既不是 transition 也不是 animation —— 上面两条**管不到它**，
+       于是开了"减少动效"的玩家仍然会被平滑滚动带着走。补上。 */
+    scroll-behavior: auto !important;
   }
 }
 
+/* 窄屏：**收窄，不删信息**。
+   ★ 上一版是 `.state-bar>.vital { display:none }` —— 420px 以下气血/内力**整组消失**，
+     而那是玩家最需要盯着看的两个数（真机上这一条就是"手机上怎么没有血条"）。
+     现在改成：缩窄轨道 + 省掉「气血」「内力」两个标签字，数值留着。
+     红/蓝本身就能区分两条，标签是给大屏的富余空间用的。 */
 @media (max-width: 480px) {
-  :root {
-    --fs: 14px;
-  }
-
-  .tool-item {
-    width: 2.9em;
-  }
-
-  .state-bar>.vital {
+  /* ★ 2026-10-18：底部多了「属性」一格（35px + 边距 ≈ 37px）。窄屏上这 37px
+     是从**状态条**身上拿的，量出来的后果是内力数值被挤出可视区：
+     320px 下 `mp.right 216 > 状态条 right 158`、360px 下 `216 > 198`。
+     数值是玩家最需要盯着看的东西，不能拿它换一个入口 —— 于是窄屏把这一格
+     **收起**（wushen 的手机界面底部也只有 3 格，属性在其展开栏里）。
+     ★ 收起之后属性并非无处可点：`ui/input.ts#CHIPS` 里有「属性」chip。
+     ★ 只收这一格，其余三格保持 35px 不变（工具键尺寸是 wushen 的原值）。 */
+  .tool-bar>.tool-item[data-act='score'] {
     display: none;
+  }
+
+  /* 状态条本身也收一档缝隙：即便只有 3 格，320px 的机型上 `who + hp + mp`
+     也刚好贴着边（收之前 360px 下 mp 差 18px 出界）。 */
+  .state-bar {
+    gap: 0.25em;
+  }
+
+  .state-bar .track {
+    width: 2.5em;
+  }
+
+  .state-bar .lb {
+    display: none;
+  }
+
+  .state-bar>.who {
+    max-width: 5em;
   }
 }

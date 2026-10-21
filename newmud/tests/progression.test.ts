@@ -29,7 +29,9 @@ import { instantiateWorld } from '../server/engine/world.js';
 import type { World } from '../server/engine/world.js';
 import type { NpcDef, PracticeDone, PracticeRefused, PracticeRefusal, PracticeResult } from '../server/world/defs.js';
 import { asWorldId } from '../shared/ids.js';
+import { FIGHT_TYPE } from '../shared/constants.js';
 import { dispatch } from '../server/engine/command.js';
+import { roomSignatureOf } from '../server/session.js';
 
 // ---------------------------------------------------------------------------
 // 判别联合取支助手：**取不到就抛** —— 等于顺手多一条断言。
@@ -102,13 +104,16 @@ describe('progression · addExp 是唯一的增加入口', () => {
     expect(player.exp).toBe(500);
     expect(player.pot).toBe(300);
     expect(player.money).toBe(20);
-    expect(out.messages.join('\n')).toContain('你获得了500 点经验，300 点潜能，20 文钱。');
+    // ★ "你获得了" 与第一个数字之间**必须有一个空格**（2026-10-20 真机反馈：
+    //   写成了 `你获得了500 点经验…`，中文与数字粘连）。这两条断言因此兼作
+    //   该分隔符的守卫 —— 别只改断言去迁就实现。
+    expect(out.messages.join('\n')).toContain('你获得了 500 点经验，300 点潜能，20 文钱。');
   });
 
   it('只有经验时只播报经验（不出现"0 点潜能"这种噪声）', () => {
     const { player, out } = makePlayer('yz/guangchang');
     player.addExp(7);
-    expect(out.messages.join('\n')).toContain('你获得了7 点经验。');
+    expect(out.messages.join('\n')).toContain('你获得了 7 点经验。');
     expect(out.messages.join('\n')).not.toContain('潜能');
   });
 
@@ -152,6 +157,55 @@ describe('progression · 打怪给经验与潜能', () => {
     expect(dummy.exp).toBe(0);
   });
 
+  it('★★ 奖励排在【战斗结束】**之后**：战斗中只记账，`endFight` 才结算（26 册 §57）', () => {
+    const { player, out } = makePlayer('yz/beidajie1');
+    const dummy = woodDummy();
+    // 真机反馈的顺序错：先「你获得了 1000 点经验…」，后「【战斗结束】」。
+    // 这里把"战斗中"造出来，让致命的 `die()` 落在战斗内 —— 那才是玩家看到的那条路径。
+    player.beginFight(dummy, FIGHT_TYPE.KILL);
+
+    dummy.takeDamage(100_000);
+    dummy.die(player);
+
+    // ① 还在战斗 ⇒ 奖励**只记账**：没进账、也没播报（这正是顺序能对调的原因）
+    expect(player.exp).toBe(0);
+    expect(out.messages.join('\n')).not.toContain('你获得了');
+
+    player.endFight();
+
+    // ② 停战之后才结算
+    expect(player.exp).toBe(1000);
+    expect(player.pot).toBe(500);
+    // ③ 判据落在**时间线**上：`combat:end` 紧挨在奖励那行之前
+    const rewardAt = out.events.findIndex((e) => e.startsWith('你获得了'));
+    expect(rewardAt, '奖励播报没出现').toBeGreaterThan(0);
+    expect(out.events[rewardAt - 1]).toBe('combat:end');
+  });
+
+  it('不在战斗中被打死（未来的绝招 / GM）⇒ 奖励立即结算，不会挂在队列里', () => {
+    const { player } = makePlayer('yz/beidajie1');
+    const dummy = woodDummy();
+    dummy.takeDamage(100_000);
+    dummy.die(player);
+    // fightType 是 NONE ⇒ `queueReward` 当场 flush
+    expect(player.exp).toBe(1000);
+    expect(player.pot).toBe(500);
+  });
+
+  it('★★ NPC 掉血 ⇒ 房间签名变（否则房间区那条血条从开打到打死一动不动）', () => {
+    const { player } = makePlayer('yz/beidajie1');
+    const dummy = woodDummy();
+
+    // 对照组：没人动的时候签名必须**稳**（不能"任何风吹草动都算"）
+    expect(roomSignatureOf(player)).toBe(roomSignatureOf(player));
+
+    const before = roomSignatureOf(player);
+    dummy.takeDamage(5);
+    // 判据是**签名**而不是"血条节点变了"：会话层的 `items` 只由签名驱动
+    // （`#reconcileRooms`），签名不变 ⇒ `afterTick` 每个 tick 都在对账也白对。
+    expect(roomSignatureOf(player)).not.toBe(before);
+  });
+
   it('没有击杀者（自然消失 / GM 清理）不发奖励', () => {
     const { player } = makePlayer('yz/beidajie1');
     const dummy = woodDummy();
@@ -183,12 +237,19 @@ describe('progression · 打怪给经验与潜能', () => {
     expect(world.npcsOf('pub/muren')).toHaveLength(0);
     expect(world.npc(dummy.oid)).toBeUndefined();
 
+    // ★ 间隔**从 def 上读**，不把秒数抄进断言。
+    //   `respawn_ms` 是内容层的调参旋钮（2026-10-19 就从 30 秒调到 5 秒用来快测曲线），
+    //   抄死的话每调一次参这条测试就红一次，而它想钉的根本不是"30 秒"
+    //   —— 是**引擎按 def 排期、且差一毫秒不刷**。读 def 后两件事都还钉着。
+    const respawn = dummy.def.respawn_ms;
+    if (respawn === undefined) throw new Error('测试前置失败：木人桩没配 respawn_ms');
+
     // ★ 差一毫秒不刷 —— 否则"重生间隔"形同虚设。
-    //   死的那一刻时钟是 clock，排期 = clock + 30000（木人桩的 respawn_ms 是 30 秒）。
-    expect(world.scheduler.step(clock + 29_999)).toBe(0);
+    //   死的那一刻时钟是 clock，排期 = clock + respawn。
+    expect(world.scheduler.step(clock + respawn - 1)).toBe(0);
     expect(world.npcsOf('pub/muren')).toHaveLength(0);
 
-    expect(world.scheduler.step(clock + 30_000)).toBe(1);
+    expect(world.scheduler.step(clock + respawn)).toBe(1);
     const reborn = world.npcsOf('pub/muren');
     expect(reborn).toHaveLength(1);
     expect(reborn[0]?.environment?.path).toBe('yz/beidajie1');
@@ -427,14 +488,20 @@ describe('progression · practice / lianxi 指令', () => {
 // ⑥ 面板：经验 / 潜能 / 上限
 // ---------------------------------------------------------------------------
 
-describe('progression · score 面板带成长三行', () => {
-  it('打出经验、潜能与技能等级上限', () => {
+describe('progression · score 面板带成长段', () => {
+  it('快照里有经验、潜能与技能等级上限', () => {
     const { player, out } = makePlayer('yz/guangchang');
     player.exp = 1000;
     player.pot = 500;
     dispatch(world.commands, player, 'score');
-    const printed = out.messages.join('\n');
-    expect(printed).toContain('经验：1000　潜能：500');
-    expect(printed).toContain('技能等级上限：22 级');
+    // ★ §62：走 `showAttr`（面板快照），不再是往消息流打三行文本
+    const view = out.attrViews.at(-1);
+    expect(view).toBeDefined();
+    expect(view?.exp).toBe(1000);
+    expect(view?.pot).toBe(500);
+    expect(view?.skillLimit).toBe(22);
+    // 气血/内力是快照里的真值（面板第二段靠它）
+    expect(view?.maxHp).toBe(player.maxHp);
+    expect(view?.hp).toBe(player.hp);
   });
 });

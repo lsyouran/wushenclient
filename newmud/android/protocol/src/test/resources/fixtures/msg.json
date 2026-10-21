@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "msg",
+  "ch": "tell",
+  "content": "你好",
+  "name": "抓帧者"
+}

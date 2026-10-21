@@ -30,7 +30,12 @@ defineSkill('wd/taijijian', {
 
   // ② 档：装上 sword 槽之后才生效（攻击随等级，命中取 1/5）
   enableProp: (lv) => ({
-    sword: { prop: { gj: Math.trunc(lv / 2), mz: Math.trunc(lv / 5) } },
+    sword: {
+      prop: {
+        attack: Math.trunc(lv / 2),
+        hit: Math.trunc(lv / 5),
+      },
+    },
   }),
 
   learnCondition: {

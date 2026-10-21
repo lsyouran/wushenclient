@@ -14,8 +14,9 @@ import { registerHandler } from '../registry.js';
 import type { CmdItem } from '../../../shared/protocol.js';
 import { pushCommands, pushLine } from '../../ui/stream.js';
 import { renderStatus } from '../../ui/status.js';
-import { renderPfms } from '../../ui/room.js';
+import { applyCooldowns, renderCombatBar, renderPfms } from '../../ui/room.js';
 import { patchVitals, state } from '../../state.js';
+import type { CooldownEntry } from '../../state.js';
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
 const asNumber = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
@@ -47,8 +48,16 @@ registerHandler('sc', (p) => {
 
 registerHandler('combat', (p) => {
   state.fighting = p['start'] === 1;
+  // ★★ 这里原先有一句 `if (state.fighting) stopAbsorb();`（§78 的修法）。
+  //   §80 之后整条吸收机制删掉了 —— 战报不带 `context`，按"安全默认"
+  //   自然落在消息流，不需要开战时**记得**去关某个标志。
+  //   这正是那三次真机反馈的教训：靠"某个时刻记得关掉开关"的修法，
+  //   下一个没想到的时刻就会重新漏。
   pushLine(state.fighting ? '【战斗开始】' : '【战斗结束】', 'fight');
   renderStatus();
+  // ★ 「逃跑」按钮跟着战斗状态出现 / 消失（wushen `escape` 只在战斗中可用）。
+  //   不重画这一行的话，开打后按钮不会冒出来 —— 玩家仍然只能靠背指令。
+  renderCombatBar();
 });
 
 registerHandler('status', (p) => {
@@ -84,8 +93,18 @@ registerHandler('die', (p) => {
   pushCommands(asCmds(p['commands']));
 });
 
+/**
+ * 持续状态（`state` 包，26 册 §75）。
+ *
+ * ★★ `state === ''` 是**状态结束**那一帧（`{state:'',desc:''}`）——
+ *   不要把它渲染成一行「【】」空壳：那不是"发生的事"，是收尾信号。
+ *   wushen 那边停止状态时也是静默的（`stopstate.js` 只回一句"你停下来了"）。
+ */
 registerHandler('state', (p) => {
-  pushLine(`【${asString(p['state'])}】${asString(p['desc'])}`, 'sys');
+  const title = asString(p['state']);
+  if (title === '') return;
+  const desc = asString(p['desc']);
+  pushLine(desc === '' ? `【${title}】` : `【${title}】${desc}`, 'sys');
 });
 
 /** 招式进 `.combat-commands`（wushen 把招式与房间动作分成两栏） */
@@ -101,15 +120,21 @@ function cooldown(kind: string) {
     if (kind === 'clearDistime') {
       state.cooldowns = id === '' ? [] : state.cooldowns.filter((c) => c.id !== id);
       renderStatus(); // ★ R7（2026-10-17 审查）：改了状态就得重绘，否则 `#pFlags` 的"冷却 N"不更新
+      // ★ 冷却撤了 ⇒ 按钮上的灰色遮罩也要当场退干净，不能等下一次重画。
+      applyCooldowns();
       return;
     }
-    const entry: { id: string; rtime?: number; time?: number; count?: number } = { id };
+    const entry: CooldownEntry = { id };
     const rtime = asNumber(p['rtime']);
     const time = asNumber(p['time']);
     const count = asNumber(p['count']);
     if (rtime !== undefined) entry.rtime = rtime;
     if (time !== undefined) entry.time = time;
     if (count !== undefined) entry.count = count;
+    // ★ 把"还剩多久"钉成"到什么时候结束"：服务端只在**开始冷却**时发一帧，
+    //   之后不会再推 ⇒ 要画一条会走的进度条，前端必须自己记一个时间点。
+    const total = time ?? rtime ?? 0;
+    if (total > 0) entry.endsAt = Date.now() + total;
     state.cooldowns = state.cooldowns.filter((c) => c.id !== id);
     state.cooldowns.push(entry);
     // ★ 冷却只落消息流：没有"武学面板"这种东西（服务端没有 skills 指令），
@@ -119,6 +144,9 @@ function cooldown(kind: string) {
     //   ⇒ L2 的"让 `renderStatus()` 消费冷却"实际对冷却这批帧是半失效的
     //   （要等下一个 `sc` / `combat` / `status` 帧顺带刷新）。补上。
     renderStatus();
+    // ★ 把遮罩贴到按钮上并起推进表：此前 CSS 里那条渐变**没有任何代码去推它**，
+    //   于是招式冷却在界面上完全没有视觉反馈。
+    applyCooldowns();
   };
 }
 

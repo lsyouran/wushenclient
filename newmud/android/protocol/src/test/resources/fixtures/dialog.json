@@ -1,0 +1,50 @@
+{
+  "v": 1,
+  "type": "dialog",
+  "dialog": "score",
+  "name": "抓帧者",
+  "gender": 0,
+  "level": 0,
+  "realmName": "初出茅庐",
+  "exp": 0,
+  "pot": 0,
+  "hp": 110,
+  "maxHp": 110,
+  "mp": 100,
+  "maxMp": 100,
+  "attrs": [
+    {
+      "key": "str",
+      "innate": 20,
+      "bonus": 0,
+      "total": 20
+    },
+    {
+      "key": "con",
+      "innate": 20,
+      "bonus": 0,
+      "total": 20
+    },
+    {
+      "key": "dex",
+      "innate": 20,
+      "bonus": 0,
+      "total": 20
+    },
+    {
+      "key": "int",
+      "innate": 20,
+      "bonus": 0,
+      "total": 20
+    }
+  ],
+  "combat": {
+    "attack": 20,
+    "defense": 4,
+    "hit": 10,
+    "evasion": 10,
+    "deflect": 10,
+    "crit": 2
+  },
+  "skillLimit": 10
+}

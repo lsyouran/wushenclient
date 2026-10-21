@@ -1,0 +1,16 @@
+# 构建产物（Gradle 自己会重建；进版本库只会让 diff 变大）
+.gradle/
+build/
+*/build/
+
+# 本机 SDK 路径（每台机器不一样；CI 由 setup-android 提供）
+local.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# 签名材料：**永远不要**提交 keystore / 密码
+*.jks
+*.keystore

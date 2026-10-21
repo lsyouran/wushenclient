@@ -286,6 +286,23 @@ export interface WarnPacket extends PacketBase {
   readonly content: string;
   readonly time?: number;
   readonly cmds: readonly CmdItem[];
+  /**
+   * **这段文本属于哪块面板**（`item` 帧的 `id`）；缺省 = 进消息流。
+   *
+   * ★★ 为什么必须有这个字段（2026-10-21 §80）：在这之前 `warn` 只有一根
+   *   `content` 字符串，前端根本不知道"这句话属于谁"，于是拿三个**间接信号**
+   *   去猜落点 —— 命令从哪来（`issuing`）、是否在战斗中（`state.fighting`）、
+   *   面板是否开着并吸收（`absorb`）。
+   *   启发式必然有漏，于是同一个病在 §57 / §74 / §78 三次真机反馈里各发作一次：
+   *   点店小二后操作层层叠进日志区、请教三次面板堆成三屏、
+   *   和木人切磋战报却写进「木人桩」的操作框。
+   *   ⇒ 把归属**声明**出来，前端只做"有就按名字投递、没有就进消息流"这一件事。
+   *
+   * ★ 为什么是**可选**而不是必填：绝大多数文本（房间播报、战斗战报、指令回显）
+   *   本来就不属于任何面板。可选字段让"安全默认"成立 ——
+   *   **不声明就不进面板**，写漏了会掉进消息流（可接受），不会掉进某块面板（不可接受）。
+   */
+  readonly context?: string;
 }
 
 export interface SettingPacket extends PacketBase {
@@ -395,6 +412,148 @@ export interface DialogPacket extends PacketBase, DialogControl {
   readonly type: 'dialog';
   readonly dialog: DialogName;
   readonly [k: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// 4.6b `dialog:score` 的载荷（属性面板）
+// ---------------------------------------------------------------------------
+
+/**
+ * **属性面板**的数据快照（`score` 指令 → `dialog:score` 帧）。
+ *
+ * 对照 wushen `world/cmd/dialog/score.js`：它把一整个结构化对象发下去，
+ * 面板模板里每个 `data-prop="str"` 逐格填值。本项目走同一条路 ——
+ * 服务端不拼显示串，前端不必从文本里猜哪个数是臂力。
+ *
+ * ★ 形状住在 `shared/` 而不是 `server/world/defs.ts`：它**是线上载荷**，
+ *   前端 `src/ui/attr.ts` 要照着渲染，而 `tsconfig.web.json` 只 include
+ *   `shared/**` 与 `src/**`（前端 import 不到 `server/`）。
+ *   内容层的 `defs.ts` 只是把名字转出去（`export type { AttrView }`）。
+ *
+ * ★★ 只放**真的有值**的字段（26 册 L8 的病：声明未实现）。与 wushen 的差别
+ *   逐条登记在这里，免得下一批当成"漏了"：
+ *     - **不发** `age` / `jingli` / `limit_mp` / `gongji`：引擎里没有这些概念
+ *       （年龄未落地、精力与内力上限属后续批次、功绩要门派）。
+ *     - **不发** `family` / `master`：门派 / 师徒系统未落地。填「无门无派」
+ *       是假数据 —— 玩家会以为功能坏了，那比少一行更伤。
+ *     - **不发** `per`（容貌）：`INNATE_KEYS` 里没有它，`computeDerived` 也没读。
+ *     - **不发** `gjsd`：`DerivedCombat.attackSpeed` 是**毫秒间隔**而非 wushen 面板上
+ *       那个"数值越大越快"的分值，直接摆上去会被读反（越小越快 ≠ 越大越好）。
+ *     - **多发** `skillLimit`：本项目独有（26 册 §56 的成长闭环），
+ *       wushen 面板里没有这一格，但没有它玩家不知道经验有什么用。
+ */
+export interface AttrView {
+  readonly name: string;
+  /** 性别三档（`Gender`：1 男 / 2 女 / 0 无性） */
+  readonly gender: number;
+  /** 境界（`Character.realm`，0–6）—— 由内功 / 轻功 / 招架三槽等级派生的，不是存下来的字段 */
+  readonly level: number;
+  /** 境界名（`REALM_NAMES[level]`，如「登堂入室」）—— 面板直接显示这个词，不再自己查表 */
+  readonly realmName: string;
+  readonly exp: number;
+  readonly pot: number;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly mp: number;
+  readonly maxMp: number;
+  /** 四维三档（`ATTR_KEYS` 顺序，口径见 `formula.ts#computeAttrBreakdowns`） */
+  readonly attrs: readonly AttrValueView[];
+  /** 战斗派生值（`formula.ts#computeDerived` 的快照，与真实出招读同一份） */
+  readonly combat: AttrCombatView;
+  /** 技能等级上限（`SkillActor.skillLimit()`；NPC 为 `Infinity`） */
+  readonly skillLimit: number;
+}
+
+/**
+ * 单维的三档读数（`AttrBreakdown` 的**协议侧**形状）。
+ * ★ `key` 是 `string` 而不是引擎的 `AttrKey`：协议边界不认引擎内部类型
+ *   （`shared/` 不依赖 `server/engine/`）。两者靠 `Character.attrView()`
+ *   的返回类型对齐 —— 引擎那边多一维、这边少一维，`tsc` 当场报错。
+ */
+export interface AttrValueView {
+  readonly key: string;
+  readonly innate: number;
+  readonly bonus: number;
+  readonly total: number;
+}
+
+/** `AttrView.combat` 的那几格（键名与 `DerivedCombat` 一致，值的含义也一致） */
+export interface AttrCombatView {
+  readonly attack: number;
+  readonly defense: number;
+  readonly hit: number;
+  readonly evasion: number;
+  readonly deflect: number;
+  readonly crit: number;
+}
+
+// ---------------------------------------------------------------------------
+// 4.6c `dialog:skills` 的载荷（技能面板）
+// ---------------------------------------------------------------------------
+
+/**
+ * **技能面板**的数据快照（`skills` / `cha` 指令 → `dialog:skills` 帧）。
+ *
+ * 对照 wushen `world/cmd/dialog/cha.js`：它把 `{items, title, limit, pot, sk_group}`
+ * 拼成 JSON 发下去，前端 `dialog/skills.js` 逐项渲染。
+ * 本项目照这条分工：**服务端给数据，面板不拼公式**。
+ *
+ * ★ 与 `AttrView` 同一取向（形状住 `shared/`）：前端 `src/ui/skills.ts` 要照着渲染，
+ *   而 `tsconfig.web.json` 只 include `shared/**` 与 `src/**`。
+ *
+ * ★★ `progress` **必须服务端算**：`levelExp(lv, grade)` 在 `server/engine/skill.ts`，
+ *   前端自己算就是第二份经验公式（26 册铁律"单源真相"）。wushen 也是在服务端算
+ *   （`os/skill/skill.js:305` 的 `exp * 100 / level_exp(...)`）。
+ *
+ * ★ 不发的字段（不是漏了）：
+ *   - **`sk_group`**：wushen 的"技能分组显示（1/2/3 组）"是个纯前端的收纳开关，
+ *     我们还没有分组概念；发一个恒 0 的字段会让前端以为能用。
+ *   - **`title` 里的"共学会 N 项"**：句子由服务端拼（`title`），前端不数 `items.length`
+ *     —— 数出来的是"本页有几条"，不是"学会了几个"（知识类可能不摆）。
+ */
+export interface SkillsView {
+  /** 面板标题的第二段（`你共学会 3 项技能` / `没有学会任何技能`） */
+  readonly title: string;
+  /** 技能等级上限（`skillLimit()`，与 `AttrView.skillLimit` 同源同一个数） */
+  readonly limit: number;
+  /** 潜能（面板底部显示，省一次 `score`） */
+  readonly pot: number;
+  readonly items: readonly SkillEntryView[];
+}
+
+/**
+ * 技能面板里的一行。
+ *
+ * ★ `kind` 决定页签（`'base'` = 基础页，其余 = 特殊页），来自**模板** `type`
+ *   —— 不是 `canEnables` 是否为空（wushen 的判据，见 27 册 §14.3 裁定 1）。
+ */
+export interface SkillEntryView {
+  /** 技能 id（`wd/taijijian`）—— 动作按钮拼命令时用的就是它 */
+  readonly id: string;
+  readonly name: string;
+  /** `'base' | 'skill' | 'knowledge'` */
+  readonly kind: string;
+  readonly grade: number;
+  readonly level: number;
+  /** 到下一级的百分比（0–100，已截断） */
+  readonly progress: number;
+  /** 被装配到的槽；null = 只学会、未装配 */
+  readonly enabled: string | null;
+  /** 可装配到的槽（`can_enables`）；空数组 = 基本功 / 知识类 */
+  readonly canEnables: readonly string[];
+  /**
+   * **基本功**占据的槽（`SkillTemplate.slot`）；非基本功为 `null`。
+   *
+   * ★ 面板为什么要它（26 册 §64.10）：wushen 的装配按钮长这样 ——
+   *   `装备<基本技能名>`，比如「装备基本剑法」。要拼出那个名字，前端得知道
+   *   "剑法这门武功的 `sword` 槽，对应我技能簿里的哪一项"。
+   *   ★ 不在前端维护"槽 → 中文"表：那会是**第二份**中文化（服务端的技能名
+   *     才是唯一那份），而且槽名是拼音 id（`sword`/`blade`），直出给玩家看
+   *     就是英文混中文。读基本功自己的名字即可，一个字都不用新造。
+   */
+  readonly slot: string | null;
+  /** 一句话说明（`learnCondition.desc`）；无则缺省 */
+  readonly note?: string;
 }
 
 // ---- 4.7 联合类型 ----
@@ -534,10 +693,12 @@ export const SERVER_PACKET_UNWIRED = [
   'cross',
   // ── 等级（等经验/等级流程）──
   'levelup',
-  // ── 战斗（`combat` / `die` 已接线：`session.ts` 的 `#outputFor`；
+  // ── 战斗（`combat` / `die` / `state` 已接线：`session.ts` 的 `#outputFor`；
   //      其余属状态 / 绝招批次，`on_use` 之外的消费者还没落地）──
+  // ★ `state` 于 2026-10-20 从本台账**划掉**（26 册 §75）：消费者是
+  //   `Character.startState` / `stopState` → `session.#outputFor` 的 `state` 出口，
+  //   由 `train/study`（研读）与 `train/stop`（中断）驱动。
   'status',
-  'state',
   'perform',
   'dispfm',
   'disobj',
@@ -553,10 +714,12 @@ export const SERVER_PACKET_UNWIRED = [
   'map',
   'updatemap',
   // ── 面板 / 设置 / 表情 / 支付（支付见 25 册，商业化前不做）──
+  // ★ dialog 已接线（26 册 §62）：server/session.ts 的 showAttr 出口发属性快照，
+  //   消费者是 world/command/info/score.ts。注意这行只能用**反引号或裸词**，
+  //   别写单引号串 —— G2 会把台账区块里任何引号字面量当成条目（踩过一次）。
   'setting',
   'pay',
   'emote',
-  'dialog',
 ] as const satisfies readonly ServerPacketType[];
 
 export const CLIENT_PACKET_TYPES = ['command', 'login', 'ping'] as const;
@@ -820,6 +983,8 @@ export const SERVER_PACKET_SCHEMAS: Record<ServerPacketType, z.ZodTypeAny> = {
     content: z.string(),
     time: z.number().optional(),
     cmds: z.array(CmdItemSchema),
+    // ★ 缺省 = 进消息流（见 `WarnPacket.context` 的说明）
+    context: z.string().optional(),
   }),
   setting: EnvelopeSchema.extend({ type: z.literal('setting'), items: z.record(z.unknown()) }),
   pay: EnvelopeSchema.extend({

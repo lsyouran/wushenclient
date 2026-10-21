@@ -154,7 +154,9 @@ describe('★ 闭集词汇表也必须与实现耦合（docs/27 D1）', () => {
       can_enables: ['base/force' as unknown as EnableSlot],
       learnCondition: {
         minSlot: { base: 1 },
-        minAttr: { attack: 1 },
+        // ★ §66 起数据键是英文，`attack` 已经是**合法**键 ⇒ 这里改用旧拼音 `gj`
+        //   当"肯定不在词表里"的样本（它也是最容易被从 wushen 抄回来的那一个）。
+        minAttr: { gj: 1 },
       } as unknown as NonNullable<SkillDef['learnCondition']>,
     });
   }
@@ -191,7 +193,7 @@ describe('★ 闭集词汇表也必须与实现耦合（docs/27 D1）', () => {
       type: SKILL_TYPES.BASE,
       slot: 'sword',
       can_enables: ['sword'],
-      learnCondition: { minSlot: { sword: 1 }, minAttr: { gj: 1 } },
+      learnCondition: { minSlot: { sword: 1 }, minAttr: { attack: 1 } },
     });
     expect(errorsOf()).toEqual([]);
   });
@@ -238,15 +240,18 @@ describe('L3 / L4 引用校验的两处收敛（★ docs/26 L3、L4 回归）', 
     expect(errs[0]?.message).toContain('base/sword');
   });
 
-  it('★ L3 补：`learnCondition.minAttr` 只认合法 PropKey（"attack" 这类英文直译必须被拒）', () => {
+  it('★ L3 补：`learnCondition.minAttr` 只认合法 PropKey（旧拼音键 `gj` 必须被拒）', () => {
+    // ★ 2026-10-18 §66 反转了这条：改英文之前 `attack` 是"看着对的错键"，
+    //   现在是 `gj` —— 从 wushen 抄内容时**最容易**写回来的那一个。
+    //   ⇒ 断言方向换了，但守的东西没变：minAttr 的键必须 ∈ CORE∪MOD。
     defineSkill('wd/x', {
       name: 'X',
-      learnCondition: { minAttr: { attack: 10 } as unknown as Partial<Record<PropKey, number>> },
+      learnCondition: { minAttr: { gj: 10 } as unknown as Partial<Record<PropKey, number>> },
     });
     const errs = errorsOf();
     expect(errs).toHaveLength(1);
     expect(errs[0]?.where).toContain('minAttr');
-    expect(errs[0]?.message).toContain('attack');
+    expect(errs[0]?.message).toContain('gj');
   });
 
   it('★ L4：变体与基对象共享的同一条坏引用，只报**一次**（不按变体数翻倍）', () => {

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "cmds",
+  "items": [
+    {
+      "cmd": "give pub/xiaoer 1000 money",
+      "name": "人字号客房"
+    }
+  ]
+}

@@ -3,21 +3,26 @@
  * G3 · 常量对账闸门（静态部分）
  * ============================================================================
  * 依据 docs/24 §3。守住「属性键」这一层：
- *   G3.A  内容层 `prop: { ... }` 的字面量键 ∈ CORE ∪ MOD
+ *   G3.A  内容层 `prop: { ... }` 的顶层键：**必须是字面量键**、且 ∈ CORE ∪ MOD；
+ *         **旧 wushen 拼音键**（`gj`/`fy`/`ds`…）当场报「改用哪个英文键」
  *   G3.B  内容层 `extProp: [...]` 内**不得出现字符串字面量**
  *         （扩展键必须来自 registerExtProp() 的返回值，否则等于绕过登记）
  *   G3.C  引擎层属性读写调用的键字面量 ∈ CORE ∪ MOD
  *   G3.D  每个 registerExtProp() 调用：命名法合法、不与 CORE **或 MOD** 重名、
  *         owner 前缀与所在 `world/<kind>/` 目录一致、无跨 owner 抢键
  *   G3.E  禁止绕过访问器直接操作 `.props` / `.extProps` 的 Map 方法
- *   G3.F  `shared/constants.ts` 的 **PROP 别名表**：值 ∈ CORE ∪ MOD、**互不重复**、非空
- *         （★ 2026-10-14 新增：`server/engine/formula.ts` 改用 `PROP.attack` 之后，
- *          G3.C 在 `server/` 里再也扫不到键**字面量** ⇒ 覆盖会静默归零。
- *          这不是"没有违规"，是**规则失去了输入**（FG-7 的死规则形态）。
- *          于是把别名表本身纳入对账：它是别名层唯一的键来源。）
- *   G3.G  命名空间隔离：**数值侧的名字**（`PROP` 别名键 ∪ `DerivedCombat` 字段名）
+ *   G3.G  命名空间隔离：**数值侧的名字**（`PROPERTIES` 核心键 ∪ `DerivedCombat` 字段名）
  *         与**技能槽词表**（`ENABLE_SLOTS`）必须不相交
- *         （★ 2026-10-14 新增：见下方 §4.5 的长说明）
+ *         （★ 2026-10-14 新增；2026-10-18 §66 把判定对象从"别名键"换成"核心键"）
+ *
+ * ★★ **2026-10-18 §66 的结构性变化**（读这段之前先看，否则会以为闸门退化了）：
+ *   - 数据键全改英文（`gj`→`attack`），`PROP` 别名层**已删除**；
+ *   - 于是内容层**不再**写 `[PROP.attack]` 计算键，而是直接写 `attack: 20`；
+ *   - **G3.F 已撤销**（它守的是别名表的值，别名表没了，对账对象消失）；
+ *   - **G3.C 恢复为唯一守卫**（`formula.ts` 又写裸字面量了，它的输入回来了 ——
+ *     这正是 G3.F 当初存在的理由，理由消失就该删规则，而不是留一条永远通过的规则）；
+ *   - G3.A 反向新增"**不许写计算键**"：`prop: { [X]: 1 }` 静态解析不出真实键名，
+ *     放行它等于给对账开一个后门（24 册 FG-7 死规则的同族）。
  *
  * ★ 无输入时 **SKIP(2) 而不是 PASS(0)**：
  *   内容层还没用 `prop`/`extProp` 时，本闸门扫到 0 个入口点。
@@ -68,6 +73,23 @@ if (CORE.length === 0) {
   process.exit(EXIT_FAIL);
 }
 
+// ── 1.5 解析「旧拼音 → 新英文」历史对照表（只用于 G3.A 的报错文案）───────────
+//
+//  ★ 为什么闸门要读它（2026-10-18 §66）：数据键改英文之后**唯一没有变**的
+//    事实是"wushen 那边还叫 `gj`" —— 于是从 wushen 抄内容时写回 `gj` 是本
+//    次改造**最主要的使用风险**（29 册 §29.11.4 第 2 条：wushen 20+ 册文档里
+//    全是拼音键，与代码永久错位）。报错若只说"不在允许集内"，抄的人还得去
+//    翻文档；能直接说"请改用 attack"才真正把这条风险压下去。
+//  ★ 表本身住在 `shared/constants.ts#LEGACY_PINYIN_KEYS`（单一来源）：
+//    它的类型是 `Record<string, CoreProp>` ⇒ 再改一次名会**编译失败**，逼着同步。
+//  ★ 解析失败**不判红**：G3.A 的判据不依赖它（只用它挑更好的文案）。
+//    若把它做成"解析不出就判红"，改一次注释格式就会假红 —— 收益不值这个风险。
+const legacyBlock = /export const LEGACY_PINYIN_KEYS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(constText);
+const LEGACY_TO_KEY = new Map();
+for (const m of legacyBlock?.[1]?.matchAll(/^ {2}([a-z][a-z0-9_]*):\s*'([^']+)'/gm) ?? []) {
+  LEGACY_TO_KEY.set(m[1], m[2]);
+}
+
 /** MOD 闭集：与 `ModProp` 类型的 5 个派生族一一对应 */
 const MOD = new Set();
 for (const c of CORE) {
@@ -114,29 +136,68 @@ function findBalanced(text, openIdx) {
   return null; // 未闭合
 }
 
-/** 取对象字面量体内的**顶层**键（跳过嵌套对象/数组与字符串内容、跳过展开项） */
-function topLevelKeys(body) {
-  const keys = [];
+/**
+ * 取 `prop: { ... }` 体内的**顶层键**，并区分书写形态：
+ *
+ *     { attack: 1 }           → { via: 'literal', key: 'attack' }
+ *     { 'max_hp': 1 }         → { via: 'literal', key: 'max_hp' }
+ *     { [PROP.attack]: 1 }    → { via: 'computed', expr: 'PROP.attack' }
+ *
+ * ★ 计算键**照样要解析出来**（而不是像最早的实现对 `[...]` 走"括号 → 深度 +1
+ *   → 整段跳过"）。理由两次都一样：
+ *   - 2026-10-18 上午：内容层改用 `[PROP.xxx]` 之后，旧实现返回**空数组**，
+ *     块数照旧 8、日志照旧 ✅，但一个键都没验（24 册 FG-7 死规则形态）；
+ *   - 2026-10-18 §66：数据键英文化 + 删别名层之后，计算键成了**违规写法**
+ *     （静态解析不出真实键名）⇒ 必须能被识别出来判红，而不是默默跳过。
+ *   ⇒ 一条判据：**看得见的东西才验得动**。解析不出来就别放行。
+ */
+function topLevelPropEntries(body) {
+  const out = [];
   let depth = 0;
   let quote = null;
   let expectKey = true;
-  let pending = null;
+  let literal = null;
+  let computedExpr = null;
+
   for (let i = 0; i < body.length; i += 1) {
     const c = body[i];
+
     if (quote !== null) {
       if (c === '\\') {
         i += 1;
         continue;
       }
       if (c === quote) quote = null;
-      else if (expectKey && depth === 0 && pending !== null) pending += c;
+      else if (expectKey && literal !== null) literal += c;
       continue;
     }
+
     if (c === '"' || c === "'" || c === '`') {
       quote = c;
-      if (expectKey && depth === 0) pending = '';
+      if (expectKey && depth === 0) literal = '';
       continue;
     }
+
+    if (depth === 0 && expectKey && c === '[') {
+      // 计算键：整段 `[...]` 取出来（内部可能是 `PROP.attack` 或任意表达式）
+      let d = 0;
+      let end = -1;
+      for (let j = i; j < body.length; j += 1) {
+        if (body[j] === '[') d += 1;
+        else if (body[j] === ']') {
+          d -= 1;
+          if (d === 0) {
+            end = j;
+            break;
+          }
+        }
+      }
+      if (end < 0) break;
+      computedExpr = body.slice(i + 1, end).trim();
+      i = end;
+      continue;
+    }
+
     if (c === '{' || c === '[' || c === '(') {
       depth += 1;
       continue;
@@ -146,22 +207,26 @@ function topLevelKeys(body) {
       continue;
     }
     if (depth !== 0) continue;
+
     if (c === ',') {
       expectKey = true;
-      pending = null;
+      literal = null;
+      computedExpr = null;
       continue;
     }
-    if (c === ':' && expectKey && pending !== null) {
-      keys.push(pending);
+
+    if (c === ':' && expectKey) {
+      if (computedExpr !== null) out.push({ via: 'computed', expr: computedExpr });
+      else if (literal !== null) out.push({ via: 'literal', key: literal });
       expectKey = false;
-      pending = null;
+      literal = null;
+      computedExpr = null;
       continue;
     }
-    if (expectKey && /[A-Za-z0-9_$]/.test(c)) {
-      pending = (pending ?? '') + c;
-    }
+
+    if (expectKey && /[A-Za-z0-9_$]/.test(c)) literal = (literal ?? '') + c;
   }
-  return keys;
+  return out;
 }
 
 // ── 3. 扫描 ─────────────────────────────────────────────────────────────────
@@ -170,11 +235,12 @@ const violations = [];
 const push = (rule, where, message) => violations.push({ rule, where, message });
 
 const counts = {
+  内容prop块: 0,
   内容prop字面量: 0,
+  内容prop计算键: 0,
   内容extProp块: 0,
   引擎属性调用: 0,
   ext登记: 0,
-  别名键: 0,
   技能槽名: 0,
   派生字段: 0,
 };
@@ -183,7 +249,7 @@ function scanWorldFile(file) {
   const relPosix = rel(file);
   const body = readCode(file).code.join('\n');
 
-  // G3.A · `prop: { ... }` 的字面量键
+  // G3.A · `prop: { ... }` 的顶层键（**只认字面量**）
   for (const m of body.matchAll(/\bprop\s*:\s*\{/g)) {
     const openIdx = m.index + m[0].length - 1;
     const slice = findBalanced(body, openIdx);
@@ -191,13 +257,49 @@ function scanWorldFile(file) {
       push('G3.A', relPosix, `prop 对象字面量未闭合（无法静态对账）`);
       continue;
     }
-    counts.内容prop字面量 += 1;
-    for (const key of topLevelKeys(slice.slice(1, -1))) {
-      if (!ALLOWED.has(key)) {
+    counts.内容prop块 += 1;
+    const items = topLevelPropEntries(slice.slice(1, -1));
+    // ★ 一个 `prop` 块至少要能解析出 1 个键。0 个 = 写法不被本规则识别
+    //   （或真的写了空对象）—— 不能当"空块"放过去，那又回到死规则。
+    if (items.length === 0) {
+      push('G3.A', relPosix, `prop 块里没有解析出任何键（新写法没被识别，或真的写了空对象）`);
+      continue;
+    }
+    for (const item of items) {
+      if (item.via === 'computed') {
+        counts.内容prop计算键 += 1;
+        // ★ 计算键在静态闸门眼里是**不透明的**：`{ [X]: 1 }` 到底写了哪个键，
+        //   要真的算一遍才知道，而闸门不执行代码。2026-10-18 §66 删掉别名层之后
+        //   它也确实没有必要存在了 —— 键名本身就是英文可读名，直接写字面量即可。
+        //   ⇒ 判红，而不是"跳过"（跳过 = FG-7，上午刚被这条坑过）。
         push(
           'G3.A',
           relPosix,
-          `prop 里出现非核心属性键 ${JSON.stringify(key)}（不在 CORE∪MOD 内；` +
+          `prop 里用了计算键 [${item.expr}]：静态闸门解析不出真实键名 ⇒ 请直接写字面量键` +
+            `（例如 \`attack: 20\`）。§66 起键名已是英文可读名，不再需要 [PROP.x] 间接层。`,
+        );
+        continue;
+      }
+
+      counts.内容prop字面量 += 1;
+      // ① 旧 wushen 拼音键：单列一条，报错直接给出新名字（本次改造的主要风险点）
+      const modern = LEGACY_TO_KEY.get(item.key);
+      if (modern !== undefined) {
+        push(
+          'G3.A',
+          relPosix,
+          `prop 里写了 wushen 旧拼音键 ${JSON.stringify(item.key)}：请改用 ` +
+            `${JSON.stringify(modern)}（数据键 §66 起全英文；词干表见 docs/29 §29.11.2，` +
+            `全量对照见 docs/32 标识字典）`,
+        );
+        continue;
+      }
+      // ② 非核心键
+      if (!ALLOWED.has(item.key)) {
+        push(
+          'G3.A',
+          relPosix,
+          `prop 里出现非核心属性键 ${JSON.stringify(item.key)}（不在 CORE∪MOD 内；` +
             `内容层自造键请改用 extProp + registerExtProp()）`,
         );
       }
@@ -322,51 +424,19 @@ if (isDir(serverDir)) {
   }
 }
 
-// ── 4. G3.F · 别名表 `PROP` 的值对账 ────────────────────────────────────────
+// ── 4. G3.F（**已撤销**，2026-10-18 §66）─────────────────────────────────────
 //
-//  ★ 见文件头 G3.F 的说明：别名层一旦成为 `formula.ts` 唯一的键来源，
-//    G3.C 的字面量计数就归零 —— 必须由本规则接住"键到底对不对"这件事。
-//  判定范围就是这个文件本身（`shared/constants.ts`），不是扫描。
-const aliasBlock = /export const PROP\s*=\s*\{([\s\S]*?)\n\}\s*as const\s+satisfies\s+Record<string,\s*PropKey>;/.exec(
-  constText,
-);
-const aliasEntries = aliasBlock?.[1]
-  ? [...aliasBlock[1].matchAll(/^ {2}([A-Za-z][A-Za-z0-9]*):\s*'([^']+)'/gm)].map((m) => [m[1], m[2]])
-  : null;
-
-if (aliasEntries === null) {
-  // 块找不到 = 别名表被改形或闸门正则失效 —— 必须报红，不许静默放行
-  push('G3.F', 'shared/constants.ts', '解析不出 `PROP` 别名块（块被改形，或本规则的正则失效）');
-} else if (aliasEntries.length === 0) {
-  push(
-    'G3.F',
-    'shared/constants.ts',
-    '`PROP` 别名块是空的 —— 别名层现在承担"引擎用哪些键"的全部信息，空表等于没对账',
-  );
-} else {
-  counts.别名键 += aliasEntries.length;
-  const seenKey = new Map();
-  for (const [alias, key] of aliasEntries) {
-    if (!ALLOWED.has(key)) {
-      push(
-        'G3.F',
-        'shared/constants.ts',
-        `PROP.${String(alias)} 指向了非核心属性键 ${JSON.stringify(key)}（不在 CORE∪MOD 内 —— 拼错？）`,
-      );
-    }
-    const prev = seenKey.get(key);
-    if (prev !== undefined) {
-      push(
-        'G3.F',
-        'shared/constants.ts',
-        `PROP.${String(prev)} 与 PROP.${String(alias)} 指向同一个键 ${JSON.stringify(key)}` +
-          `（别名应互不重复 —— 否则读代码的人会以为它们不同）`,
-      );
-    } else {
-      seenKey.set(key, alias);
-    }
-  }
-}
+//  ★ 保留这段注释是为了让后来人知道"这条规则曾经存在、为什么现在不在"。
+//    G3.F 守的是 `PROP` 别名表的值（∈ CORE∪MOD、互不重复、非空）。它当初
+//    存在的理由很具体：`formula.ts` 改写成 `getProp(props, PROP.attack)` 之后，
+//    源码里再没有键**字面量**，G3.C 的计数归零 —— 那是 FG-7 的死规则形态，
+//    于是把"引擎用的是哪些键"这件事挪到别名表上继续对账。
+//
+//  ★ §66 把数据键改成英文、别名层删掉、`formula.ts` 又写裸字面量 ⇒
+//    **理由消失了**。判据是铁律 4 的镜像：**一条永远通过的规则比没有更糟**
+//    （它会让人以为这里有守卫）。⇒ 删规则，让 G3.C 重新成为唯一守卫。
+//    ★ 删掉的东西：本段判定、`counts.别名键`、COVERAGE 里的 `G3.F` 行、
+//      2 条 G3.F 变异样本、`tests/prop-alias.test.ts`。
 
 // ── 4.5 G3.G · 命名空间隔离：数值侧的名字 ⊥ 技能槽词表 ───────────────────────
 //
@@ -379,7 +449,9 @@ if (aliasEntries === null) {
 //    也是 `ENABLE_SLOTS` 里的槽名 ⇒ 读代码 / 复刻 wushen 时 grep 分不清
 //    命中的到底是"躲闪值"还是"轻功技能"。故数值侧取 `evasion` / `deflect`。
 //
-//  判定：`PROP` 别名键 ∪ `DerivedCombat` 字段名，与 `ENABLE_SLOTS` **不相交**。
+//  判定：`PROPERTIES` **核心键** ∪ `DerivedCombat` 字段名，与 `ENABLE_SLOTS` **不相交**。
+//  ★ §66 之前判的是"别名键"；别名层删掉后改判**核心键** —— 覆盖面反而更广
+//    （76 个键全查，而不是当初那 30 个别名）。
 //  ★ 两侧任一解析失败或为空 ⇒ 判红（FG-7：规则失去输入不是"通过"）。
 //    这里的形态与 G3.F 同类 —— 正则解析 + "解析不出来就报红"，不给静默放行留口子。
 const slotsBlock = /export const ENABLE_SLOTS\s*=\s*\[([\s\S]*?)\]\s*as const;/.exec(constText);
@@ -403,14 +475,14 @@ if (slots === null || slots.length === 0) {
   counts.技能槽名 += slots.length;
   counts.派生字段 += derivedFields.length;
   const slotSet = new Set(slots);
-  // 别名侧：aliasEntries 为 null 时 G3.F 已判红（整体仍是不通过），这里不重复报
-  for (const [alias] of aliasEntries ?? []) {
-    if (slotSet.has(alias)) {
+  // 核心键侧（§66 之前判的是别名键；别名层删掉后直接判核心键，覆盖面更广）
+  for (const key of CORE) {
+    if (slotSet.has(key)) {
       push(
         'G3.G',
         'shared/constants.ts',
-        `PROP 别名键 ${JSON.stringify(alias)} 与技能槽 / 技能 id 重名 —— ` +
-          `数值侧必须换个词（对照见 docs/29 §29.10）`,
+        `核心属性键 ${JSON.stringify(key)} 与技能槽 / 技能 id 重名 —— ` +
+          `数值侧必须换个词（对照见 docs/29 §29.10 与 docs/32 标识字典）`,
       );
     }
   }
@@ -429,22 +501,25 @@ if (slots === null || slots.length === 0) {
 // ── 5. 汇总 ─────────────────────────────────────────────────────────────────
 
 const entries =
+  counts.内容prop块 +
   counts.内容prop字面量 +
+  counts.内容prop计算键 +
   counts.内容extProp块 +
   counts.引擎属性调用 +
   counts.ext登记 +
-  counts.别名键 +
   counts.技能槽名 +
   counts.派生字段;
 
 header('G3', '常量对账', {
   'CORE 键（解析所得）': CORE.length,
   'MOD 闭集': MOD.size,
-  'prop 字面量块': counts.内容prop字面量,
+  'prop 块数': counts.内容prop块,
+  'prop 字面量键': counts.内容prop字面量,
+  'prop 计算键（应恒为 0）': counts.内容prop计算键,
   'extProp 块': counts.内容extProp块,
   '引擎属性调用': counts.引擎属性调用,
   'registerExtProp 调用': counts.ext登记,
-  'PROP 别名键': counts.别名键,
+  '旧拼音对照表条目': LEGACY_TO_KEY.size,
   '技能槽名': counts.技能槽名,
   '派生字段': counts.派生字段,
 });
@@ -466,18 +541,29 @@ if (entries === 0) {
 
 // ── DEAD-RULE GUARD（24 册 FG-7：0 覆盖 = 死规则，必须判失败）───────────────
 // ★ 逐子规则列出"输入数"与"是否必须有输入"（2026-10-15 补，26 册 §36）。
-//   为什么不是"每条都必须 > 0"：G3.B / G3.C / G3.D 守的是**尚未启用的能力** ——
-//   内容层还没写 `extProp`、还没 `registerExtProp`，而引擎已改用 `PROP` 别名
-//   （"引擎用了哪些键"这件事由 G3.F 接住，见文件头 G3.F 说明）。它们的 0 是
+//   为什么不是"每条都必须 > 0"：G3.B / G3.D 守的是**尚未启用的能力** ——
+//   内容层还没写 `extProp`、还没 `registerExtProp`。它们的 0 是
 //   **当前事实**、不是缺陷；强制 > 0 会当场假红（假红比漏报更伤，见 G15 头）。
 //   ★ 但**必须显式声明**：某条能力启用后，把它这一列的 `false` 改成 `true` ——
 //     这份表就是那条"改了要动这里"的锚。
 const COVERAGE = [
-  ['G3.A 内容 `prop` 字面量', counts.内容prop字面量, true],
+  ['G3.A 内容 `prop` 块', counts.内容prop块, true],
+  // ★★ 2026-10-18 §66：这一项从 `false` 改回 `true`。理由是"输入回来了"——
+  //   别名层删掉之后内容层必须写字面量键，于是字面量计数**必然** > 0。
+  //   ★ 这正是 §66 撤掉 G3.F 的前提：G3.C/G3.A 的输入没有消失，撤规则不会留白。
+  ['G3.A 内容 `prop` 字面量键', counts.内容prop字面量, true],
+  // 计算键**不设 required**：它是"一律判红"的形态，任何一条都会直接进 violations，
+  // 于是"有输入"的那一轮必然是红轮 —— 拿它当覆盖判据只会制造假红。
+  ['G3.A 内容 `prop` 计算键（应恒 0）', counts.内容prop计算键, false],
   ['G3.B 内容 `extProp` 块', counts.内容extProp块, false], // 内容层尚未使用 extProp
-  ['G3.C 引擎属性调用', counts.引擎属性调用, false], // 引擎已改用 PROP 别名（→ G3.F 接住）
+  // ★★ 2026-10-18 §66：从 `false` 改回 `true`。`formula.ts` 又写裸字面量了
+  //   （`getProp(props, 'attack')`），这条规则的输入恢复 ⇒ 它重新成为唯一守卫。
+  ['G3.C 引擎属性调用', counts.引擎属性调用, true],
+  // ★ 这一项必须有输入：它撑起 G3.A 的"旧拼音键 ⇒ 请改用 X"文案。表被改形 /
+  //   解析正则失效时 size 归 0 —— 那样 G3.A 对旧拼音只剩一句泛泛的"不在允许集内"，
+  //   本次改名最主要的移植风险就没人兜了。⇒ 判失败，而不是静默降级。
+  ['G3.A 旧拼音对照表', LEGACY_TO_KEY.size, true],
   ['G3.D registerExtProp 调用', counts.ext登记, false], // 尚无内容登记扩展键
-  ['G3.F `PROP` 别名表', counts.别名键, true],
   ['G3.G 技能槽名', counts.技能槽名, true],
   ['G3.G 派生字段', counts.派生字段, true],
 ];

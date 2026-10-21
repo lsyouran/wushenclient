@@ -301,11 +301,25 @@ describe('obj/give —— 给同房间的人', () => {
       id: 'obj/give',
     });
     expect(player.money).toBe(0);
-    // 先一句"收下了"，再一句房间播报（给钱用 `$n` 指向收钱的人）
-    expect(out.messages).toEqual([
-      '店小二收了钱，引你往人字号客房走去。',
-      `你给了店小二${moneyToStr(1000)}。`,
-    ]);
+    // ★ 26 册 §57 订正：原先这里还有一句 `on_accept` 里的
+    //   「店小二收了钱，引你往人字号客房走去。」—— 那是**谓词抢跑**：
+    //   它说"收了"的时候引擎还没扣钱，扣不动就会出现两句自相矛盾的话。
+    //   现在"成没成"只由 `give` 播报（给钱用 `$n` 指向收钱的人）。
+    expect(out.messages).toEqual([`你给了店小二${moneyToStr(1000)}。`]);
+  });
+
+  it('★★ 钱不够但"给的数目"够 ⇒ **只有一句**没钱，不许先说"收了钱"（26 册 §57）', () => {
+    const { player, out } = enterContentRoom('yz/guangchang');
+    // 真机反馈的原样：点「人字号客房」发的是 `give 店小二 1000 money`，
+    // 而玩家身上一文钱都没有 ⇒ `on_accept` 看到 count=1000 够，放行；
+    // 引擎去扣时失败。旧实现在这里先说"店小二收了钱…"再说"你没有那么多的钱…"。
+    player.money = 0;
+
+    dispatch(world.commands, player, 'give 店小二 1000 money');
+    expect(player.money).toBe(0);
+    expect(out.messages).toEqual([GIVE_MESSAGES.noMoney('店小二')]);
+    // 反向断言：那句"抢先宣布成功"的话一个字都不许出现
+    expect(out.messages.join('\n')).not.toContain('收了钱');
   });
 
   it('★ 钱不够时店小二**当场拒收**，且一分钱都不动（`on_accept` 是准入判据）', () => {

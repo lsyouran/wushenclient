@@ -23,21 +23,22 @@ import { dispatch } from '../server/engine/command.js';
 import { instantiateWorld } from '../server/engine/world.js';
 import { describeWorld } from '../server/bootstrap.js';
 import type { ItemDef, NpcDef } from '../server/world/defs.js';
-import { PROP } from '../shared/constants.js';
 import { asWorldId } from '../shared/ids.js';
 
 const world = instantiateWorld();
 
 describe('engine/world · 真实内容的实例化统计', () => {
   it('各计数与注册表一致', () => {
-    // 内容：2 房间 / **2** NPC 实例（店小二 + 木人桩）/ 2 物品实例 / 1 区域 / 2 出口
-    expect(world.stats.rooms).toBe(2);
-    expect(world.stats.npcs).toBe(2);
-    expect(world.stats.items).toBe(2); // drug/yao + drug/yao#1 各 1 个
+    // 内容：3 房间 / **3** NPC 实例（店小二 + 木人桩 + 武馆教头）/ 2 物品实例 / 1 区域 / 4 出口
+    //   ★ §64 新增武馆（`yz/wuguan`）与教头（`pub/jiaotou`）：
+    //     "学技能"必须有一个能站人的地址（`learn` 要求老师同房间）。
+    expect(world.stats.rooms).toBe(3);
+    expect(world.stats.npcs).toBe(3);
+    expect(world.stats.items).toBe(4); // drug/yao + #1 + 两本书（§75）
     expect(world.stats.areas).toBe(1);
-    expect(world.stats.exits).toBe(2); // 广场↔北大街 两条有向出口
-    expect(world.stats.oidsIssued).toBe(6); // 2 房间 + 2 NPC + 2 物品
-    expect(world.stats.skills).toBe(3); // base/force + base/sword + wd/taijijian
+    expect(world.stats.exits).toBe(4); // 广场↔北大街 + 北大街↔武馆
+    expect(world.stats.oidsIssued).toBe(10); // 3 房间 + 3 NPC + 4 物品（§75 两本书）
+    expect(world.stats.skills).toBe(7); // 6 门基本武学 + 太极剑法（2026-10-18 补齐）
   });
 
   it('公式摘要被带进统计（启动日志能一眼看见生效参数）', () => {
@@ -45,7 +46,9 @@ describe('engine/world · 真实内容的实例化统计', () => {
   });
 
   it('启动日志一行统计含指令数', () => {
-    expect(describeWorld(world.stats)).toContain('指令 15（别名 22）');
+    // ★ 这个"别名"数是**名字 + 别名**的条目总数（`CommandTable.aliasCount`），
+    //   所以 `admin/addxp`（只有一个名字）也会让它 +1
+    expect(describeWorld(world.stats)).toContain('指令 23（别名 37）');
   });
 
   it('起始房间取区域 first', () => {
@@ -125,15 +128,18 @@ describe('engine/world · NPC 从 def 取属性 / 技能（★ docs/27 D9：技�
     // 而 maxHp 是**公式 + 技能属性**共同算出来的（这条断言把整条链钉住）：
     //   con*5                        = 27*5                     = 135
     //   + maxMp * forceRad           = 150 * 0.1               =  15
-    //   + prop(con) * con            = 3 * 27（基本内功 30 级：con += 30/10）
-    //                                                          = 81
-    //   → int(135 + 15 + 81) = 231
+    //   + prop(con) * con            = 1 * 27（基本内功 30 级：con += attrPassive(30)）
+    //                                                          =  27
+    //   → int(135 + 15 + 27) = 177
     // ★ 注意 `prop(con) * con` **不除 10** —— 照抄 wushen `user.js:3`（29 册 §29.4 偏离① 已闭合）。
     //   （同一个 `prop(con)` 在 `defense` 式里是 `/10` —— 原作如此，别顺手统一，见 29 册 §29.2。）
-    // ★ 这条同时证明 `prop(con)` **有真实生产者**：基本内功 30 级就给了 con +3，
+    // ★ 这条同时证明 `prop(con)` **有真实生产者**：基本内功 30 级就给了 con +1，
     //   早期"内容层没有 con 生产者 ⇒ 影响为零"的说法已不成立（2026-10-14 复查订正）。
+    // ★ 2026-10-18 曲线三改（线性 → sqrt → 幂律凸曲线）：30 级从 +3（线性）到 +5（sqrt）
+    //   到现在 +1（幂律低端）。**有意**的数值变更，不是回归 —— 曲线的低端本来就该弱，
+    //   "根骨"要火候够深（见 `server/world/skill-curves.ts` 文件头）。
     // 于是 def 里的 `hp: 150`（初始血量）小于上限，不会被 setHp() 截断。
-    expect(npc.maxHp).toBe(231);
+    expect(npc.maxHp).toBe(177);
   });
 });
 
@@ -160,12 +166,12 @@ describe('engine/world · ★ 同一模板的两个实例互不影响（原型�
     expect(a.skills).not.toBe(b.skills);
 
     // 改 a 的核心属性 → b 不受影响
-    setProp(a, PROP.attack, 999); // wushen 'gj'
-    expect(getProp(a, PROP.attack)).toBe(999);
+    setProp(a, 'attack', 999); // wushen 'attack'
+    expect(getProp(a, 'attack')).toBe(999);
     // ★ b 的攻击 = 25 不是 0：这是 `wd/taijijian` 装上 sword 槽之后的 ② 档属性
     //   （`enableProp` → `gj: trunc(50/2) = 25`）。**两个实例各持一份技能簿**，
     //   所以 a 被改写都不会串到 b —— 这正是本用例要证明的东西。
-    expect(getProp(b, PROP.attack)).toBe(25);
+    expect(getProp(b, 'attack')).toBe(25);
 
     a.recount();
     expect(a.derived.attack).toBeGreaterThan(b.derived.attack); // 1019 vs 45
@@ -193,7 +199,7 @@ describe('engine/world · 物品实例字段', () => {
 
   it('★ 内容层第一个 prop 声明确实在 def 上（G3 由 SKIP 转实检的前提）', () => {
     const def = getDef<ItemDef>('item', 'drug/yao#1');
-    expect(def?.prop).toEqual({ gj: 20, gjsd_per: -20 });
+    expect(def?.prop).toEqual({ attack: 20, attack_speed_per: -20 });
   });
 
   it('Item 不是 PropHolder —— def 的 prop 尚未挂载到实例（消费者属装备/服用批次）', () => {
@@ -210,8 +216,8 @@ describe('engine/world · id 空间可复用（读档恢复场景）', () => {
     const first = instantiateWorld({ oidSpace: shared });
     const second = instantiateWorld({ oidSpace: shared });
 
-    expect(first.stats.oidsIssued).toBe(6);
-    expect(second.stats.oidsIssued).toBe(12); // 同一个空间已累计 12
+    expect(first.stats.oidsIssued).toBe(10); // 3 房间 + 3 NPC + 4 物品（§75 两本书）
+    expect(second.stats.oidsIssued).toBe(20); // 同一个空间已累计 20（每轮 10 个）
 
     const firstOids = new Set([...first.rooms.values()].map((r) => r.oid));
     for (const r of second.rooms.values()) expect(firstOids.has(r.oid)).toBe(false);
@@ -222,12 +228,17 @@ describe('engine/world · 指令表 + 真实内容的三级分发（全链路）
   it('指令表被建进世界（别名 → 条目）', () => {
     // 11 条：action/{look,select} + move/go + chat/{say,shout,tell} + info/score
     //         + obj/{get,drop,give,use}（B 批四条物品指令）
-    // 17 个别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper / score,attr
+    // 别名：look,l / select,command / go / say / **chat**,shout,yell / tell,whisper / score,attr
     //         + get / drop / give / use（各一个，与 wushen 的 `this.command` 同名，未起短写）
+    //         + practice,lianxi（§56 成长闭环）
+    //         + learn,xue / enable / forget,fangqi / skills,cha（§64 技能链，+7）
+    //         + addxp（2026-10-19 测试指令，无别名）
+    //         + flee,escape,tao（逃跑闭环，2026-10-20，+3）
     //   ↑ `chat` 是 wushen 的原词（`world/cmd/channel/chat.js`），
     //     也是前端「世界」页签产出的命令名（26 册 §24.3）
-    expect(world.stats.commands).toBe(15);
-    expect(world.stats.commandAliases).toBe(22);
+    // ★ 这两个数**每次加指令都要手动对**——它们是"内容清单没漏登记"的副作用检查。
+    expect(world.stats.commands).toBe(23);
+    expect(world.stats.commandAliases).toBe(37);
     expect(world.commands.lookup('look')?.id).toBe('action/look');
     expect(world.commands.lookup('l')?.id).toBe('action/look');
     expect(world.commands.lookup('select')?.id).toBe('action/select');
@@ -291,27 +302,36 @@ describe('engine/world · 指令表 + 真实内容的三级分发（全链路）
     expect(out.messages).toEqual(['什么？']);
   });
 
-  it('★ info/score 打出属性三档（合计 / 先天 / 后天）', () => {
+  it('★ info/score 发出属性面板快照（三档：合计 / 先天 / 后天）', () => {
     const { actor, out } = spawn('yz/guangchang', 'ffffffffff');
     expect(dispatch(world.commands, actor, 'score')).toEqual({
       kind: 'executed',
       via: 'command',
       id: 'info/score',
     });
-    const printed = out.messages.join('\n');
-    expect(printed).toContain('【属性】');
-    // 无加成三维：只报合计
-    expect(printed).toContain('臂力：20');
-    expect(printed).toContain('身法：20');
-    expect(printed).toContain('悟性：20');
-    // 店小二根骨 27 + 基本内功的 3 点根骨加成 ⇒ 展开三档
-    expect(printed).toContain('根骨：30（先天 27 + 后天 3）');
+    // ★ §62：落点是**面板快照**（`showAttr` → `dialog:score` 帧），不是消息流文本
+    expect(out.messages.join('\n')).not.toContain('【属性】');
+    const view = out.attrViews.at(-1);
+    expect(view).toBeDefined();
+
+    const bd = Object.fromEntries((view?.attrs ?? []).map((a) => [a.key, a]));
+    // 无加成三维：`bonus` 为 0（面板据此只报合计，不写"后天 0"）
+    expect(bd['str']?.total).toBe(20);
+    expect(bd['str']?.bonus).toBe(0);
+    expect(bd['dex']?.total).toBe(20);
+    expect(bd['int']?.total).toBe(20);
+    // 店小二根骨 27 + 基本内功的 1 点根骨加成 ⇒ 三档分开
+    //   （30 级内功：`attrPassive(30) = 1`；线性时代是 3、sqrt 版是 5）
+    expect(bd['con']).toMatchObject({ innate: 27, bonus: 1, total: 28 });
+    // 三档的算术关系必须自洽（面板显示的就是它）
+    expect(bd['con']?.total).toBe((bd['con']?.innate ?? 0) + (bd['con']?.bonus ?? 0));
 
     // 再加 5 点臂力加成；别名 attr 与主名 score 落到同一条
-    setProp(actor, PROP.strengthBonus, 5);
-    out.messages.length = 0;
+    setProp(actor, 'str', 5);
     expect(dispatch(world.commands, actor, 'attr').kind).toBe('executed');
-    expect(out.messages.join('\n')).toContain('臂力：25（先天 20 + 后天 5）');
+    const after = out.attrViews.at(-1);
+    const str = after?.attrs.find((a) => a.key === 'str');
+    expect(str).toMatchObject({ innate: 20, bonus: 5, total: 25 });
   });
 
   it('真实 NPC 的 ask 动作（三级里的第三级：目标物件动作）', () => {

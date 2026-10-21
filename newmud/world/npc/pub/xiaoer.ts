@@ -75,15 +75,25 @@ defineNpc('pub/xiaoer', {
    *   `on_accept` 是**准入判据**（`defs.ts#InteractHooks.onAccept`），
    *   引擎在它返回真之后才扣钱。这里返回假 ⇒ 玩家一分钱没少，
    *   并且先收到一句**为什么**（免得只看到笼统的"不要你的钱"）。
+   *
+   * ★★ **这里不许播报"收下了"**（26 册 §57，真机反馈抓到的矛盾消息）：
+   *   原先这一支写的是 `me.notify('店小二收了钱，引你往人字号客房走去。')` 再 `return true`，
+   *   而引擎拿到 `true` **之后**才去 `spendMoney(1000)`。玩家身上没钱时，屏幕上就是
+   *   两句互相打脸的话：
+   *       店小二收了钱，引你往人字号客房走去。
+   *       你身上没有那么多的钱给店小二。
+   *   根子在**职责错位**：`on_accept` 是纯谓词（`defs.ts` 写死的），
+   *   它只回答"收不收"，无权宣布结果 —— 结果由引擎扣钱成功后才成立。
+   *   现在"成没成"统一由 `give` 播报（`$N给了$n…` / `你身上没有那么多的钱给…`）。
    */
   on_accept: (me, objId, count) => {
     // 店小二不收东西 —— 要卖东西走商店的 `sell`（交易批次），不走 `give`。
     if (objId !== GIVE_MONEY_KEY) return false;
     if (count < LODGING_FEE) {
+      // 这句是**拒收的理由**（不是"结果"），允许出现在谓词里：它解释为什么返回 false。
       me.notify(`店小二陪笑道：住店要${String(LODGING_FEE)}文钱，客官。`);
       return false;
     }
-    me.notify('店小二收了钱，引你往人字号客房走去。');
     return true;
   },
   on_enter: (me) => {

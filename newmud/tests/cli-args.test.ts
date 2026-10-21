@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 
 import { PROJECT_ROOT } from '../server/paths.js';
-import { DEFAULT_PORT, UsageError, parseArgs } from '../server/cli.js';
+import { DEFAULT_PORT, UsageError, isWildcardHost, lanAddresses, parseArgs } from '../server/cli.js';
 import { DEFAULT_WS_HOST } from '../server/net/ws-server.js';
 
 describe('parseArgs · 缺省值', () => {
@@ -72,6 +72,18 @@ describe('parseArgs · 覆盖', () => {
     expect(parseArgs(['--host=192.168.1.9']).host).toBe('192.168.1.9');
   });
 
+  // ---- --lan：局域网快捷开关（2026-10-18：用户要"手机/局域网也能连"，
+  //      每次敲 --host 0.0.0.0 容易忘，给一个说人话的开关）----
+  it('★ --lan = 把监听显式放开到全部网卡（等价 --host 0.0.0.0）', () => {
+    expect(parseArgs(['--lan']).host).toBe('0.0.0.0');
+    expect(parseArgs(['--lan']).host).not.toBe(DEFAULT_WS_HOST);
+  });
+
+  it('★ --lan 与 --host 同时给：**后写的赢**（与其它覆盖参数同一条规矩）', () => {
+    expect(parseArgs(['--lan', '--host', '192.168.1.9']).host).toBe('192.168.1.9');
+    expect(parseArgs(['--host', '192.168.1.9', '--lan']).host).toBe('0.0.0.0');
+  });
+
   it('--help / -h 都认', () => {
     expect(parseArgs(['--help']).help).toBe(true);
     expect(parseArgs(['-h']).help).toBe(true);
@@ -105,5 +117,23 @@ describe('parseArgs · 坏输入必须炸，不许静默吞掉', () => {
 
   it('位置参数（多余的词）→ UsageError', () => {
     expect(() => parseArgs(['whatever'])).toThrow(UsageError);
+  });
+});
+
+describe('启动日志的局域网提示（isWildcardHost / lanAddresses）', () => {
+  it('★ 通配地址认两个写法：0.0.0.0 与 ::（:: 是 IPv6 的"全部网卡"）', () => {
+    expect(isWildcardHost('0.0.0.0')).toBe(true);
+    expect(isWildcardHost('::')).toBe(true);
+    // 缺省与具体网卡都不是通配
+    expect(isWildcardHost(DEFAULT_WS_HOST)).toBe(false);
+    expect(isWildcardHost('192.168.1.9')).toBe(false);
+  });
+
+  it('★ lanAddresses 只给非回环的 IPv4（::1 / 127.x / 链路本地都是噪音）', () => {
+    for (const ip of lanAddresses()) {
+      expect(ip, `不是 IPv4：${ip}`).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+      expect(ip.startsWith('127.'), `回环地址混进来了：${ip}`).toBe(false);
+      expect(ip.startsWith('169.254.'), `链路本地混进来了：${ip}`).toBe(false);
+    }
   });
 });

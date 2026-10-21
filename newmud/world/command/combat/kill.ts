@@ -27,6 +27,13 @@ export const KILL_MESSAGES = {
   what: '你要攻击谁？',
   /** wushen `kill.js:8` —— 房间禁武 */
   noFight: '这里不允许战斗。',
+  /**
+   * 目标声明了 `no_kill`（wushen `kill.js:11` 的 `!target.do_kill`）。
+   *
+   * ★ wushen 对这类目标回的是"你要攻击谁？"（把"不可杀"伪装成"找不到"）。
+   *   这里改成明说 —— 玩家点不到按钮、手敲时也该知道**为什么**不行。
+   */
+  noKill: (name: string): string => `${name}不是能杀的人。`,
   /** 开杀宣言（wushen `kill.js:60-61`） */
   declare: '\n$N对着$n喝道：「$n！今日不是你死就是我活！」\n',
   /**
@@ -71,6 +78,12 @@ defineCommand('combat/kill', {
     const hit = findTarget(me, env, key);
     if (hit === undefined) {
       me.notify(KILL_MESSAGES.what);
+      return;
+    }
+    // ★ 与面板同一条闸：老师 / 店主这类 NPC 杀掉了，教与卖两条内容链就断了。
+    //   wushen 用"有没有 do_kill"表达同一件事（`kill.js:11`）。
+    if (hit.noKill === true) {
+      me.notify(KILL_MESSAGES.noKill(neutralizePlayerText(hit.name)));
       return;
     }
     const result = me.beginFight(hit, FIGHT_TYPE.KILL);

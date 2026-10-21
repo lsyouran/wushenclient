@@ -9,10 +9,22 @@
 ## 跑起来
 
 ```bash
+npm run dev                  # ★ 最省事：构建前端 → 起服务 → 开浏览器，并持续监听 src/
 npm start                    # 默认端口 8123；prestart 会自动先跑 build:web
 npm start -- --port 9000     # 传参给 npm script 必须用 `--` 隔开
 npm start -- --help          # 看全部参数
+npm run start:lan            # 局域网可连（= --host 0.0.0.0），启动后打印局域网地址
 ```
+
+★ **`npm run dev` 与 `npm start` 的区别只有一个：谁负责"更新前端"。**
+`dev` 每建一次就把 `src/` 与 `shared/` 挂上监听，改完自动重建（F5 即见）；
+`start` 只在启动时构建一次，适合"拿来就跑"，不适合边改边看。两者都走
+`tools/build-web.mjs` 这一个构建入口（不许有第二份 tsc 参数）。
+
+★ **`build:web` 靠 `prestart` 触发**：只有走 `npm start` / `npm run start:lan` 才会重建前端。
+直接 `node tools/start.mjs` **不会**构建 —— 改了 `src/` 之后这样起，读到的还是 `dist/web/`
+里的旧产物（`static.ts` 已是 `cache-control: no-store`，所以刷新浏览器也救不回来）。
+⇒ 手工起服务前先 `npm run build:web`，或者干脆用 `npm run dev`。
 
 **参数一览**
 
@@ -20,6 +32,7 @@ npm start -- --help          # 看全部参数
 |---|---|---|
 | `--port N` | 监听端口（静态资源与 WebSocket **同端口**） | `8123` |
 | `--host <addr>` | **监听地址**。★ 缺省 `127.0.0.1`（只本机可访问）；要局域网/外网访问才显式改（如 `0.0.0.0`）—— 改之前先看 26 册 §30.2 的安全说明 | `127.0.0.1` |
+| `--lan` | 局域网可连（等价 `--host 0.0.0.0`），启动后额外打印本机局域网地址（手机/其它机器连那个） | 关 |
 | `--no-web` | 不托管静态资源，只跑 WebSocket | 关 |
 | `--web-root DIR` | 指定静态资源根 | `dist/web/` |
 | `--max-connections N` | 连接数上限 | 见 `cli.ts` |
@@ -36,7 +49,19 @@ npm start -- --help          # 看全部参数
 npm run check        # = typecheck + test + gate（日常改完先跑这个）
 npm run gate         # 静态闸门套件
 npm run gate:mutation # 元闸门：证明"每道闸门都真的会变红"（较慢，改动闸门/测试后必须跑）
+npm run e2e          # 真浏览器冒烟：起临时服务 + 无头 Chrome，走"打开 → 登录 → 看到房间"
+npm run ids          # 打印九组标识清单（指令/技能/服务端帧/客户端帧/错误码/属性键/kind/槽/保留区）
+npm run ids:check    # 核对 32 册的生成块 ⊥ 代码枚举（= G18 的人工版）
 ```
+
+★ **`npm run e2e` 是唯一能看见"界面"的那一层**：静态闸门判不了版式与交互，
+`tsc` 与单测判不了"元素可见但 0×0"。它断言四件事（认证屏可见 / 脚本已就绪 /
+登录后主屏出现 / 气血真收到数值）并截图；**没装 Chrome 时报 SKIP（退出码 2）**，不当作失败。
+
+★ **加了标识（技能 / 指令 / 帧 / 属性键 …）之后**：跑 `npm run ids:check` 看差在哪，
+`npm run ids --write` 就能修（**只重写 32 册标记块内，块外一个字不碰**）。
+**九组都已建块**，任何一组漏了都会红（见 26 册 §71.8）。
+★ 但**块外的人写表（含义 / 分组 / 触发词 / 旧键）仍要人维护** —— 闸门只保证名单是全的。
 
 ## 细节去哪看
 
@@ -58,5 +83,5 @@ npm run gate:mutation # 元闸门：证明"每道闸门都真的会变红"（较
 | `shared/` | 前后端共享：id 语法、常量、协议类型（**单源真相**） |
 | `world/` | 内容层：房间 / NPC / 物品 / 技能 / 指令 |
 | `src/` | 浏览器前端（原生 ESM + 纯 DOM，不引框架、不引打包器） |
-| `tools/` | 启动器、构建脚本、静态闸门（`tools/gate/`） |
+| `tools/` | 启动器（`start.mjs` / `run.mjs`）、构建（`build-web.mjs`）、静态闸门（`tools/gate/`）、真机 e2e（`tools/e2e/`） |
 | `tests/` | vitest 用例 |

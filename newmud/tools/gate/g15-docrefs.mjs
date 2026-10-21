@@ -63,14 +63,23 @@
  *
  * ── ★ 已知窄口（**如实记档，不是许可**）──────────────────────────────────────
  * 只判**册号存在性**，**不判 `§节号` 是否真存在于该册**。
- * 不可机械化的原因是实的：`§` 引用常指向**非标题**的东西（`26 册 §16.4 F1` 的 `F1`、
- * `24 册 §5.3` 的表格行），且 `§28.10` 与 `§28.1` 存在前缀关系 ——
- * 机械解析会制造一批假红，那比现在的窄口更糟。
+ *
+ * ★★ **2026-10-19 修正**：下面这段当初把"节号不可机械化"说得比事实更满，已由 G16 推翻一半。
+ *   原文（保留）：*`§` 引用常指向**非标题**的东西（`26 册 §16.4 F1` 的 `F1`、`24 册 §5.3` 的表格行），
+ *   且 `§28.10` 与 `§28.1` 存在前缀关系 ⇒ 机械解析会制造一批假红。*
+ *   —— 三个担心**都有解**：
+ *     ① `§16.4` 与 `F1` 是**两个 token**，判据只认 `§(\d+(?:\.\d+)*)`，`F1` 根本进不来；
+ *     ② "指向表格行"指的是**那一节的内部**，节号本身仍然存在，判据不关心行号；
+ *     ③ 前缀关系用**整串相等**（`sections` 集合）解决，不做前缀匹配。
+ *   真正的难点不是这三点，而是**归属**：裸 `§X` 前面没有册号时，它可能指**别册**（实测占比极大）。
+ *   ⇒ 结论改成两条，各自落地：
+ *     · **绑定式** `NN 册 §X`：可判，已由 **G16.3** 接管（归属由正则结构决定，不靠"就近猜"）；
+ *     · **裸 `§X`**：不判 —— 不是不能解析，而是**不可判归属**，判了就是假红（G16 头部有实测数据）。
+ *   ★ 于是本闸门的窄口收窄为"**只判册号**"，而"节号"那半边在 G16 那里、按可判与不可判分开处理。
  *
  * 退出码：0 通过 / 1 违规 / 2 跳过（docs/ 不可达）/ 3 崩溃（闸门自身异常，见 26 册 §27）
  */
 
-import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -86,6 +95,11 @@ import {
   report,
   walk,
 } from './lib.mjs';
+// ★ 册号解析**不在本文件里再写一份**（24 册铁律 4）：与 G16 共用 `docs-index.mjs`。
+//   在此之前这里有一个 `bookNumbersOf()` + 本地 `BOOK_NO_RE` —— 那正是"第二份真相"的
+//   最小形态：G16 要判"每册有哪些节"时必然也要扫同一批文件名，两份一旦对不上，
+//   "哪个才是册号集合"就没人知道了。
+import { DOCS_DIR, bookNumberList, loadDocsIndex } from './docs-index.mjs';
 
 installCrashGuard('G15');
 
@@ -93,18 +107,14 @@ installCrashGuard('G15');
 const SELF = rel(fileURLToPath(import.meta.url));
 
 /**
- * 文档目录是工程根的**兄弟目录**（`D:/ts-mud/{newmud,docs}`），
- * 所以这里必须向上走一层 —— 但仍**不写死任何目录名**：
+ * 文档目录是工程根的**兄弟目录**（`D:/ts-mud/{newmud,docs}`）——
+ * 由 `docs-index.mjs` 用 `import.meta.url` 上溯推出，本文件**不写死任何目录名**：
  * 工程根名与册号都取自磁盘，改名/复制副本（见 24 册 §5.4 的 G12 实验）都跟随。
  */
-const DOCS_DIR = join(ROOT, '..', 'docs');
-const WUSHEN_DOCS_DIR = join(DOCS_DIR, 'wushen');
+const index = loadDocsIndex();
 
 /** 扫哪里：本方声明（铁律 5），不与别的闸门共用一份清单 */
 const SCAN_DIRS = ['server', 'shared', 'tests', 'src', 'tools', 'world'];
-
-/** 文件名前缀的两位册号：`26-代码审查记录.md` → `26` */
-const BOOK_NO_RE = /^(\d{2})-/;
 
 /**
  * 册号引用 `NN 册`。
@@ -120,30 +130,14 @@ const REF_RE = /(?<!\d)(\d{2}) 册(?!\d)/g;
  */
 const DOCS_REF_RE = /(?<!\d)docs\/(?:wushen\/)?(\d{2})(?!\d)/g;
 
-/** 从目录里的文件名前缀收集册号（读不到目录就返回空集，由调用方判前置） */
-function bookNumbersOf(dir) {
-  const out = new Set();
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return out;
-  }
-  for (const name of entries) {
-    const m = BOOK_NO_RE.exec(name);
-    if (m !== null) out.add(m[1]);
-  }
-  return out;
-}
-
-if (!isDir(DOCS_DIR)) {
+if (!index.ok) {
   header('G15', '文档引用（册号存在性）');
   console.log(`  ⏭️  SKIP：文档目录不可达（${DOCS_DIR}）`);
   console.log('      —— 取不到册号集合就谈不上判据，比照 G2 的语义**不做结论**（SKIP 不计为通过）');
   process.exit(EXIT_SKIP);
 }
 
-const known = new Set([...bookNumbersOf(DOCS_DIR), ...bookNumbersOf(WUSHEN_DOCS_DIR)]);
+const known = new Set(bookNumberList(index));
 const knownList = [...known].sort().join(' / ');
 
 const violations = [];

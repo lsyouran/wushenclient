@@ -188,11 +188,17 @@ export class Item extends GameObject {
  */
 function deriveInteract(def: ItemDef | undefined): InteractHooks | undefined {
   if (def === undefined) return undefined;
+  // ★★ 投影面要**完整**（26 册 §75）：这里原来只投了 5 个字段，`on_study` / `on_open`
+  //   与两个读书字段一个都没投 —— 于是内容层写了它们也永远不会被读到
+  //   （"声明存在、消费为零"，26 册 L8 的同一个病型）。
   return {
     noGet: def.no_get,
     noDrop: def.no_drop,
     noConsume: def.no_consume,
     onGet: def.on_get,
     onUse: def.on_use,
+    onStudy: def.on_study,
+    studySkill: def.studySkill,
+    studyMaxLevel: def.studyMaxLevel,
   };
 }

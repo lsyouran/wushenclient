@@ -36,53 +36,53 @@ const dirty = (v: unknown): number => v as number;
 describe('核心属性：读写语义对齐 wushen', () => {
   it('未设置读作 0（不是 undefined）——与 query_prop 一致', () => {
     const h = createPropHolder();
-    expect(getProp(h, 'gj')).toBe(0);
-    expect(hasProp(h, 'gj')).toBe(false);
+    expect(getProp(h, 'attack')).toBe(0);
+    expect(hasProp(h, 'attack')).toBe(false);
   });
 
   it('hasProp 能区分"没写过"与"就是 0"', () => {
     const h = createPropHolder();
-    setProp(h, 'gj', 0);
-    expect(getProp(h, 'gj')).toBe(0);
-    expect(hasProp(h, 'gj')).toBe(true);
+    setProp(h, 'attack', 0);
+    expect(getProp(h, 'attack')).toBe(0);
+    expect(hasProp(h, 'attack')).toBe(true);
   });
 
   it('setProp 覆盖写；addProp 累加并返回新值', () => {
     const h = createPropHolder();
-    setProp(h, 'gj', 10);
-    expect(getProp(h, 'gj')).toBe(10);
+    setProp(h, 'attack', 10);
+    expect(getProp(h, 'attack')).toBe(10);
 
-    expect(addProp(h, 'gj', 5)).toBe(15);
-    expect(addProp(h, 'gj', -20)).toBe(-5);
-    expect(getProp(h, 'gj')).toBe(-5);
+    expect(addProp(h, 'attack', 5)).toBe(15);
+    expect(addProp(h, 'attack', -20)).toBe(-5);
+    expect(getProp(h, 'attack')).toBe(-5);
   });
 
   it('addProp 在未设置的键上等同于从 0 起算（wushen add_prop 语义）', () => {
     const h = createPropHolder();
-    expect(addProp(h, 'fy', 7)).toBe(7);
-    expect(getProp(h, 'fy')).toBe(7);
+    expect(addProp(h, 'defense', 7)).toBe(7);
+    expect(getProp(h, 'defense')).toBe(7);
   });
 
   it('MOD 派生键同样是合法核心键（类型与运行时一致）', () => {
     const h = createPropHolder();
-    setProp(h, 'gj_per', 20);
-    setProp(h, 'diff_sh_per', 15);
-    setProp(h, 'add_bjsh_per', 30);
-    expect(getProp(h, 'gj_per')).toBe(20);
-    expect(getProp(h, 'diff_sh_per')).toBe(15);
-    expect(getProp(h, 'add_bjsh_per')).toBe(30);
+    setProp(h, 'attack_per', 20);
+    setProp(h, 'diff_damage_per', 15);
+    setProp(h, 'add_crit_damage_per', 30);
+    expect(getProp(h, 'attack_per')).toBe(20);
+    expect(getProp(h, 'diff_damage_per')).toBe(15);
+    expect(getProp(h, 'add_crit_damage_per')).toBe(30);
   });
 
   it('removeProp 返回是否确实存在过；clearProps 清空', () => {
     const h = createPropHolder();
-    setProp(h, 'gj', 1);
-    expect(removeProp(h, 'gj')).toBe(true);
-    expect(removeProp(h, 'gj')).toBe(false);
-    expect(hasProp(h, 'gj')).toBe(false);
+    setProp(h, 'attack', 1);
+    expect(removeProp(h, 'attack')).toBe(true);
+    expect(removeProp(h, 'attack')).toBe(false);
+    expect(hasProp(h, 'attack')).toBe(false);
 
-    setProp(h, 'fy', 2);
+    setProp(h, 'defense', 2);
     clearProps(h);
-    expect(hasProp(h, 'fy')).toBe(false);
+    expect(hasProp(h, 'defense')).toBe(false);
   });
 });
 
@@ -96,43 +96,43 @@ describe('★ 数值守卫（wushen 的静默 NaN / 字符串缺陷）', () => {
     };
 
     const a: Record<string, unknown> = {};
-    wushenAddProp(a, 'gj', undefined);
-    expect(Number.isNaN(a['gj'])).toBe(true); // 攻击变成 NaN，后续公式全废
+    wushenAddProp(a, 'attack', undefined);
+    expect(Number.isNaN(a['attack'])).toBe(true); // 攻击变成 NaN，后续公式全废
 
     const b: Record<string, unknown> = {};
-    wushenAddProp(b, 'gj', '5');
-    expect(b['gj']).toBe('05'); // 0 + '5' = 字符串拼接
+    wushenAddProp(b, 'attack', '5');
+    expect(b['attack']).toBe('05'); // 0 + '5' = 字符串拼接
   });
 
   it('变异：NaN / Infinity / 字符串 / null 一律抛 PropValueError，且不写脏表', () => {
     const h = createPropHolder();
     for (const bad of [NaN, Infinity, -Infinity, dirty('5'), dirty(null), dirty(undefined)]) {
-      expect(() => setProp(h, 'gj', bad), String(bad)).toThrow(PropValueError);
-      expect(() => addProp(h, 'gj', bad), String(bad)).toThrow(PropValueError);
+      expect(() => setProp(h, 'attack', bad), String(bad)).toThrow(PropValueError);
+      expect(() => addProp(h, 'attack', bad), String(bad)).toThrow(PropValueError);
     }
     // 关键：抛错之后表里依然干净，没有被写入半成品
     expect(h.props.size).toBe(0);
-    expect(getProp(h, 'gj')).toBe(0);
+    expect(getProp(h, 'attack')).toBe(0);
   });
 
   it('有限浮点数合法（wushen 里 force_rad 就是 0.1 这种）', () => {
     const h = createPropHolder();
-    setProp(h, 'sh', 0.1);
-    expect(getProp(h, 'sh')).toBeCloseTo(0.1);
+    setProp(h, 'damage', 0.1);
+    expect(getProp(h, 'damage')).toBeCloseTo(0.1);
   });
 });
 
 describe('★ 核心 / 扩展物理隔离', () => {
   it('两个 Map 完全独立：写扩展不影响核心，反之亦然', () => {
     const h = createPropHolder();
-    setProp(h, 'gj', 100);
+    setProp(h, 'attack', 100);
     setExtProp(h, EXT, 999);
 
-    expect(getProp(h, 'gj')).toBe(100);
+    expect(getProp(h, 'attack')).toBe(100);
     expect(getExtProp(h, EXT)).toBe(999);
     // 存储层就是两个桶，不是"一个大桶 + 类型约定"
     expect(h.props.has(EXT)).toBe(false);
-    expect(h.extProps.has('gj')).toBe(false);
+    expect(h.extProps.has('attack')).toBe(false);
   });
 
   it('扩展属性累加 / 删除 / has 全套', () => {
@@ -160,7 +160,7 @@ describe('★ 核心 / 扩展物理隔离', () => {
 
   it('clearAllProps 同时清两套', () => {
     const h = createPropHolder();
-    setProp(h, 'gj', 1);
+    setProp(h, 'attack', 1);
     setExtProp(h, EXT, 1);
     clearAllProps(h);
     expect(h.props.size).toBe(0);
@@ -171,28 +171,28 @@ describe('★ 核心 / 扩展物理隔离', () => {
 describe('存档 / 读档边界', () => {
   it('snapshot → loadProps 往返一致', () => {
     const a = createPropHolder();
-    setProp(a, 'gj', 12);
+    setProp(a, 'attack', 12);
     setProp(a, 'max_hp', 300);
     setExtProp(a, EXT, 8);
 
     const snap = snapshotProps(a);
-    expect(snap.prop).toEqual({ gj: 12, max_hp: 300 });
+    expect(snap.prop).toEqual({ attack: 12, max_hp: 300 });
     expect(snap.ext).toEqual({ props_test_key: 8 });
 
     const b = createPropHolder();
     const report = loadProps(b, snap);
     expect(report.rejected).toEqual([]);
     expect(report.loaded).toBe(3);
-    expect(getProp(b, 'gj')).toBe(12);
+    expect(getProp(b, 'attack')).toBe(12);
     expect(getExtProp(b, EXT)).toBe(8);
   });
 
   it('loadProps 是合并语义，不碰没提到的键', () => {
     const h = createPropHolder();
-    setProp(h, 'fy', 42);
-    loadProps(h, { prop: { gj: 1 } });
-    expect(getProp(h, 'fy')).toBe(42);
-    expect(getProp(h, 'gj')).toBe(1);
+    setProp(h, 'defense', 42);
+    loadProps(h, { prop: { attack: 1 } });
+    expect(getProp(h, 'defense')).toBe(42);
+    expect(getProp(h, 'attack')).toBe(1);
   });
 
   it('★ 变异：未登记的键被拒收且**不写进表**（121 vs 70 的那道闸口）', () => {
@@ -203,21 +203,21 @@ describe('存档 / 读档边界', () => {
     //   而真实不可信数据（存档 / 协议帧）走的正是 JSON.parse —— 它才会
     //   生成名为 `__proto__` 的自有属性，这才是要防的那条路。
     const payload = JSON.parse(
-      '{"prop":{"gj":10,"attack":99,"gjsd_peer":1,"__proto__":1},' +
+      '{"prop":{"attack":10,"defence":99,"gjsd_peer":1,"__proto__":1},' +
         '"ext":{"props_test_key":3,"someone_elses_buff":5}}',
     ) as unknown;
 
     const report = loadProps(h, payload);
-    expect(report.loaded).toBe(2); // 只有 gj 与 props_test_key
+    expect(report.loaded).toBe(2); // 只有 attack 与 props_test_key
     expect(report.rejected.map((r) => r.key).sort()).toEqual([
       'ext.someone_elses_buff',
       'prop.__proto__',
-      'prop.attack',
+      'prop.defence',
       'prop.gjsd_peer',
     ]);
     expect(h.props.size).toBe(1);
     expect(h.extProps.size).toBe(1);
-    expect(getProp(h, 'gj')).toBe(10);
+    expect(getProp(h, 'attack')).toBe(10);
     // 原型没有被污染
     expect(Object.getPrototypeOf(h.props)).toBe(Map.prototype);
   });
@@ -232,12 +232,16 @@ describe('存档 / 读档边界', () => {
   it('★ 变异：非数值被拒收，不会把 NaN 装进档案', () => {
     const h = createPropHolder();
     const report = loadProps(h, {
-      prop: { gj: '5', fy: null, ds: NaN, zj: 7 },
+      prop: { attack: '5', defense: null, evasion: NaN, deflect: 7 },
     });
     expect(report.loaded).toBe(1);
-    expect(report.rejected.map((r) => r.key).sort()).toEqual(['prop.ds', 'prop.fy', 'prop.gj']);
+    expect(report.rejected.map((r) => r.key).sort()).toEqual([
+      'prop.attack',
+      'prop.defense',
+      'prop.evasion',
+    ]);
     expect(h.props.size).toBe(1);
-    expect(getProp(h, 'zj')).toBe(7);
+    expect(getProp(h, 'deflect')).toBe(7);
   });
 
   it('loadProps 拒绝不认识的字段，非对象入参直接抛', () => {
@@ -256,14 +260,14 @@ describe('存档 / 读档边界', () => {
     // 对照：`typeof [] === 'object'`，所以只用 typeof 判会**静默放行**数组。
     // 最坏的一种是空数组：`Object.entries([])` 是空的 → loaded 0 / rejected 0，
     // 调用方看到的是"成功装了 0 个属性"，而不是"你给错了形状"。
-    for (const bad of [[], ['gj'], [1, 2]] as unknown[]) {
+    for (const bad of [[], ['attack'], [1, 2]] as unknown[]) {
       expect(() => loadProps(h, bad), JSON.stringify(bad)).toThrow(PropValueError);
     }
     // 抛错之后表依然是空的 —— 抛错路径不许留半成品
     expect(h.props.size).toBe(0);
 
     // 嵌套层同理：`{ prop: [] }` 不是"没有属性"，是一个**坏形状**
-    for (const nested of [[], ['gj', 'fy']] as unknown[]) {
+    for (const nested of [[], ['attack', 'defense']] as unknown[]) {
       const report = loadProps(h, { prop: nested });
       expect(report.loaded, JSON.stringify(nested)).toBe(0);
       expect(report.rejected, JSON.stringify(nested)).toEqual([
@@ -278,36 +282,36 @@ describe('存档 / 读档边界', () => {
 // E11（2026-10-16 审查）：`loadProps` 只过 `Number.isFinite` —— **没有范围闸门**
 // ---------------------------------------------------------------------------
 //
-// 于是 `gj:1e300`、`max_hp:-5`、`gjsd:-1e9` 都能进表：前两个会让一切下游算术失真，
+// 于是 `attack:1e300`、`max_hp:-5`、`attack_speed:-1e9` 都能进表：前两个会让一切下游算术失真，
 // 后者让攻击速度变成负数（`MIN_ATTACK_INTERVAL_MS` 那条钳制也救不了负数语义）。
 // 与 `temp.ts` 的取向对齐：**读档是数据入口，脏值要在入口拒掉**。
 describe('E11 · 范围闸门（数值大小与符号）', () => {
   it('★ 超过数值上界的属性被拒收并记账（1e300 不许进表）', () => {
     const h = createPropHolder();
-    const report = loadProps(h, { prop: { gj: 1e300 } });
+    const report = loadProps(h, { prop: { attack: 1e300 } });
 
     expect(report.loaded).toBe(0);
-    expect(report.rejected.map((r) => r.key)).toEqual(['prop.gj']);
-    expect(getProp(h, 'gj'), '脏值不许进表').toBe(0);
+    expect(report.rejected.map((r) => r.key)).toEqual(['prop.attack']);
+    expect(getProp(h, 'attack'), '脏值不许进表').toBe(0);
   });
 
   it('★ 语义上非负的键（上限 / 时长类）收到负值 ⇒ 拒收', () => {
     const h = createPropHolder();
-    const report = loadProps(h, { prop: { max_hp: -5, gjsd: -1e9 } });
+    const report = loadProps(h, { prop: { max_hp: -5, attack_speed: -1e9 } });
 
     expect(report.loaded).toBe(0);
-    expect([...report.rejected.map((r) => r.key)].sort()).toEqual(['prop.gjsd', 'prop.max_hp']);
+    expect([...report.rejected.map((r) => r.key)].sort()).toEqual(['prop.attack_speed', 'prop.max_hp']);
     expect(getProp(h, 'max_hp')).toBe(0);
   });
 
   it('【反向锚点】合法值照常装载（含"允许为负"的键的负值）', () => {
     const h = createPropHolder();
-    const report = loadProps(h, { prop: { gj: 40, max_hp: 100, fy: -3 } });
+    const report = loadProps(h, { prop: { attack: 40, max_hp: 100, defense: -3 } });
 
     // `fy` 允许为负（减益是合法内容），只有上界与"非负子集"受限
     expect(report.rejected).toEqual([]);
     expect(report.loaded).toBe(3);
     expect(getProp(h, 'max_hp')).toBe(100);
-    expect(getProp(h, 'fy')).toBe(-3);
+    expect(getProp(h, 'defense')).toBe(-3);
   });
 });

@@ -21,11 +21,19 @@ import type { ActorObject, ItemDetailView } from '@engine/world/defs.js';
  *      客户端靠"首字符是不是 `{`"把它认回成包。
  *      这里走显式的 `me.showItem(detail)`，由会话层包成 `item` 帧。
  *
- *   ② **动作清单只列真的打得出来的**。wushen 的 `query_commands_json` 还会拼
- *      「比试 / 击杀 / 拜师 / 学习 / 购买 / 询问」—— 那些依赖
- *      `fight` / `kill` / `bai` / `cha` / `list` 等指令，本项目一条都还没有。
- *      照抄它们等于摆一排点下去只会回"什么？"的按钮（`src/index.html` 的工具条
- *      注释里已经立过这条规矩）。等那些指令落地，在这里按 wushen 的顺序追加即可。
+ *   ② **动作清单只列真的打得出来的**。wushen 的 `query_commands_json`
+ *      （`os/char/npc.js:56-105`）按顺序拼「查看 / 比试 / 击杀 / 拜师 / 学习 /
+ *      购买 / 询问」。本项目逐条对照现状：
+ *        · `look <id>` / `fight <id>` / `kill <id>` —— **已有**，本轮接上；
+ *        · `skills <id>`（看这个人会什么）—— **已有**，对应 wushen 的「学习」入口；
+ *        · 拜师 `bai` / 购买 `list` / 询问 `ask ... about` —— 仍无指令，不摆按钮。
+ *      规矩不变：只列点下去**真的有反应**的动作（`src/index.html` 工具条注释）。
+ *
+ *   ③ **比试 / 击杀 要过两道闸**：房间 `noFight`（这块地方不许动手）与
+ *      目标自己的 `noFight` / `noKill`（这个人不肯打 / 杀不得）。
+ *      两者任一成立就不出按钮 —— 与 wushen `npc.js:67` 的 `if (!this.no_fight)` 同源，
+ *      但把"击杀"也纳入闸门（wushen 那边按钮恒在、由 `kill.js:11` 事后拒绝，
+ *      结果是点下去只得到一句"你要攻击谁？"，玩家会以为按钮坏了）。
  *
  * ★ 闸门照抄：wushen `select.js` 声明了 `allow_busy` / `allow_state`。
  *   "看东西"不该被忙碌或打坐挡住 —— 也不该被灵魂状态挡住（否则死了连自己
@@ -57,7 +65,7 @@ defineCommand('action/select', {
       me.notify(INSPECT_MESSAGES.notFound);
       return;
     }
-    me.showItem(detailOf(target));
+    me.showItem(detailOf(target, env.noFight === true));
   },
 });
 
@@ -90,19 +98,52 @@ export const INSPECT_MESSAGES = {
  * **三级分发的第三级**（`ask <目标>` 里 `<目标>` 要先能解析成对象）；
  * 用运行时实例 id 才不会有"两个同名 NPC 打错人"的问题。
  */
-export function detailOf(obj: ActorObject): ItemDetailView {
+export function detailOf(obj: ActorObject, roomNoFight = false): ItemDetailView {
   const desc = (obj.desc ?? '').trim();
   return {
     id: obj.id,
     name: obj.name,
     desc: desc === '' ? obj.name : `${obj.name}\n${desc}`,
-    commands: commandsOf(obj),
+    commands: commandsOf(obj, roomNoFight),
   };
 }
 
-/** 目标声明的动作 → 按钮列表（wushen `query_commands_json` 的自定义 `actions` 那一支） */
-function commandsOf(obj: ActorObject): Array<{ cmd: string; name: string }> {
+/**
+ * 目标声明的动作 → 按钮列表。
+ *
+ * ★ **地面物品先给一条「捡起」**（2026-10-18 真机走查）：`detailOf()` 原先只列
+ *   `obj.actions`，而那是 NPC / 房间"自己的动作"，物品的 `actions` 恒为空 ——
+ *   于是点地上的丹药看到描述、却**没有任何办法捡起来**，只能猜到要手敲 `get 丹药`。
+ *   wushen 的 `OBJ.query_desc`（`os/item/obj.js:32-47`）是无条件 push
+ *   `{ cmd: "get " + this.id, name: "捡起" }`，这里照它。
+ *
+ * ★ 带**实例 id** 而不是名字：地上两枚同名丹药，`get 丹药` 捡哪一枚取决于查找顺序，
+ *   `get <id>` 不会捡错（与 NPC 动作同一条理由）。
+ * ★ `no_get` 的物品也照样给按钮 —— wushen 就是无条件给的，点下去由 `get` 说明
+ *   为什么拿不起来（"明确拒绝"比"没有按钮"更好解释）。
+ */
+function commandsOf(obj: ActorObject, roomNoFight: boolean): Array<{ cmd: string; name: string }> {
   const out: Array<{ cmd: string; name: string }> = [];
+  // wushen `obj.js:41-44`：物品的详情固定带一条「捡起」
+  if (obj.kind === 'item') out.push({ cmd: `get ${obj.id}`, name: '捡起' });
+
+  // wushen `os/char/npc.js:63-75`：NPC 的详情固定是「查看 / 比试 / 击杀」打头
+  if (obj.kind === 'npc') {
+    out.push({ cmd: `look ${obj.id}`, name: '查看' });
+    // ★ 房间禁武 = 这块地方不许动手；目标 noFight/noKill = 这个人不肯打 / 杀不得。
+    if (!roomNoFight && obj.noFight !== true) {
+      out.push({ cmd: `fight ${obj.id}`, name: '比试' });
+    }
+    if (!roomNoFight && obj.noKill !== true) {
+      out.push({ cmd: `kill ${obj.id}`, name: '击杀' });
+    }
+    // 「技能」对应 wushen 的「学习」入口（`cha <id>`）：先看他会什么，再决定学哪门。
+    // ★ 一门都不会的人（木人桩）不摆按钮 —— 点开只会回"什么武功也不会"。
+    if ((obj.skillList?.() ?? []).length > 0) {
+      out.push({ cmd: `skills ${obj.id}`, name: '技能' });
+    }
+  }
+
   for (const action of obj.actions ?? []) {
     // wushen 也是 `if (!this.actions[cmd].name) continue;` —— 没有显示名的动作
     // 不该变成一个只有触发词的按钮。

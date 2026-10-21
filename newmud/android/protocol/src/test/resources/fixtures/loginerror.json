@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "type": "loginerror",
+  "code": "NOT_LOGGED_IN",
+  "msg": "尚未登录"
+}

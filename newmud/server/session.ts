@@ -62,8 +62,16 @@ function packet(body: Record<string, unknown>): string {
  *   （`shared/constants.ts`）。属于 FG-20 那类"注释宣称了一件事、而事实相反"，
  *   已于 2026-10-13 随 26 册 §24 一并改正。
  */
-function textPacket(content: string): string {
-  return packet({ type: 'warn', content, cmds: [] as CmdItem[] });
+function textPacket(content: string, context?: string): string {
+  // ★ 不带归属时**不写这个键**（而不是写 `context: undefined`）：JSON.stringify
+  //   会把 `undefined` 值丢掉，但显式写出来会让"这条有没有声明归属"在报文上
+  //   看起来一样，调试时分不清是"服务端没声明"还是"序列化吃掉了"。
+  return packet({
+    type: 'warn',
+    content,
+    cmds: [] as CmdItem[],
+    ...(context === undefined ? {} : { context }),
+  });
 }
 
 function errorPacket(code: ErrorCode): string {
@@ -155,7 +163,7 @@ const CHANNEL_SCOPE: Readonly<Record<Channel, 'world' | 'self' | 'target'>> = {
 };
 
 /**
- * "客户端看到的房间"的签名：房间 path + 房内**全部**对象 id（排序）。
+ * "客户端看到的房间"的签名：房间 path + 房内**全部**对象（排序）。
  *
  * ★ 排序后再拼接：`items` 的顺序会随进出变化，不排序的话"两个人交换了位置"
  *   也会被当成变化 —— 那会让判据噪声大到没人敢用（见 FG-11：判据要落在
@@ -170,19 +178,34 @@ const CHANNEL_SCOPE: Readonly<Record<Channel, 'world' | 'self' | 'target'>> = {
  * ★ 排除自己**不是**正确性需要？—— 逐条查过，含自己**不会漏掉任何一次该推的更新**：
  *   - 自己换了房间 ⇒ `path` 变 ⇒ 签名变；
  *   - 房里有人进/出 ⇒ id 集合变 ⇒ 签名变（房内每个人都会收到新 `items`）。
- *   反过来，含自己也不会**多推**：签名变 ⟺ 房间里的人员/物件集合变了
- *   ⟺ 房里每个玩家的视图都变了。
+ *   ★★ 2026-10-17 订正（26 册 §57）：原文写的是"签名变 ⟺ 人员/物件**集合**变了"，
+ *      现在**不再成立** —— NPC 掉血也进签名（否则血条不动）。准确的说法是：
+ *      **签名变 ⟺ 集合变了 ∨ 某个 NPC 的气血/内力变了**，两者都是"房里每个人
+ *      的视图都变了"，所以"不会多推"那半句仍然站得住。
  *   `tests/session.test.ts` 的『同房两玩家签名相同 / 多一人少一人签名变』
  *   与 `tests/login-e2e.test.ts` 的『同房的人走了 → 我这边收到新的 items』
- *   一起把这条钉住（前者是同房共用的**前提**，后者是端到端的行为）。
+ *   一起把这条钉住（前者是同房共用的**前提**，后者是端到端的行为）；
+ *   『NPC 掉血 ⇒ 签名变』由 `tests/session.test.ts` 的 §57 组钉住。
  *
  * ★ 不在房间 / 房间没有模板 path → 空串（此时无话可说，`#reconcileRooms` 跳过）。
  */
 export function roomSignatureOf(player: Player): string {
   const env = player.environment;
   if (env === null || env.path === null) return '';
+  // ★★ 带上 NPC 的**气血 / 内力**（26 册 §57，真机反馈"打木人桩血条不动"）：
+  //   只拼 id 的话，木人桩从满血打到 0 血时 id 一字不变 ⇒ `#reconcileRooms` 判定
+  //   "客户端已知这个房间"、`items` 不再重推 ⇒ 房间区那条血条从开打到打死一动不动
+  //   （而 `afterTick` 每个 tick 都在对账，等于白对）。
+  //
+  // ★ 只取**非玩家**角色：玩家自己的气血由 `statSignatureOf` 的 `sc` 帧负责，
+  //   重复纳入只会让"我掉一滴血"也触发一次整房重推。
+  // ★ "谁是玩家"对房里所有人是**同一个事实** ⇒ 同房签名仍然相同（N5 的前提不变）。
   const ids = env.items
-    .map((o) => o.id)
+    .map((o) =>
+      o instanceof Character && !(o instanceof Player)
+        ? `${o.id}:${String(o.hp)}|${String(o.mp)}`
+        : o.id,
+    )
     .sort()
     .join(',');
   return `${env.path}|${ids}`;
@@ -352,6 +375,12 @@ export class GameSessions {
       output: this.#outputFor(conn),
       // ★ 世界时钟：战斗节拍要它。世界是角色的时钟来源（单源，见 `World.scheduler`）。
       scheduler: this.#world.scheduler,
+      // ★★ 技能注册表（§64）：**不传的话玩家用的是 `EMPTY_REGISTRY`**
+      //   —— 于是 `learn` / `practice` 全都报"没有这个技能"，
+      //   而这类失败看起来像"内容没写"，其实是"没接线"。
+      //   第一版就是漏了这一行，真机探针才把它抓出来（单元测试里 `makePlayer`
+      //   一直显式传了 registry，所以单测一直是绿的 —— 这正是"必须真机走一遍"的理由）。
+      skillRegistry: this.#world.skillRegistry,
     });
 
     try {
@@ -485,6 +514,12 @@ export class GameSessions {
       notify: (text) => {
         this.#send(conn, textPacket(text));
       },
+      // ★ 面板内文本 → `warn` 帧带 `context`（§80）。**只转不判断**：
+      //   "这块面板是不是还开着"是前端的知识，这里多看一层只会多一份会漂的判据。
+      //   前端对不上就退回消息流，文本不会丢。
+      notifyInPanel: (panelId, text) => {
+        this.#send(conn, textPacket(text, panelId));
+      },
       sendCommands: (...pairs) => {
         this.#send(conn, cmdsPacket(pairs));
       },
@@ -494,6 +529,21 @@ export class GameSessions {
       //   再打一遍（26 册 §20.3 的真机记录）。现在由 `select` 指令喂它。
       showItem: (detail) => {
         this.#send(conn, packet({ type: 'item', ...detail }));
+      },
+      // ★ 属性面板 → `dialog:score` 帧（§62）。wushen 的 `score` 就是
+      //   `{type:"dialog",dialog:"score",…}`（`world/cmd/dialog/score.js`），
+      //   前端 `src/process/handlers/social.ts` 按 `dialog` 名分派到专用渲染器。
+      //   ★ 这里**只转**不加工：`AttrView` 的字段名与前端读的一一对应，
+      //     中间加一层改名就会多出一份"谁叫什么"的对照表（24 册铁律 4）。
+      showAttr: (view) => {
+        this.#send(conn, packet({ type: 'dialog', dialog: 'score', ...view }));
+      },
+      // ★ 技能面板 → `dialog:skills` 帧（§64）。wushen 的 `cha` 就是
+      //   `{type:"dialog",dialog:"skills",items:[…],title,limit,pot}`（`world/cmd/dialog/cha.js`）。
+      //   ★ `title` / `limit` / `pot` 与 `items` 都是**服务端算好**的字段名，
+      //     这里一个都不改名 —— 改名会多出一份对照表。
+      showSkills: (view) => {
+        this.#send(conn, packet({ type: 'dialog', dialog: 'skills', ...view }));
       },
       sendChannel: (ch, content, to) => {
         const me = this.#players.get(conn.id);
@@ -515,6 +565,15 @@ export class GameSessions {
       //   前端 `combat.ts` 的 `die` handler 靠 `p['relive'] === true` 分支成"你又活过来了"。
       revive: () => {
         this.#send(conn, packet({ type: 'die', relive: true }));
+      },
+      // ★ 持续状态 → `state` 帧（26 册 §75）。**这一条以前同样没有生产者**：
+      //   协议里 `StatePacket` 写着、前端 `handlers/combat.ts` 也注册了 handler，
+      //   但全仓零发送点 —— 于是 wushen 那套"读书 / 练习 / 打坐"的持续状态
+      //   在本项目里根本无从表达（`practice` 只能做成一次结算）。
+      //   现在由 `Character.startState` / `stopState` 喂它。
+      //   ★ `null`（状态结束）也发一帧：`{state:'',desc:''}` —— 前端据此把那条状态收起来。
+      state: (view) => {
+        this.#send(conn, packet({ type: 'state', state: view?.title ?? '', desc: view?.desc ?? '' }));
       },
     };
   }

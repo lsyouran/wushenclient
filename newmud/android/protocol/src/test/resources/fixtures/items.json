@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "type": "items",
+  "items": [
+    {
+      "id": "p0b0gw3m96",
+      "name": "店小二",
+      "hp": 150,
+      "max_hp": 177,
+      "mp": 150,
+      "max_mp": 150
+    },
+    {
+      "id": "k4y92o0qva",
+      "name": "丹药"
+    }
+  ]
+}

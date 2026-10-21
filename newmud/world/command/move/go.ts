@@ -30,6 +30,16 @@ defineCommand('move/go', {
       me.notify('往哪个方向走？用法：走 <方向>，如 `走 north`、`走 n`。');
       return;
     }
+    // ★ 战斗中不能白走（wushen `go.js:24`：先 `do_escape()`，成功了才允许移动）。
+    //   以前这里没有这道闸，于是"打不过就裸走"成了无代价传送 —— 逃跑指令还没写，
+    //   玩家已经能靠 `go` / 裸方向溜掉（脱战判定形同虚设）。
+    if ((me.fightType ?? 0) > 0) {
+      const escaped = me.escape();
+      if (!escaped.ok) {
+        me.notify('你被对手缠住，脱不了身。');
+        return;
+      }
+    }
     // 走不动的原因**引擎会告诉你**（26 册 T2）：没出路 / 内容在 `on_leave` 里拦住 /
     // 房间人满。三句话各不相同（`MOVE_MESSAGES`），不再笼统地说"过不去" ——
     // 以前这里和 `engine/room.ts` 的派生动作各写一遍同一句，改一处另一处不动。

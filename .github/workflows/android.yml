@@ -1,0 +1,136 @@
+# 安卓端构建与验证（26 册 §83.5）。
+#
+# ★★ 存在理由：开发机**没有 JDK、没有 Android SDK**（`JAVA_HOME` 指向一个不存在的目录），
+#   所以"能压缩一行 Kotlin"这件事只能由 CI 提供。
+#   ⇒ 这个 workflow 不只是打包，它还承担了**本机做不到的全部验证**：
+#     编译、单测、以及"生成物有没有落后于协议"。
+#
+# ★ 三条作业的分工就是三种失败：
+#   ① protocol-drift —— Kotlin 协议模型落后于 `shared/protocol.ts`（生成器 `--check`，秒级）
+#   ② jvm-tests      —— 判断逻辑错了（`:core` 与 `:protocol` 的单测，**不需要安卓 SDK**）
+#   ③ assemble       —— 代码编不过 / 清单写错（真出 debug APK，可下载装机）
+#
+# ⚠️ 本目录在**仓库根**（git 根是 `ts-mud/`，`newmud/` 是子目录），
+#   所以下面每一条路径都带 `newmud/` 前缀。若把 `newmud` 拆成独立仓库，
+#   这个文件要搬到 `newmud/.github/workflows/`，并把所有 `newmud/` 前缀去掉。
+
+name: Android
+
+on:
+  push:
+    paths:
+      - 'newmud/android/**'
+      - 'newmud/shared/protocol.ts'
+      - 'newmud/tools/gen-kotlin-protocol.mjs'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'newmud/android/**'
+      - 'newmud/shared/protocol.ts'
+      - 'newmud/tools/gen-kotlin-protocol.mjs'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+# 同一分支连续推两次：取消前一次。省时间，也避免"两个作业同时写同一个 artifact"
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与本地托管版本对齐（`C:\Users\...\node\versions\22.22.2-6`）
+  NODE_VERSION: '22.22.2'
+  GRADLE_VERSION: '8.11.1'
+  JAVA_VERSION: '17'
+
+jobs:
+  # ── ① 生成物 vs 协议：谁落后就红 ──────────────────────────────────────────
+  #
+  # ★ 这条**不需要 JDK**，所以放在最前面：最快给出"你忘了重新生成"的答案。
+  #   它守的是"协议改了、Kotlin 没跟上"——那种错误在安卓编译时**表现为完全正常的代码**，
+  #   只会在真机上少一个字段（`ignoreUnknownKeys` 把多出来的丢掉、缺的走默认值）。
+  protocol-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: newmud/package-lock.json
+
+      - name: 安装依赖
+        working-directory: newmud
+        run: npm ci
+
+      - name: 校验 Kotlin 协议模型是否与 shared/protocol.ts 一致
+        working-directory: newmud
+        run: node tools/gen-kotlin-protocol.mjs --check
+
+      - name: 打印真机样本覆盖面（缺口必须是有解释的）
+        working-directory: newmud
+        run: node tools/gen-protocol-fixtures.mjs --list
+
+  # ── ② 判断逻辑的单测：**不需要安卓 SDK** ──────────────────────────────────
+  #
+  # ★ `-PskipApp` 是这里的关键：不配置 `:app` 就不会触发 AGP 的 "SDK location not found"。
+  #   于是"文本该落到哪儿""颜色标签怎么解""面板轮次"这些**唯一会写错的判断**
+  #   可以在一台没有安卓环境的机器上几秒内验完。
+  jvm-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          # ★ 仓库里**没有** `gradle-wrapper.jar`（二进制文件不进版本库），
+          #   由这个 action 提供 Gradle 本体。于是本地也不需要先装 wrapper 才能出包。
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 协议解码 + 文本落点判据
+        working-directory: newmud/android
+        run: gradle :protocol:test :core:test -PskipApp --stacktrace
+
+      - name: 失败时把测试报告传上来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvm-test-reports
+          path: |
+            newmud/android/protocol/build/reports/tests/**
+            newmud/android/core/build/reports/tests/**
+          if-no-files-found: ignore
+
+  # ── ③ 出 APK：这一步才需要安卓 SDK ────────────────────────────────────────
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 构建 debug APK
+        working-directory: newmud/android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: newmud-debug-apk
+          path: newmud/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

@@ -13,13 +13,21 @@
 
 import './area/yz.js';
 import './skill/base/force.js';
+import './skill/base/dodge.js';
+import './skill/base/parry.js';
+import './skill/base/unarmed.js';
 import './skill/base/sword.js';
+import './skill/base/blade.js';
 import './skill/wd/taijijian.js';
 import './item/drug/yao.js';
+import './item/book/taijijian.js';
+import './item/book/sword.js';
 import './npc/pub/xiaoer.js';
 import './npc/pub/muren.js';
+import './npc/pub/jiaotou.js';
 import './room/yz/guangchang.js';
 import './room/yz/beidajie1.js';
+import './room/yz/wuguan.js';
 import './command/action/look.js';
 import './command/action/select.js';
 import './command/move/go.js';
@@ -33,8 +41,16 @@ import './command/obj/give.js';
 import './command/obj/use.js';
 import './command/combat/fight.js';
 import './command/combat/kill.js';
+import './command/combat/flee.js';
 import './command/combat/relive.js';
 import './command/train/practice.js';
+import './command/train/learn.js';
+import './command/train/enable.js';
+import './command/train/forget.js';
+import './command/train/study.js';
+import './command/train/stop.js';
+import './command/info/skills.js';
+import './command/admin/addxp.js';
 
 /**
  * 清单（相对 `world/` 的路径，顺序 = 加载顺序）。
@@ -43,13 +59,21 @@ import './command/train/practice.js';
 export const CONTENT_MODULES: readonly string[] = [
   'area/yz.ts',
   'skill/base/force.ts',
+  'skill/base/dodge.ts',
+  'skill/base/parry.ts',
+  'skill/base/unarmed.ts',
   'skill/base/sword.ts',
+  'skill/base/blade.ts',
   'skill/wd/taijijian.ts',
   'item/drug/yao.ts',
+  'item/book/taijijian.ts',
+  'item/book/sword.ts',
   'npc/pub/xiaoer.ts',
   'npc/pub/muren.ts',
+  'npc/pub/jiaotou.ts',
   'room/yz/guangchang.ts',
   'room/yz/beidajie1.ts',
+  'room/yz/wuguan.ts',
   'command/action/look.ts',
   'command/action/select.ts',
   'command/move/go.ts',
@@ -63,6 +87,14 @@ export const CONTENT_MODULES: readonly string[] = [
   'command/obj/use.ts',
   'command/combat/fight.ts',
   'command/combat/kill.ts',
+  'command/combat/flee.ts',
   'command/combat/relive.ts',
   'command/train/practice.ts',
+  'command/train/learn.ts',
+  'command/train/enable.ts',
+  'command/train/forget.ts',
+  'command/train/study.ts',
+  'command/train/stop.ts',
+  'command/info/skills.ts',
+  'command/admin/addxp.ts',
 ];

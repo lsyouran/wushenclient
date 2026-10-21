@@ -1,0 +1,73 @@
+{
+  "source": "tools/gen-protocol-fixtures.mjs（真起服务端抓的帧）",
+  "protocolVersion": 1,
+  "captured": [
+    [
+      "cmds",
+      1
+    ],
+    [
+      "combat",
+      1
+    ],
+    [
+      "dialog",
+      2
+    ],
+    [
+      "exits",
+      9
+    ],
+    [
+      "item",
+      1
+    ],
+    [
+      "items",
+      9
+    ],
+    [
+      "login",
+      2
+    ],
+    [
+      "loginerror",
+      1
+    ],
+    [
+      "msg",
+      1
+    ],
+    [
+      "room",
+      9
+    ],
+    [
+      "sc",
+      2
+    ],
+    [
+      "state",
+      2
+    ],
+    [
+      "warn",
+      17
+    ]
+  ],
+  "types": [
+    "cmds",
+    "combat",
+    "dialog",
+    "exits",
+    "item",
+    "items",
+    "login",
+    "loginerror",
+    "msg",
+    "room",
+    "sc",
+    "state",
+    "warn"
+  ]
+}

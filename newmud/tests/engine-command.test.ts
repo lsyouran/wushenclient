@@ -37,14 +37,21 @@ import type {
   CommandActor,
   CommandDef,
   CommandGateDecl,
+  EnableResult,
+  EscapeResult,
+  ForgetResult,
   ItemDetailView,
+  LearnResult,
   NpcDef,
   PracticeResult,
+  StudyResult,
   RoomDef,
   FightStart,
+  SkillsView,
 } from '../server/world/defs.js';
 import type { Channel, Direction } from '../shared/constants.js';
 import type { AttrBreakdown } from '../server/engine/formula.js';
+import type { AttrView } from '../shared/protocol.js';
 import { asWorldId } from '../shared/ids.js';
 
 /**
@@ -97,7 +104,7 @@ class TestActor implements CommandActor {
   public isAlive: boolean;
   public userLevel: number;
   public fightType: number;
-  public state: { readonly title: string } | null;
+  public state: { readonly id: string; readonly title: string; readonly desc: string } | null;
   public isFaint: boolean;
   #busy: boolean;
 
@@ -119,8 +126,27 @@ class TestActor implements CommandActor {
     this.#busy = opts.busy ?? false;
     this.userLevel = opts.userLevel ?? 0;
     this.fightType = opts.fightType ?? 0;
-    this.state = opts.state ?? null;
+    // 闸门只读 `title`；`id` / `desc` 是状态机的字段，这里补成形状完整的值
+    this.state = opts.state === undefined || opts.state === null ? null : { id: 'test', title: opts.state.title, desc: '' };
     this.isFaint = opts.faint ?? false;
+  }
+
+  /**
+   * 状态机的两个动作在这里是**桩**（`false` = 没开始 / 没停掉）。
+   * ★ 状态机本身必须用真 `Character` + 真 `Scheduler` 测（见 `tests/engine-state.test.ts`）：
+   *   替身里实现一份"自己的状态机"只会测到替身。
+   */
+  public startState(): boolean {
+    return false;
+  }
+
+  public stopState(): boolean {
+    return false;
+  }
+
+  /** 读书的桩（同上：真账目在 `tests/skill-study.test.ts` 用真 `SkillBook` 验） */
+  public studySkill(): StudyResult {
+    return { kind: 'refused', reason: 'unknown' };
   }
 
   public get room(): Room | null {
@@ -141,9 +167,48 @@ class TestActor implements CommandActor {
     return true;
   }
 
+  /**
+   * `grantExp` 的桩：**真的记账**，而不是空实现。
+   * ★ 空实现会让"addxp 到底加没加"这类测试变成假绿 —— 桩也要有可观察效果。
+   */
+  public grantExp(exp: number, pot = 0): void {
+    this.exp += exp;
+    this.pot += pot;
+  }
+
   public practiceSkill(): PracticeResult {
     // ★ 判别联合会拒绝"半边有值"的形状：拒绝时就不能带 spent/gained，也不能编造 level
     return { kind: 'refused', reason: 'unknown' };
+  }
+
+  // ── 技能簿另外三个动作 + 面板（§64）—— 本文件只测分发闸门，故全是"不会"桩 ──
+  //
+  // ★ 形状必须与真实现**同一条判别联合**：桩里编 `{kind:'learned'}` 会让
+  //   "指令层漏判 refused"这类编码错误在本文件里测不出来。
+  public learnSkill(): LearnResult {
+    return { kind: 'refused', reason: 'unknown' };
+  }
+
+  public forgetSkill(): ForgetResult {
+    return { kind: 'refused', reason: 'unknown' };
+  }
+
+  public enableSkill(): EnableResult {
+    return { kind: 'refused', reason: 'unknown' };
+  }
+
+  public disableSkill(): boolean {
+    return false;
+  }
+
+  public skillView(): SkillsView {
+    return { title: '没有学会任何技能', limit: 0, pot: 0, items: [] };
+  }
+
+  public readonly skillViews: SkillsView[] = [];
+
+  public showSkills(view: SkillsView): void {
+    this.skillViews.push(view);
   }
 
   public skillLimit(): number {
@@ -156,6 +221,11 @@ class TestActor implements CommandActor {
 
   public notify(text: string): void {
     this.messages.push(text);
+  }
+
+  /** §80：面板内文本 —— 记成 `[panel:id] 文本`，让"落错框"在断言里看得见 */
+  public notifyInPanel(panelId: string, text: string): void {
+    this.messages.push(`[panel:${panelId}] ${text}`);
   }
 
   public sendRoom(text: string): void {
@@ -192,6 +262,20 @@ class TestActor implements CommandActor {
   public beginFight(target: ActorObject, type: FightType): FightStart {
     this.fightOps.push(`fight ${target.id} ${String(type)}`);
     return { ok: true };
+  }
+
+  /**
+   * `CommandActor.escape` 的桩（逃跑批次新增）—— 默认"没在战斗"，只记账。
+   *
+   * ★ 判据（躲闪对抗命中 / 失败加 busy）必须用**真 `Character`** 测，见
+   *   `tests/combat.test.ts` 的 `Character.escape` 一组；本文件只测 `go` / `flee`
+   *   两条指令**有没有**调它。
+   */
+  public escapeCalls = 0;
+
+  public escape(): EscapeResult {
+    this.escapeCalls += 1;
+    return { ok: false, reason: 'not-fighting' };
   }
 
   /** `CommandActor.revive` 的桩（复活批次新增）—— 同上，只记账 */
@@ -260,6 +344,38 @@ class TestActor implements CommandActor {
    */
   public attrBreakdowns(): readonly AttrBreakdown[] {
     return [];
+  }
+
+  /**
+   * `CommandActor.attrView` 的桩（§62）：属性面板要的那张快照。
+   *
+   * ★ `TestActor` 没有 `#derived`，所以战斗那几格只能给 0 —— 但**形状**要是真的，
+   *   否则"面板少了哪一段"这类问题在测试里看不出来。真实的取数由
+   *   `Character.attrView()` 给，口径由 `tests/engine-character.test.ts` 钉住。
+   */
+  public attrView(): AttrView {
+    return {
+      name: this.name,
+      gender: 0,
+      level: 0,
+      realmName: '初出茅庐',
+      exp: 0,
+      pot: 0,
+      hp: 0,
+      maxHp: 0,
+      mp: 0,
+      maxMp: 0,
+      attrs: this.attrBreakdowns(),
+      combat: { attack: 0, defense: 0, hit: 0, evasion: 0, deflect: 0, crit: 0 },
+      skillLimit: 0,
+    };
+  }
+
+  /** 收下 `showAttr` 的面板快照（`score` 指令的落点）。诊断与测试用 */
+  public readonly attrViews: AttrView[] = [];
+
+  public showAttr(view: AttrView): void {
+    this.attrViews.push(view);
   }
 
   public lastMessage(): string {
@@ -496,9 +612,29 @@ describe('engine/command · gateStateOf', () => {
       id: 'x',
       name: 'X',
       notify: () => undefined,
+      // §80：`gateStateOf` 用不到，但接口要求在场（缺了 tsc 会点名）
+      notifyInPanel: () => undefined,
       sendRoom: () => undefined,
       sendCommands: () => undefined,
       showItem: () => undefined,
+      // §62：属性面板的两条落点（`gateStateOf` 用不到，但接口要求在场）
+      showAttr: () => undefined,
+      showSkills: () => undefined,
+      attrView: () => ({
+        name: '',
+        gender: 0,
+        level: 0,
+        realmName: '初出茅庐',
+        exp: 0,
+        pot: 0,
+        hp: 0,
+        maxHp: 0,
+        mp: 0,
+        maxMp: 0,
+        attrs: [],
+        combat: { attack: 0, defense: 0, hit: 0, evasion: 0, deflect: 0, crit: 0 },
+        skillLimit: 0,
+      }),
       sendChannel: () => undefined,
       go: () => ({ ok: false, reason: 'blocked' }),
       environment: null,
@@ -515,13 +651,25 @@ describe('engine/command · gateStateOf', () => {
       spendMoney: () => true,
       // 战斗批次新增（`gateStateOf` 用不到，但接口要求在场）
       beginFight: () => ({ ok: true }),
+      escape: () => ({ ok: false, reason: 'not-fighting' }),
       revive: () => true,
       // 成长批次新增（`gateStateOf` 用不到，但接口要求在场）
       exp: 0,
       pot: 0,
       spendPot: () => false,
+      grantExp: () => undefined,
       practiceSkill: () => ({ kind: 'refused', reason: 'unknown' }),
       skillLimit: () => 0,
+      // 技能簿另外三个动作 + 面板（§64；`gateStateOf` 用不到，但接口要求在场）
+      learnSkill: () => ({ kind: 'refused', reason: 'unknown' }),
+      forgetSkill: () => ({ kind: 'refused', reason: 'unknown' }),
+      enableSkill: () => ({ kind: 'refused', reason: 'unknown' }),
+      disableSkill: () => false,
+      skillView: () => ({ title: '没有学会任何技能', limit: 0, pot: 0, items: [] }),
+      // 状态机（§75；`gateStateOf` 只读 `state`，两个动作要求在场）
+      startState: () => false,
+      stopState: () => false,
+      studySkill: () => ({ kind: 'refused', reason: 'unknown' }),
     };
     expect(gateStateOf(minimal, 1000)).toEqual({
       userLevel: 0,

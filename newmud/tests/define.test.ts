@@ -122,13 +122,13 @@ describe('M5 变体合并语义（★ docs/26 M5 回归 —— 显式钉住，�
   it('★ `prop` 是**并集**合并：变体只调一个属性，基对象其余属性必须留住', () => {
     defineItem('drug/m', {
       name: '药',
-      prop: { gj: 10, fy: 5, mz: 3 },
-      variants: { '1': { prop: { gj: 20 } } },
+      prop: { attack: 10, defense: 5, hit: 3 },
+      variants: { '1': { prop: { attack: 20 } } },
     });
     // 基对象不受影响
-    expect(getDef<ItemDef>('item', 'drug/m')?.prop).toEqual({ gj: 10, fy: 5, mz: 3 });
-    // 旧实现（整块覆盖）会得到 { gj: 20 } —— fy/mz 静默消失
-    expect(getDef<ItemDef>('item', 'drug/m#1')?.prop).toEqual({ gj: 20, fy: 5, mz: 3 });
+    expect(getDef<ItemDef>('item', 'drug/m')?.prop).toEqual({ attack: 10, defense: 5, hit: 3 });
+    // 旧实现（整块覆盖）会得到 { attack: 20 } —— fy/mz 静默消失
+    expect(getDef<ItemDef>('item', 'drug/m#1')?.prop).toEqual({ attack: 20, defense: 5, hit: 3 });
   });
 
   it('★ `extProp` 按 key 并集：变体赢、顺序稳定、基对象独有键保留', () => {

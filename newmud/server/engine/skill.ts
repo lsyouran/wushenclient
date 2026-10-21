@@ -29,7 +29,6 @@ import {
   isExtProp,
   isPropKey,
 } from '@shared/constants.js';
-import { GENDER_LABELS, propLabel } from '@shared/constants.js';
 import type { EnableSlot, ExtProp, PropKey, SkillType } from '@shared/constants.js';
 import { COMBAT_FORMULA, isAttrKey } from './formula.js';
 import { describeValue, isPlainRecord } from './load-report.js';
@@ -44,7 +43,18 @@ import {
 } from './props.js';
 import type { PropHolder } from './props.js';
 import type { TempStore } from './temp.js';
-import type { PerformDef, PracticeResult, PropMap, SkillActor, SkillDef, SkillLearnCondition } from '../world/defs.js';
+import { SKILL_CURVE } from '../world/skill-curves.js';
+import type {
+  LearnRefused,
+  LearnResult,
+  PerformDef,
+  PracticeResult,
+  PropMap,
+  SkillActor,
+  SkillDef,
+  SkillLearnCondition,
+  StudyResult,
+} from '../world/defs.js';
 
 export class SkillError extends Error {
   public override readonly name = 'SkillError';
@@ -75,9 +85,43 @@ export const SKILL_FORMULA = {
   limitExpMinLevel: 10,
   /** 上限因子按**境界**（0-6）取；`round(pow(exp * factor, 1/3))`（wushen `skill_limit`） */
   limitRealmFactor: [10, 20, 30, 40, 50, 60, 60] as const,
-  /** `max_level` 缺省值 */
+  /**
+   * **境界阈值**（技能等级）—— 境界 = 内功 / 轻功 / 招架**三槽等级的最小值**落在第几档。
+   *
+   * ★★ 为什么是**三槽取最小**（木桶）：境界是"这个人的整体层次"，不是"他最拿手的那门"。
+   *   取最大值会让"只练剑、不练内功"的人一路升到顶，而内功是气血与内力上限的来源
+   *   （`forceRad`）—— 那种角色会变成"高境界、纸糊的血条"。取最小值逼三样都练。
+   *
+   * ★★ **循环依赖与它为什么收敛**（这里最容易被后人误判成 bug）：
+   *     境界 ← 三槽等级 ← 技能上限 ← `limitRealmFactor[境界]` ← 境界
+   *   闭环存在，但**单调收敛**：上限只由 `exp` 与当前境界决定，而 `exp` 来自打怪、
+   *   不受技能上限约束。只要"升下一档所需的等级"在本档上限内能练到（下面的阈值都
+   *   远小于 1000 的硬顶），玩家攒够经验就一定能升上去，不会卡死。
+   *   ⇒ 阈值必须是**常数**；若把它写成 `exp` 的函数，就会变成"境界完全由经验决定"，
+   *     三槽等级这一维就白设了。
+   *
+   * ★ 1000 是最后一档的门槛：它同时是 `limitMaxLevel`（硬顶），于是"深不可测"
+   *   必须三样都练到顶才够 —— 这是刻意的，最后一档应该是终点而不是路过。
+   */
+  realmThresholds: [50, 150, 300, 500, 800, 1000] as const,
+  /** `max_level` 缺省值（内容层漏写时的**保守兜底**，不是本项目的设计上限） */
   defaultMaxLevel: 100,
+  /**
+   * 技能等级的**硬顶** —— 经验换算出来的上限不可能超过它。
+   *
+   * ★ 值来自 `SKILL_CURVE.refLevel`（**不是**另写一个 1000）：曲线的标定点就是
+   *   "练满拿满额加成"的那一级，两者必须相等，否则会出现"练到顶也拿不满"。
+   *   所以这里用引用而不是字面量，结构上不可能漂移。
+   */
+  limitMaxLevel: SKILL_CURVE.refLevel,
 } as const;
+
+// ★ 基本技能的 ① 档被动曲线**不在这张表里**，在 `server/world/skill-curves.ts`
+//   （`SKILL_CURVE`）。原因是依赖方向（G13 D2）：内容层 `world/skill/base/*.ts`
+//   只允许 import `@shared/**` 与 `server/world/**`，而曲线必须由内容层调用
+//   （`passiveProp` 是内容写的），否则 6 份文件各写一条曲线 = 第二份真相。
+//   引擎侧要读它也没问题（G13 D1 只禁 `server/engine` → `world/**`）。
+//   汇总视图仍是一处：`tuning.ts` 把 `SKILL_CURVE` 与这张表并排列出。
 
 /** 升到 `level+1` 所需的经验（wushen `level_exp`） */
 export function levelExp(level: number, grade: number): number {
@@ -94,11 +138,56 @@ export function totalNeedExp(level: number, grade: number): number {
   return base * (grade + 1) * SKILL_FORMULA.expBase;
 }
 
-/** 等级上限（wushen `skill_limit`）；`realm` = 境界 level 0-6 */
+/**
+ * 技能等级上限（wushen `skill_limit`）；`realm` = 境界 level 0-6。
+ *
+ * ★★ 这是「**技能上限由经验换算**」的唯一落点：
+ *
+ *     `上限 = min( round( (exp × 境界因子)^(1/3) ), limitMaxLevel )`
+ *
+ *   · `exp` 是**角色经验**，境界因子 10→60 只是把同一份经验放大到 1.8 倍上限；
+ *   · 经验是等级的**立方** ⇒ 上限从 100 涨到 200 要 8 倍经验，200→400 要 8 倍，
+ *     400→1000 又要 15.6 倍。这就是"越到后期越难突破"在算术上的来源。
+ *   · 末尾的 `min` 是**硬顶**：wushen 没有这一层，`cbrt` 会让高境界 + 巨量经验
+ *     无限膨胀（realm 6 下 1 亿经验能算出 1817 级）。本项目把天花板标在
+ *     `SKILL_CURVE.refLevel`（= 曲线标定点），于是"练满 1000 级"既能达到，
+ *     又不会溢出到曲线函数里被截断而白练。
+ *
+ * ★ wushen 只把这条曲线用在**玩家**的练习路径上；本项目同理 ——
+ *   `Npc.skillLimit()` 返回 `Infinity`，NPC 的上限就是模板 `max_level`。
+ */
+
+/**
+ * **境界**：由内功 / 轻功 / 招架**三槽等级的最小值**落在第几档决定（0–6）。
+ *
+ * ★★ wushen 的 `level` 是**存下来的一个数**（`user.js` 里有赋值路径，靠任务/门派推），
+ *   本项目改成**派生**：三样基本功练到哪，境界就是哪。理由有两条：
+ *   ① 少一个可写字段 = 少一处"存档里的境界与技能对不上"的可能（33 册红牌：同一概念单源）；
+ *   ② 玩家能**自己看见怎么涨**——"把内功/轻功/招架练上去"是一句可执行的话，
+ *      而"等级到了就涨"在内容层没有对应动作。
+ *
+ * ★ 为什么取 `min` 不取 `max` 或平均：见 `SKILL_FORMULA.realmThresholds` 的注释
+ *   （取 max ⇒ 只练剑不练内功的人会变成"高境界、纸糊血条"）。
+ *
+ * ★ 没练过（0）/ 传了脏值 ⇒ 境界 0。**不抛**：这是显示与上限因子都要读的量，
+ *   抛错会把"面板打不开"变成"进不了游戏"。
+ */
+export function realmOf(forceLevel: number, dodgeLevel: number, parryLevel: number): number {
+  const lowest = Math.min(forceLevel, dodgeLevel, parryLevel);
+  if (!Number.isFinite(lowest) || lowest <= 0) return 0;
+  let realm = 0;
+  for (const threshold of SKILL_FORMULA.realmThresholds) {
+    if (lowest < threshold) break;
+    realm += 1;
+  }
+  return realm;
+}
+
 export function levelLimit(exp: number, realm: number): number {
   if (exp < SKILL_FORMULA.limitExpMin) return SKILL_FORMULA.limitExpMinLevel;
   const factor = SKILL_FORMULA.limitRealmFactor[realm] ?? SKILL_FORMULA.limitExpMinLevel;
-  return Math.round(Math.pow(exp * factor, 1 / 3));
+  const byExp = Math.round(Math.pow(exp * factor, 1 / 3));
+  return Math.min(byExp, SKILL_FORMULA.limitMaxLevel);
 }
 
 /** 进阶后的新等级（wushen `grade_up`） */
@@ -455,6 +544,19 @@ export class SkillBook {
     return this.#states.get(id)?.level ?? 0;
   }
 
+  /**
+   * 按**中文名**取等级（0 = 不会或没这个技能）。
+   *
+   * ★ 给 `learn <中文名> from <老师>` 用：指令层只拿到玩家敲的那串字，
+   *   要问"老师这门练到几级"就必须先按名解析一次。
+   * ★ 重名照 `byName` 的规矩**抛错**（内容配置错误，不能静默取一个）；
+   *   未知名字返回 0 —— "老师不会"是一条正常路径，不是错误。
+   */
+  public levelOfName(name: string): number {
+    const tpl = this.#registry.byName(name);
+    return tpl === undefined ? 0 : this.levelOf(tpl.id);
+  }
+
   /** 占该槽的**基本技能**的等级（对应 wushen `query_skill('force')`） */
   public levelOfSlot(slot: EnableSlot): number {
     for (const st of this.#states.values()) {
@@ -491,29 +593,91 @@ export class SkillBook {
     return this.#enabledBySlot.get(slot);
   }
 
+  /**
+   * 按 id **或中文名**查模板（玩家输入走这一条）。
+   *
+   * ★ 与 `practice()` / `learn()` 用同一个解析顺序（id 优先、再按名），
+   *   于是"面板里点的是它、指令里练的也是它"不会出现两个解析路径。
+   *   未知返回 `undefined`（不抛）—— 调用方要把它变成一句"没有这个技能"。
+   */
+  public templateOf(idOrName: string): SkillTemplate | undefined {
+    return this.#registry.get(idOrName) ?? this.#registry.byName(idOrName);
+  }
+
+  /**
+   * 本簿对某技能的等级上限：`min(模板 max_level, 角色 skillLimit())`。
+   *
+   * ★ 是 `#capOf` 的**只读**转发。为什么需要它：`practice`/`addExp` 用它封顶，
+   *   指令层要提前说"你到 22 级上限了"，面板要显示上限 —— 三条路读同一个数。
+   *   未知技能返回 0（调用方先把 `unknown` 判掉）。
+   */
+  public capOf(idOrName: string): number {
+    const tpl = this.templateOf(idOrName);
+    return tpl === undefined ? 0 : this.#capOf(tpl);
+  }
+
+  /**
+   * 到**下一级**的进度百分比（0–100，已截断）。
+   *
+   * ★ 服务端算，前端不碰 `levelExp`：经验公式只有 `skill.ts` 一份（27 册 §14.5.2）。
+   * ★ 满级（`level >= maxLevel`）时 `progress` 报 **100**：此时"下一级"不存在，
+   *   报 0 会让面板显示"刚起步"，与"已经练满"完全相反。
+   */
+  public progressOf(tpl: SkillTemplate, st: SkillState): number {
+    if (st.level >= tpl.maxLevel) return 100;
+    const need = levelExp(st.level, tpl.grade);
+    if (!(need > 0)) return 0;
+    return Math.max(0, Math.min(100, Math.trunc((st.exp * 100) / need)));
+  }
+
   // ── 变更（唯一入口；末尾一律 recompute）───────────────────────────────────
 
-  /** 学会一个技能。返回是否成功（不满足条件会 `notify` 拒绝理由） */
-  public learn(id: string, level = 1): boolean {
-    const tpl = this.#registry.getOrThrow(id);
-    if (this.#states.has(id)) {
-      this.#owner.notify(`你已经学会了${tpl.name}。`);
-      return false;
+  /**
+   * 学会一个技能（**建档**，不结算经验 —— 结算在 `CommandActor.learnSkill`）。
+   *
+   * ★★ 返回判别联合而不 `notify`（26 册 §64）：原实现把六句拒绝文案写在这里，
+   *   于是"同样的拒绝"在指令层无法复用、也没法被 `switch` 穷举。
+   *   现在结构在这里、文案在指令层（与 `practice` 同构）。
+   *
+   * @param level 建档时的等级；缺省 1（`setLevel`/NPC 用别的值）
+   */
+  public learn(idOrName: string, level = 1): LearnResult {
+    const tpl = this.templateOf(idOrName);
+    if (tpl === undefined) return { kind: 'refused', reason: 'unknown' };
+    if (this.#states.has(tpl.id)) {
+      return { kind: 'refused', reason: 'already', name: tpl.name };
     }
-    const reason = this.#learnBlockReason(tpl);
-    if (reason !== null) {
-      this.#owner.notify(reason);
-      return false;
-    }
-    if (!tpl.onLearn(this.#owner)) return false;
-    this.#states.set(id, { id, level: clampLevel(level, tpl), exp: 0, enabled: null });
+    const refusal = this.#conditionRefusal(tpl);
+    if (refusal !== null) return refusal;
+    if (!tpl.onLearn(this.#owner)) return { kind: 'refused', reason: 'hook', name: tpl.name };
+    const lv = clampLevel(level, tpl);
+    this.#states.set(tpl.id, { id: tpl.id, level: lv, exp: 0, enabled: null });
     this.recompute();
-    return true;
+    // ★ `spent` / `gained` 在这里**真的是 0**：建档不花潜能、不涨级。
+    //   真正的"学一次"结算在 `CommandActor.learnSkill`，它会在本方法之后再算一遍。
+    return { kind: 'learned', id: tpl.id, name: tpl.name, level: lv, spent: 0, gained: 0 };
+  }
+
+  /**
+   * 学习准入的**只读**检查（不建档、不跑 `onLearn` 钩子）；`null` = 通过。
+   *
+   * ★★ 为什么需要它（26 册 §64.11，真机抓到的泄漏）：`CommandActor.learnSkill`
+   *   除了准入门槛，还要判"老师会不会 / 到头了没 / 潜能够不够"，而那三条都在
+   *   建档**之后**才算得出来。原实现直接先 `learn()` 建档 ⇒ 被拒之后技能簿里
+   *   多了一门 1 级的技能，玩家看到"面板说我学会了、可我潜能是 0"。
+   *   有了这个只读口，`learnSkill` 就能**先把所有拒绝判完**，最后一步才动状态。
+   *
+   * ★ 与 `learn()` 里那次检查是**同一个函数**（`#conditionRefusal`）——
+   *   不是第二套判据，所以不会漂移。
+   */
+  public conditionOf(idOrName: string): LearnRefused | null {
+    const tpl = this.templateOf(idOrName);
+    if (tpl === undefined) return { kind: 'refused', reason: 'unknown' };
+    return this.#conditionRefusal(tpl);
   }
 
   /** 遗忘一个技能（若已装配则一并卸下） */
-  public forget(id: string): boolean {
-    const st = this.#states.get(id);
+  public forget(id: string): boolean {    const st = this.#states.get(id);
     if (st === undefined) return false;
     const tpl = this.#registry.get(id);
     if (st.enabled !== null) this.#detachSlot(st.enabled);
@@ -683,6 +847,59 @@ export class SkillBook {
   }
 
   /**
+   * **读书**：给一门技能加 `exp` 点经验（wushen `study.js` 的 `do_learn` 主体）。
+   *
+   * 顺序（不能换，每一道决定下一句该说什么）：
+   *   ① 技能存在 → `unknown`
+   *   ② 已到「书能教的上限」与「角色能到的上限」两者的小值 → `too-shallow`
+   *      （wushen `study.js:96`「这本书上的内容对你来说太浅了」）
+   *   ③ 准入（`learnCondition`：基本功 / 属性 / 内力 / 性别）→ `blocked`
+   *      ★★ 这一道**必须**在，否则一本书就能绕过"基本功 30 级才能学太极剑法"——
+   *      wushen `study.js:105-113` 的 `check_skill` 判的正是同一件事。
+   *   ④ 加经验（落到 `addExp`，上限钳制只在那一个地方）
+   *
+   * ★ 为什么"从零学会"也走这里：`addExp` 的 `#ensureState` 会建档 ——
+   *   wushen 的书本来就能让人**第一次**学会一门武功（`me.query_skill(id)===0` 时
+   *   先跑 `do_learn` 做准入）。这里语义相同，只是准入挪到了 ③。
+   */
+  public study(idOrName: string, exp: number, bookMax: number): StudyResult {
+    if (!Number.isFinite(exp) || exp < 0) {
+      throw new SkillError(`study 的经验必须是 ≥0 的有限数值，收到 ${String(exp)}`);
+    }
+    if (!Number.isFinite(bookMax) || bookMax < 0) {
+      throw new SkillError(`study 的书本上限必须是 ≥0 的有限数值，收到 ${String(bookMax)}`);
+    }
+    const tpl = this.#registry.get(idOrName) ?? this.#registry.byName(idOrName);
+    if (tpl === undefined) return { kind: 'refused', reason: 'unknown' };
+
+    const level = this.#states.get(tpl.id)?.level ?? 0;
+    const cap = Math.min(this.#capOf(tpl), Math.trunc(bookMax));
+    if (level >= cap) {
+      return { kind: 'refused', reason: 'too-shallow', name: tpl.name, level, bookMax: cap };
+    }
+
+    const refusal = this.#conditionRefusal(tpl);
+    if (refusal !== null) return { kind: 'blocked', refusal };
+
+    // ★★ `exp === 0` = **准入预检**（`train/study` 起状态前先问一句"这书我读得了吗"）。
+    //   必须在 `addExp` **之前**返回：`addExp` 的 `#ensureState` 会给他**建档**，
+    //   于是"读了一本没资格的书"会静默在技能表里留下一条 0 级记录。
+    if (exp === 0) {
+      return { kind: 'ok', name: tpl.name, gained: 0, level, limit: this.#capOf(tpl) };
+    }
+
+    // ★ `untilLevel: cap` —— 书的等级上限**也是**一次的硬顶，否则"读一次跳 40 级"
+    const gained = this.addExp(tpl.id, exp, cap);
+    return {
+      kind: 'ok',
+      name: tpl.name,
+      gained,
+      level: this.#states.get(tpl.id)?.level ?? 0,
+      limit: this.#capOf(tpl),
+    };
+  }
+
+  /**
    * 把武功装配到某个槽。
    *
    * ★ 与 wushen 的差异（**改进**）：wushen 先卸旧、再问新技能 `enable()`，
@@ -791,7 +1008,7 @@ export class SkillBook {
       //   wushen `os/skill/skill.js:65/87` 的 `release_prop` / `attach_prop` 开头都是
       //   `if (!lv) return;` —— 只看等级，不看"属性值是不是 0"。
       //   两者不等价：技能完全可以把属性写成**与等级无关的常数**
-      //   （`passiveProp: () => ({ prop: { gj: 5 } })`），此时"跳过 0 值"这条规则救不了场，
+      //   （`passiveProp: () => ({ prop: { attack: 5 } })`），此时"跳过 0 值"这条规则救不了场，
       //   一个被 `setLevel(id, 0)` 清零（或存档里就是 0 级）的技能会继续白给属性。
       //   `tests/engine-audit.test.ts` 的 A7 组把这两条都钉住（含"升回 1 级必须重新生效"）。
       if (st.level === 0) continue;
@@ -991,32 +1208,37 @@ export class SkillBook {
     return isAttrKey(key) ? this.#owner[key] : getProp(this.#owner, key);
   }
 
-  /** 学习条件判定的**唯一实现**（返回拒绝理由；null = 通过） */
-  #learnBlockReason(tpl: SkillTemplate): string | null {
+  /**
+   * 学习条件判定的**唯一实现**（返回结构化拒绝；null = 通过）。
+   *
+   * ★★ 只出**结构**、不出文案（26 册 §64）：文案归指令层。
+   *   原先这里直接拼中文，于是同一句拒绝在别处想复用时只能重抄一遍 ——
+   *   两份措辞会漂移，而"漂移的那一份"永远是玩家看到的那一份。
+   */
+  #conditionRefusal(tpl: SkillTemplate): LearnRefused | null {
     const c = tpl.learnCondition;
     if (c === null) return null;
 
     for (const [slot, need] of Object.entries(c.minSlot ?? {}) as [EnableSlot, number][]) {
-      const have = this.levelOfSlot(slot);
-      if (have < need) {
+      if (this.levelOfSlot(slot) < need) {
+        // 名字取"该槽当前生效的技能"（`基本剑法`）；槽空着时退回槽名（`sword`）。
+        // 与 wushen `os/skill/skill.js:234` 同口径 —— 那里也是 `query_used_skill`。
         const name = this.activeTemplate(slot)?.name ?? slot;
-        return `你的${name}等级不够 ${need}，无法学习${tpl.name}。`;
+        return { kind: 'refused', reason: 'slot', slot, need, name };
       }
     }
     // ★ 属性门槛只有这一路，读**有效属性**（先天 + 后天加成）—— 26 册 §37 归一。
     //   四维与其它键的差别被 `#effectiveProp()` 吸收，这里不出现"先天/加成"的分支。
     for (const [key, need] of Object.entries(c.minAttr ?? {}) as [PropKey, number][]) {
       if (this.#effectiveProp(key) < need) {
-        return `你的${propLabel(key)}不够 ${need}，无法学习${tpl.name}。`;
+        return { kind: 'refused', reason: 'attr', key, need, name: tpl.name };
       }
     }
     if (c.minMaxMp !== undefined && this.#owner.maxMp < c.minMaxMp) {
-      return `你的内力上限不够 ${c.minMaxMp}，无法学习${tpl.name}。`;
+      return { kind: 'refused', reason: 'max-mp', need: c.minMaxMp, name: tpl.name };
     }
     if (c.gender !== undefined && this.#owner.gender !== c.gender) {
-      // ★ 三档文案取**单源**（`GENDER_LABELS`）—— 与 wushen `os/skill/skill.js:239`
-      //   的"男性/女性/无性"同口径。原先这里内联了同一张三元表（T18 的残余）。
-      return `${GENDER_LABELS[c.gender]}才能学习${tpl.name}。`;
+      return { kind: 'refused', reason: 'gender', gender: c.gender, name: tpl.name };
     }
     return null;
   }

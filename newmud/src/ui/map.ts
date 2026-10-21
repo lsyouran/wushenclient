@@ -48,18 +48,27 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
  * 画布宽度（**恒定**，中心 = 它的一半）。
  *
- * ★ 宽度写死 216 有两个理由：
+ * ★ 宽度写死有两条理由：
  *   ① 比例恒定 ⇒ 换房间时格子大小与字号**不会忽大忽小**（框的高度会变，见 `renderMap`）；
- *   ② wushen 也是把 60 宽的格子居中摆在**整个容器宽度**里（`l = (w - unitW)/2`），
- *      横向留白是原样照抄的。
+ *   ② wushen 也是把格子居中摆在**整个容器宽度**里（`l = (w - unitW)/2`），横向留白是原样照抄的。
+ * ★ 渲染是 **1:1 像素**（viewBox 单位 = CSS 像素，`style.css` 的 `#mapSvg` 不再缩放）。
+ *
+ * ★★ 尺寸是 wushen 的 **1.3 倍**（2026-10-18 真机反馈"地图比较小"）：
+ *   wushen 的 `unitX/Y/W/H` = 70/30/60/20、字号 12px，在 768px 宽的容器里只占
+ *   216px，手机上更是小 —— 逐值照抄之后玩家第一句就是"好看是好看，就是小"。
+ *   于是整组等比 ×1.3（78×26 的格子、91×39 的格距、16px 的字），
+ *   **比例与配色仍是 wushen 的**，只是整体放大一档。
  */
-const CANVAS_W = 216;
-/** 九宫格中心（在画布水平正中、第 2 行） */
+const CANVAS_W = 276;
+/** 九宫格中心（在画布水平正中、第 2 行；两侧各留 `276 - 2×91 - 78 = 16` 的余量） */
 const CX = CANVAS_W / 2;
-const CY = 48;
-/** 格子尺寸（与 `SLOT_POS` 的间距配套：36×18 在 8 个格位上两两不碰） */
-const CELL_W = 36;
-const CELL_H = 18;
+const CY = 64;
+/**
+ * 格子尺寸（wushen `unitW=60, unitH=20` ×1.3；间距 91×39 在 `dirs.ts#SLOT_POS`）。
+ * 78×26 + 间距 91×39 ⇒ 相邻格子之间空 13×13，连接线走的正是这段空隙。
+ */
+const CELL_W = 78;
+const CELL_H = 26;
 
 /**
  * 框在**上下**留的边（viewBox 单位）：贴着格子显得挤。
@@ -68,22 +77,22 @@ const CELL_H = 18;
 const FRAME_PAD_Y = 4;
 
 /**
- * 格子文字的字号（**viewBox 单位**，不是屏幕像素 —— SVG 会整体缩放）。
+ * 格子文字的字号（**viewBox 单位 = 屏幕像素**，1:1 渲染见 `CANVAS_W`）。
  *
  * ★ **全图一个字号，永不按字数缩。** wushen 的 `CreateExitsMap` 就是写死的
  *   `style="font-size:12px;"`，它从没算过字号；装不下是**截断**（见 `cellLabel`）。
+ *   这里照抄 12 —— 60 宽的格子放 5 个字，是 wushen 的原话。
  *
  * ★ `font-size` 由这里**唯一**决定，`style.css` 不再给 `.ceg text` / `.ccg text`
  *   配字号 —— 两边各写一份就会出现"按 8 算、按 X 画"的静默越界。
  *   （`tests/web-ui.test.ts` 有一条断言钉着"CSS 里不许再写一份"。）
  *
- * ★ 为什么是 8：`tests` 与 `probe9.mjs` 在**本站字体栈**（`Microsoft YaHei UI` …）
- *   下实测 CJK 推进宽度**恰好 1.00 em**（6/7/8/9/10 号逐一量过，与字号成正比），
- *   所以「字号 = 一个字占多少 viewBox 单位」。32 单位的可用宽 ÷ 8 = 刚好 4 个字，
+ * ★ 为什么是 16：wushen 的 12px ×1.3（见 `CANVAS_W` 的放大说明）。
+ *   本站字体栈（`Microsoft YaHei UI` …）下实测 CJK 推进宽度**恰好 1.00 em**，
+ *   所以「字号 = 一个字占多少单位」。4 字房名 = 64 单位 < 74 的内容宽，
  *   而内容层最长的房名尾巴就是 4 个字（「中央广场」）—— 真名一个都不会被截。
- *   比例 8/36 ≈ 0.22，与 wushen 的 12/60 = 0.2 同档（屏幕上 ≈11px vs 它的 12px）。
  */
-const BASE_FONT = 8;
+const BASE_FONT = 16;
 /** 文字两侧的留白（viewBox 单位）：不贴着边框 */
 const TEXT_PAD = 4;
 
@@ -179,28 +188,75 @@ export function renderMap(): void {
     const dest = (state.exits[dir] ?? '').trim();
     const label = dest === '' ? dirLabel(dir) : cellLabel(dest);
 
-    node.appendChild(svg('line', { x1: CX, y1: CY, x2: x, y2: y, stroke: '#2c2c2c' }));
+    // 连接线：从邻居格靠中心的那条边，画到中心格的那条边（wushen 的 `pos1`/`pos2`）。
+    // ★ 线只在两格之间的空隙里走（正方向 10 单位、斜角一条对角短线），不穿格子。
+    // ★ 上下楼（含 `northup` 等）照 wushen：`stroke-dasharray='5,5'` + `stroke-width='10'`
+    //   —— 一段粗虚线就是"楼梯"的记号，其余的线宽 1。
+    const sx = Math.sign(x - CX);
+    const sy = Math.sign(y - CY);
+    let x1: number;
+    let y1: number;
+    let x2: number;
+    let y2: number;
+    if (sx === 0) {
+      x1 = CX;
+      x2 = CX;
+      y1 = y - sy * (CELL_H / 2);
+      y2 = CY + sy * (CELL_H / 2);
+    } else if (sy === 0) {
+      x1 = x - sx * (CELL_W / 2);
+      x2 = CX + sx * (CELL_W / 2);
+      y1 = CY;
+      y2 = CY;
+    } else {
+      x1 = x - sx * (CELL_W / 2);
+      x2 = CX + sx * (CELL_W / 2);
+      y1 = y - sy * (CELL_H / 2);
+      y2 = CY + sy * (CELL_H / 2);
+    }
+    const stairs = dir.includes('up') || dir.includes('down');
+    node.appendChild(
+      svg(
+        'line',
+        stairs
+          ? { x1, y1, x2, y2, stroke: 'gray', 'stroke-dasharray': '5,5', 'stroke-width': 10 }
+          : { x1, y1, x2, y2, stroke: 'gray', 'stroke-width': 1 },
+      ),
+    );
 
+    // 邻居格：`#232323` 底 · gray 边 · 直角（wushen `CreateExitsMap` 的原文三件）
     const g = svg('g', { class: 'ceg' });
     g.setAttribute('data-dir', dir);
     // 悬停提示把**方向 + 完整房名**还回来：格子只放得下短名（还会被截），
     // 而"往哪走"这件事在格子上是靠位置表达的，鼠标用户多给一条明确的路。
     // —— 这里用**没截断**的名字，否则提示里也是省略号，等于没得看。
     g.appendChild(svg('title', {}, dest === '' ? dirLabel(dir) : `${dirLabel(dir)} · ${plainText(dest)}`));
-    g.appendChild(svg('rect', { x: x - CELL_W / 2, y: y - CELL_H / 2, width: CELL_W, height: CELL_H, rx: 4 }));
     g.appendChild(
-      svg('text', { x, y: y + BASE_FONT / 2, class: 'et', 'font-size': BASE_FONT, 'text-anchor': 'middle' }, label),
+      svg('rect', { x: x - CELL_W / 2, y: y - CELL_H / 2, width: CELL_W, height: CELL_H, fill: '#232323', stroke: 'gray', 'stroke-width': 1 }),
+    );
+    g.appendChild(
+      svg(
+        'text',
+        { x, y: y + BASE_FONT / 2, class: 'et', fill: 'dimgrey', 'font-size': BASE_FONT, 'text-anchor': 'middle' },
+        label,
+      ),
     );
     node.appendChild(g);
   }
 
-  // 中心 = 当前所在（点它 = 环顾）
+  // 中心 = 当前所在（点它 = 环顾）。wushen 的反色高亮：`dimgrey` 亮底 + `#232323` 深字。
   const here = cellLabel(state.room?.name ?? '?');
   const cg = svg('g', { class: 'ccg' });
   cg.appendChild(svg('title', {}, `${plainText(state.room?.name ?? '?')}（点这里环顾）`));
-  cg.appendChild(svg('rect', { x: CX - CELL_W / 2, y: CY - CELL_H / 2, width: CELL_W, height: CELL_H, rx: 4 }));
   cg.appendChild(
-    svg('text', { x: CX, y: CY + BASE_FONT / 2, class: 'cm', 'font-size': BASE_FONT, 'text-anchor': 'middle' }, here),
+    svg('rect', { x: CX - CELL_W / 2, y: CY - CELL_H / 2, width: CELL_W, height: CELL_H, fill: 'dimgrey', stroke: 'gray', 'stroke-width': 1 }),
+  );
+  cg.appendChild(
+    svg(
+      'text',
+      { x: CX, y: CY + BASE_FONT / 2, class: 'cm', fill: '#232323', 'font-size': BASE_FONT, 'text-anchor': 'middle' },
+      here,
+    ),
   );
   node.appendChild(cg);
 

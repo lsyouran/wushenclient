@@ -10,12 +10,18 @@
   "scripts": {
     "start": "node tools/start.mjs",
     "prestart": "npm run build:web",
+    "dev": "node tools/run.mjs --watch",
+    "start:lan": "npm run build:web && node tools/start.mjs --lan",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "gate": "node tools/gate/run-all.mjs",
     "gate:mutation": "node tools/gate/mutation-test.mjs",
-    "build:web": "tsc -p tsconfig.web.json && node tools/copy-web-assets.mjs",
+    "e2e": "node tools/e2e/smoke.mjs",
+    "e2e:layout": "node tools/e2e/layout.mjs",
+    "ids": "node tools/ids.mjs",
+    "ids:check": "node tools/ids.mjs --check",
+    "build:web": "node tools/build-web.mjs",
     "check": "npm run typecheck && npm run test && npm run gate"
   },
   "dependencies": {

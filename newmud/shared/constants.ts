@@ -19,122 +19,156 @@
 // ===========================================================================
 
 /**
- * 引擎核心属性表：key → 中文显示名。
+ * 引擎核心属性表：key → 中文显示名。**共 76 个键**。
  *
- * 关于 key 的命名法（**数据层不改名、只做收口**）：
- *   - 保留 wushen 的 key 原样（gj/fy/ds/zj/mz/bj/gjsd 等拼音缩写），
- *     因为它们是**数据契约**：内容层 `prop: { gj: 20 }`、协议帧 `max_hp`、
- *     存档都在用，改名就等于把"照抄 wushen 内容"这条路堵死；
- *   - 但把它们收成一个**闭集联合类型**，从此再也无法写出
- *     `attack` / `defence` / `gjsd_peer` 这类拼错却静默通过的键。
- *   - ★ **代码里不要写这些裸字符串** —— 用下面的 `PROP` 别名表（`PROP.attack`），
- *     落库/上网仍是 `'gj'`。人读的完整对照见 29 册 §29.10。
+ * ## 命名法（2026-10-18 §66 起：数据键也是英文）
  *
- * 派生规则（不逐一枚举，见 ModProp 类型）：
- *   `<X>_per`       百分比加成
- *   `diff_<X>`      减免 / 抵抗
- *   `diff_<X>_per`  减免百分比
- *   `add_<X>`       追加
- *   `add_<X>_per`   追加百分比
+ * 数据键一律 **英文 snake_case 裸名词**，不加 `Bonus`/`Per` 之类后缀。
+ * ★★ 后缀会被卷进派生规则（见 `ModProp`）：核心键若叫 `attackBonus`，
+ *   就会派生出 `diff_attackBonus` 这种怪键。**只有核心键的名字是自由的。**
+ *
+ * ### 与 wushen 的关系：**不再是逐字双射**
+ * wushen 这套键是拼音缩写（`gj` 攻击 / `fy` 防御 / `ds` 躲闪 / `zj` 招架 /
+ * `mz` 命中 / `bj_per` 暴击 / `gjsd` 攻速 …）。本项目**全栈改成了英文**
+ * —— 代码、内容层 `prop:{}`、协议帧、存档都是同一套 snake_case。
+ *
+ * ⇒ **从 wushen 抄内容时必须过一遍词干替换**。对照表在
+ *   `docs/29` §29.11.2（甲 18 词干 / 乙 38 独立键）；全量标识含义见
+ *   `docs/32` 标识字典。闸门 **G3.A** 带旧拼音黑名单：内容层写 `gj` 会
+ *   当场报「改用 attack」，而不是留一个静默失效的键。
+ *
+ * ★★ 每条键后面用 `←` 标注 wushen 旧名。**这份标注是给"照抄内容"的人看的**，
+ *   不是契约 —— 旧名从此只出现在注释与文档里。
+ *
+ * ## 派生规则（不逐一枚举，见 `ModProp` 类型）
+ * ```
+ *   <X>_per`       百分比加成
+ *   diff_<X>`      减免 / 抵抗
+ *   diff_<X>_per`  减免百分比
+ *   add_<X>`       追加
+ *   add_<X>_per`   追加百分比
+ * ```
+ * ★ 表里有些键**既显式登记、又符合派生规则**（`attack_per` = `attack` + `_per`）。
+ *   这是有意的：显式登记才拿得到中文名（`propLabel()`）。派生族只保证
+ *   **类型上合法**，不保证有中文名。
+ *
+ * ## 命名空间隔离
+ * 数值侧的名字不得与**技能 id / 装配槽**（`ENABLE_SLOTS`，
+ * `force/dodge/parry/bite/unarmed/sword/blade/staff/club/whip/throwing`）撞名
+ * —— 这正是躲闪/招架叫 `evasion`/`deflect` 而**不叫** `dodge`/`parry` 的原因。
+ * 由静态闸门 **G3.G** 守（`CORE ∪ DerivedCombat 字段` ⊥ `ENABLE_SLOTS`）。
  */
 export const PROPERTIES = {
-  // -- 先天四维（建号时 15-30，和 = 80，见 05 册 5.1.4） --
-  con1: '先天根骨',
-  dex1: '先天身法',
-  int1: '先天悟性',
-  str1: '先天臂力',
+  // ═════════════════════════════════════════════════════════════════════════
+  // 甲 · 有派生族的词干（18 词干 → 38 键；改词干则整族自动跟随）
+  // ═════════════════════════════════════════════════════════════════════════
 
-  // -- 基础八维 + 福缘 --
-  con: '根骨',
-  dex: '身法',
-  int: '悟性',
-  str: '臂力',
-  kar: '福缘', // ★ wushen 源码使用了但 PROPERTIES 未定义（21 册 #17）
-  per: '容貌',
-  age: '年龄',
-  gender: '性别', // ★ 补齐：character.js 用作基础字段
+  // -- 战斗核心：平加 --
+  attack: '攻击', // ← gj
+  defense: '防御', // ← fy
+  evasion: '躲闪', // ← ds　★ 不叫 dodge（那是技能 id）
+  deflect: '招架', // ← zj　★ 不叫 parry（那是技能 id）
+  hit: '命中', // ← mz
+  crit: '暴击', // ← bj_per　★ wushen 名字带 _per 却是**平加**；改裸名词顺手填坑
+  damage: '伤害', // ← sh
+  crit_damage: '暴击伤害', // ← bjsh
+  attack_speed: '攻击速度', // ← gjsd
 
-  // -- 战斗核心（拼音缩写，保留） --
-  //    ★ 保留拼音不只是"照抄 wushen"：它就是与**技能 id**（`dodge`/`parry`/`force`，
-  //      全英文）分开的机制。改写成英文全称会与技能 id 撞名 ⇒ 见 `PROP` 表处的说明。
-  gj: '攻击',
-  fy: '防御',
-  ds: '躲闪',
-  zj: '招架',
-  mz: '命中',
-  bj_per: '暴击',
-  sh: '伤害',
-  bjsh: '暴击伤害',
-  gjsd: '攻击速度',
+  // -- 战斗核心：百分比 --
+  attack_per: '攻击', // ← gj_per
+  defense_per: '防御', // ← fy_per
+  evasion_per: '躲闪', // ← ds_per
+  deflect_per: '招架', // ← zj_per
+  hit_per: '命中', // ← mz_per
+  attack_speed_per: '攻击速度', // ← gjsd_per
+  diff_defense_per: '忽视对方防御', // ← diff_fy_per
+  diff_crit: '暴击抵抗', // ← diff_bj
 
-  // -- 气血 / 内力 --
-  max_hp: '气血上限',
-  max_mp: '内力上限',
-  limit_mp: '内力上限加成',
+  // -- 伤害修正（damage 词干整族）--
+  add_damage: '伤害增加', // ← add_sh
+  add_damage_per: '最终伤害', // ← add_sh_per
+  diff_damage: '受到的伤害减少', // ← diff_sh
+  diff_damage_per: '伤害减免', // ← diff_sh_per
+  add_crit_damage_per: '暴击伤害', // ← add_bjsh_per
+
+  // -- 先天四维（建号时 15-30，和 = 80，见 05 册 5.1.4）--
+  //    ★ 与下面的 `innate_*` 是两回事：这四个是**加成池**里的键，
+  //      `innate_*` 才是建号时定下的**先天值**。
+  str: '臂力', // ← str（不变：通用英文缩写 + D&D 惯例）
+  con: '根骨', // ← con
+  dex: '身法', // ← dex
+  int: '悟性', // ← int
 
   // -- 绝招节奏 --
-  distime: '绝招冷却',
-  releasetime: '绝招释放',
-  expend_mp: '内力消耗',
-  distime_per: '绝招冷却',
-  releasetime_per: '绝招释放',
-  expend_mp_per: '内力消耗',
+  cooldown: '绝招冷却', // ← distime
+  cooldown_per: '绝招冷却', // ← distime_per
+  cast_time: '绝招释放', // ← releasetime
+  cast_time_per: '绝招释放', // ← releasetime_per
+  mp_cost: '内力消耗', // ← expend_mp
+  mp_cost_per: '内力消耗', // ← expend_mp_per
 
-  // -- 状态 --
-  busy: '忙乱时间',
+  // -- 打坐 / 忙乱 --
+  meditation: '打坐效率', // ← dazuo
+  meditation_per: '打坐效率', // ← dazuo_per
+  busy_time: '忙乱时间', // ← busy
+  busy_time_per: '忙乱时间', // ← busy_per
+  diff_busy_time: '忽视忙乱', // ← diff_busy
+  diff_busy_time_per: '忽视忙乱', // ← diff_busy_per
 
-  // -- 活动效率与产出（打坐/练习/采药/挖矿/钓鱼/炼药/闭关） --
-  study_per: '学习效率',
-  dazuo: '打坐效率',
-  dazuo_per: '打坐效率',
-  lianxi_per: '练习效率',
-  recover_per: '疗伤效果',
-  caiyao1: '采药效率',
-  caiyao_exp: '采药经验',
-  caiyao_pot: '采药潜能',
-  kuang1: '挖矿效率',
-  kuang_exp: '挖矿经验',
-  kuang_pot: '挖矿潜能',
-  diaoyu1: '钓鱼效率',
-  diaoyu_exp: '钓鱼经验',
-  diaoyu_pot: '钓鱼潜能',
-  lianyao1: '炼药效率',
-  lianyao2: '丹药产出',
-  lianyao_exp_per: '炼药获得经验',
-  xiulian_exp: '闭关经验',
-  shuangxiu: '双修效率',
-  fenjie: '分解获得的玄晶',
+  // ═════════════════════════════════════════════════════════════════════════
+  // 乙 · 独立键（无派生族，逐条起名 · 38 个）
+  // ═════════════════════════════════════════════════════════════════════════
 
-  // -- 战斗修正 --
-  gj_per: '攻击',
-  fy_per: '防御',
-  ds_per: '躲闪',
-  zj_per: '招架',
-  mz_per: '命中',
-  hp_per: '气血',
-  gjsd_per: '攻击速度',
-  add_sh: '伤害增加',
-  add_sh_per: '最终伤害',
-  add_bjsh_per: '暴击伤害',
-  diff_sh: '受到的伤害减少',
-  diff_sh_per: '伤害减免',
-  diff_sh_per2: '伤害减免',
-  diff_fy_per: '忽视对方防御',
-  diff_fy_per2: '伤害减免',
-  diff_bj: '暴击抵抗',
-  diff_busy: '忽视忙乱',
-  diff_busy_per: '忽视忙乱',
-  diff_downside: '负面状态抵抗',
-  diff_downside_per: '负面状态抵抗',
-  busy_per: '忙乱时间',
+  // -- 先天四维的**值**（与上面 `str/con/dex/int` 加成池不同一层）--
+  innate_con: '先天根骨', // ← con1
+  innate_dex: '先天身法', // ← dex1
+  innate_int: '先天悟性', // ← int1
+  innate_str: '先天臂力', // ← str1
 
-  // -- 控制类 --
-  no_fy: '无法防御',
-  no_pfm: '禁止绝招',
+  // -- 基础杂项 --
+  luck: '福缘', // ← kar　★ wushen 源码用了但 PROPERTIES 未定义（21 册 #17）
+  appearance: '容貌', // ← per　★ 必须改：`per` 本身是核心键，又恰好是派生后缀 `_per` 的词
+  age: '年龄', // ← age
+  gender: '性别', // ← gender　★ 补齐：character.js 用作基础字段
 
-  // -- 副本 / 支付 --
-  score: '副本分数',
-  cash_money: '充值货币', // ★ 补齐
+  // -- 气血 / 内力 --
+  max_hp: '气血上限', // ← max_hp（不变）
+  max_mp: '内力上限', // ← max_mp（不变）
+  limit_mp: '内力上限加成', // ← limit_mp（不变）
+  //    ★ 与 `max_mp`（上限本身）是两回事：这个是**内容层给池子的加数**。
+  hp_per: '气血', // ← hp_per（本就不变，故不在甲表）
+
+  // -- 形如派生、其实**不在**派生族里（wushen 只"显式定义"）--
+  diff_damage_per2: '伤害减免', // ← diff_sh_per2　★ 尾数 2 = 第二档（比试场景才合并）
+  diff_defense_per2: '伤害减免', // ← diff_fy_per2　★ 同上
+  debuff_resist: '负面状态抵抗', // ← diff_downside　★ 特意改裸名词：它不在 diff_ 族里
+  debuff_resist_per: '负面状态抵抗', // ← diff_downside_per
+
+  // -- 活动效率与产出（打坐/练习/采药/挖矿/钓鱼/炼药/闭关）--
+  study_efficiency: '学习效率', // ← study_per
+  practice_efficiency: '练习效率', // ← lianxi_per
+  recovery_efficiency: '疗伤效果', // ← recover_per
+  herb_gathering: '采药效率', // ← caiyao1
+  herb_exp: '采药经验', // ← caiyao_exp
+  herb_potential: '采药潜能', // ← caiyao_pot
+  mining: '挖矿效率', // ← kuang1
+  mining_exp: '挖矿经验', // ← kuang_exp
+  mining_potential: '挖矿潜能', // ← kuang_pot
+  fishing: '钓鱼效率', // ← diaoyu1
+  fishing_exp: '钓鱼经验', // ← diaoyu_exp
+  fishing_potential: '钓鱼潜能', // ← diaoyu_pot
+  alchemy: '炼药效率', // ← lianyao1
+  alchemy_yield: '丹药产出', // ← lianyao2
+  alchemy_exp_efficiency: '炼药获得经验', // ← lianyao_exp_per
+  retreat_exp: '闭关经验', // ← xiulian_exp
+  dual_cultivation: '双修效率', // ← shuangxiu
+  dismantle_yield: '分解获得的玄晶', // ← fenjie
+
+  // -- 控制类 / 副本支付 --
+  no_defense: '无法防御', // ← no_fy
+  no_special: '禁止绝招', // ← no_pfm
+  instance_score: '副本分数', // ← score
+  paid_currency: '充值货币', // ← cash_money　★ 补齐
 } as const;
 
 export type CoreProp = keyof typeof PROPERTIES;
@@ -151,9 +185,9 @@ export type ModProp =
 export type PropKey = CoreProp | ModProp;
 
 /**
- * 属性键的**中文名**（wushen `PROPERTIES` 表；`propLabel('str') === '臂力'`）。
+ * 属性键的**中文名**（`propLabel('str') === '臂力'`）。
  *
- * ★ 为什么要它：面向玩家的文案不该出现 `gj` / `mz` 这类拼音键
+ * ★ 为什么要它：面向玩家的文案不该出现 `max_hp` / `attack_speed` 这类机读键
  *   （wushen `os/skill/skill.js:235` 也是用 `PROPERTIES[key]` 拼学习条件拒绝语）。
  * ★ `ModProp` 是**由规则派生**的联合类型（`add_<X>` 等），并不都在 `PROPERTIES` 里
  *   ⇒ 未登记时回落到键本身，不产生 `undefined` 文案。
@@ -163,93 +197,111 @@ export function propLabel(key: string): string {
 }
 
 /**
- * 属性键的**可读别名表**（`PROP.attack === 'gj'`）。
+ * ⚠️ **两个易混点（名字撞了，靠 receiver 区分 —— 别写反）**
  *
- * 为什么要有这一层：
- *   - `PROPERTIES` 的键**故意保留 wushen 原样**（`gj`/`fy`/`gj_per`…）—— 它们是
- *     **数据契约**（内容层 / 协议帧 / 存档都在用），改了就把"照抄 wushen 内容"堵死；
- *   - 可**代码**里满屏 `getProp(props, 'gj')` 没人读得懂（`gj` 是拼音缩写）。
- *   ⇒ 中间加一层：**代码写 `PROP.attack`，落库/上网仍是 `'gj'`**。
+ * 1. `props.str` 是**臂力加成**（加成池里的键），而 `innateStats.str` 是**先天臂力**
+ *    —— 同名不同物，wushen 也是这个坑。改成英文键后**没有**消除它：`str` 在
+ *    `PROPERTIES` 里是「臂力」（加成侧），`innate_str` 才是先天值。
+ * 2. `props.max_hp` 是气血**加成**，`derived.maxHp` 是算出来的**上限**。
  *
- * ★ 这一层**不是**第二事实源：
- *   - 值必须 ∈ `PropKey`（`satisfies` 编译期兜底，写错键名直接编译失败）；
- *   - 静态闸门 **G3.F** 逐值对账（∈ CORE∪MOD、**无重复值**、非空）；
- *   - `tests/prop-alias.test.ts` 再双向钉一遍（含"每个别名都有中文名"）。
- * ★ 人读版对照（别名 ↔ wushen 键 ↔ 中文）在 `docs/29` §29.10。
- *
- * ★ **命名空间隔离**（2026-10-14；静态闸门 **G3.G** 守）：别名键**不得**与技能 id /
- *   装配槽重名（`ENABLE_SLOTS` = `force/dodge/parry/bite/sword/…`，见本文件 §4）。
- *   这正是 wushen 拿"属性用拼音、技能用英文"分开的那条线 —— 所以躲闪/招架叫
- *   `evasion`/`deflect`，**不叫** `dodge`/`parry`（后两个是 `BASE_SKILLS` 里的
- *   基础技能 id）。★ **下面这两个目录在 wushen 侧**，本项目内容层尚未落地：
- *   `wushen/world/skill/dodge/`（8 部轻功）、`wushen/world/skill/parry/`（空目录），
- *   基本技能定义在 `wushen/world/skill/base/dodge.js` / `base/parry.js`。
- *   ⚠️ 旧注释漏了 `wushen/` 前缀，读起来像本项目有这两个目录 —— 实际
- *   `newmud/world/skill/` 下只有 `base/force.ts`、`base/sword.ts`、`wd/taijijian.ts`。
- *
- * ⚠️ 两个易混点（别写反）：
- *   1. `PROP.strengthBonus` 取的是 **`'str'` 这个「臂力加成」键**，
- *      与"先天臂力"（`InnateStats.str`）不是一回事；
- *   2. `PROP.maxHpBonus`（`'max_hp'` = 气血**加成**）与派生值 `derived.maxHp`
- *      （算出来的**上限**）同名不同物 —— wushen 也是这个坑。
+ * ★★ 这两条曾经靠 `PROP.strengthBonus` / `PROP.maxHpBonus` 这类别名**在名字上岔开**。
+ *   §66 删掉别名层之后，岔开的手段只剩 **receiver**（`props.*` vs `innateStats.*` vs
+ *   `derived.*`）—— 这正是 wushen 的做法，见 `docs/29` §29.11.1 条③「接受它」。
+ *   写公式时**先看清自己在读哪个对象**，不要再想着用后缀把两者分开。
  */
-export const PROP = {
-  // -- 先天四维的「加成」键（平加；与裸的先天值 str/con/dex/int 是两回事）--
-  strengthBonus: 'str',
-  constitutionBonus: 'con',
-  dexterityBonus: 'dex',
-  intelligenceBonus: 'int',
 
-  // -- 战斗属性：平加 --
-  attack: 'gj',
-  defense: 'fy',
-  hit: 'mz',
-  /** 躲闪（`ds`）。★ **不要**写成 `dodge` —— 那是**技能 id**（基础轻功），见本文件 §4 */
-  evasion: 'ds',
-  /** 招架（`zj`）。★ **不要**写成 `parry` —— 那是**技能 id**（基础招架），见本文件 §4 */
-  deflect: 'zj',
-  /** 暴击（wushen 键名带 `_per` 但**当平加**用，照抄） */
-  crit: 'bj_per',
-  /** 攻击速度加成（毫秒，从间隔基准里减） */
-  attackSpeed: 'gjsd',
-
-  // -- 战斗属性：百分比修正（写 50 表示 +50%）--
-  attackPer: 'gj_per',
-  defensePer: 'fy_per',
-  hitPer: 'mz_per',
-  evasionPer: 'ds_per',
-  deflectPer: 'zj_per',
-  attackSpeedPer: 'gjsd_per',
-
-  // -- 气血 --
-  /** 气血**加成**（不是上限本身，见上面易混点 2） */
-  maxHpBonus: 'max_hp',
-  hpPer: 'hp_per',
-
-  // -- 透传给战斗层的修正 --
-  /**
-   * 伤害减免（百分比）—— `computeDamage` 第 ③ 步。
-   *
-   * ★ 与下面的 `damageReduction` **同名不同物**：这个是"减百分之多少"，
-   *   那个是"固定减多少点"。wushen 两个都有（`combat.js` 里的
-   *   `diff_sh_per` 与 `diff_sh`），本项目一度只移植了百分比那一半。
-   */
-  damageReductionPer: 'diff_sh_per',
-  /**
-   * **固定**伤害减免（`diff_sh`，"受到的伤害减少"）—— `computeDamage` 第 ⑤ 步。
-   *
-   * ★ 2026-10-17 审查 **M4**：这个键在核心表里**早就登记了**（`PROPERTIES.diff_sh`），
-   *   内容层与存档都能写，但 `computeDamage` 从头到尾不读它 ⇒ **写了静默失效**。
-   *   wushen `combat.js:228` 在递减减伤之后、`parseInt` 之前做
-   *   `sh = sh - this.query_prop("diff_sh")` —— 本实现补在同一位置。
-   */
-  damageReduction: 'diff_sh',
-  /** 忽视对方防御（百分比） */
-  ignoreDefensePer: 'diff_fy_per',
-} as const satisfies Record<string, PropKey>;
-
-/** `PROP` 的别名键（`'attack'` / `'crit'` …） */
-export type PropAlias = keyof typeof PROP;
+/**
+ * **历史对照表**：wushen 旧拼音键 → 本项目英文键。**冻结，永不扩充。**
+ *
+ * ★ 运行时**零消费者** —— 唯一用途是静态闸门 **G3.A** 的报错文案：
+ *   内容层若从 wushen 抄来 `prop: { gj: 20 }`，报错要能直接说"请改用 `attack`"，
+ *   而不是干巴巴一句"不在允许集内"。这是本次改名**最主要的使用风险**
+ *   （29 册 §29.11.4「两处最易翻车」第 2 条）的兜底。
+ *
+ * ★ 它**不是**第二份键表：
+ *   - 类型 `Record<string, CoreProp>` 保证每个值都是**当下**合法的核心键 ⇒
+ *     再改一次名，这里会**编译失败**，逼着同步（不会静默漂移）；
+ *   - 键（旧拼音）**永远**不该是合法 `PropKey` —— 由
+ *     `tests/g3-constants.test.ts` 正向断言钉住；
+ *   - 只增不减地"冻结"才有意义：新增键**不必**登记它，它只描述"改名前长什么样"。
+ *
+ * ★ 人读全量表（含中文名与出处）在 `docs/32` 标识字典。
+ *
+ * ⚠️ 表里有四个词**在别处也是合法标识符**，别拿这张表去做全仓禁用：
+ *   `per`（变量名"百分比"）/ `busy`（`CommandActor.busy` 与 `allow_busy` 闸门）/
+ *   `dazuo`（**指令 id**，打坐）/ `score`（**面板名** `dialog:'score'`）。
+ *   ⇒ 本表只能用来判"**`prop` 块里的键**是不是从 wushen 抄来的旧名"。
+ */
+export const LEGACY_PINYIN_KEYS: Readonly<Record<string, CoreProp>> = {
+  // 甲 · 词干族
+  gj: 'attack',
+  gj_per: 'attack_per',
+  fy: 'defense',
+  fy_per: 'defense_per',
+  diff_fy_per: 'diff_defense_per',
+  ds: 'evasion',
+  ds_per: 'evasion_per',
+  zj: 'deflect',
+  zj_per: 'deflect_per',
+  mz: 'hit',
+  mz_per: 'hit_per',
+  bj_per: 'crit',
+  diff_bj: 'diff_crit',
+  sh: 'damage',
+  add_sh: 'add_damage',
+  add_sh_per: 'add_damage_per',
+  diff_sh: 'diff_damage',
+  diff_sh_per: 'diff_damage_per',
+  bjsh: 'crit_damage',
+  add_bjsh_per: 'add_crit_damage_per',
+  gjsd: 'attack_speed',
+  gjsd_per: 'attack_speed_per',
+  distime: 'cooldown',
+  distime_per: 'cooldown_per',
+  releasetime: 'cast_time',
+  releasetime_per: 'cast_time_per',
+  expend_mp: 'mp_cost',
+  expend_mp_per: 'mp_cost_per',
+  dazuo: 'meditation',
+  dazuo_per: 'meditation_per',
+  busy: 'busy_time',
+  busy_per: 'busy_time_per',
+  diff_busy: 'diff_busy_time',
+  diff_busy_per: 'diff_busy_time_per',
+  // 乙 · 独立键
+  con1: 'innate_con',
+  dex1: 'innate_dex',
+  int1: 'innate_int',
+  str1: 'innate_str',
+  kar: 'luck',
+  per: 'appearance',
+  diff_sh_per2: 'diff_damage_per2',
+  diff_fy_per2: 'diff_defense_per2',
+  diff_downside: 'debuff_resist',
+  diff_downside_per: 'debuff_resist_per',
+  study_per: 'study_efficiency',
+  lianxi_per: 'practice_efficiency',
+  recover_per: 'recovery_efficiency',
+  caiyao1: 'herb_gathering',
+  caiyao_exp: 'herb_exp',
+  caiyao_pot: 'herb_potential',
+  kuang1: 'mining',
+  kuang_exp: 'mining_exp',
+  kuang_pot: 'mining_potential',
+  diaoyu1: 'fishing',
+  diaoyu_exp: 'fishing_exp',
+  diaoyu_pot: 'fishing_potential',
+  lianyao1: 'alchemy',
+  lianyao2: 'alchemy_yield',
+  lianyao_exp_per: 'alchemy_exp_efficiency',
+  xiulian_exp: 'retreat_exp',
+  shuangxiu: 'dual_cultivation',
+  fenjie: 'dismantle_yield',
+  no_fy: 'no_defense',
+  no_pfm: 'no_special',
+  score: 'instance_score',
+  cash_money: 'paid_currency',
+};
 
 export function isCoreProp(x: string): x is CoreProp {
   return Object.hasOwn(PROPERTIES, x);
@@ -259,16 +311,21 @@ export function isCoreProp(x: string): x is CoreProp {
  * 运行时守卫：必须与 `PropKey` 类型**逐字符串等价**。
  *
  * ❌ 曾经的实现是「一次性剥掉 `diff_`/`add_` 前缀 + `_per` 后缀，再查核心键」。
- *    那是错的：核心表里本身就有以 `_per` 结尾（`bj_per`、`diff_sh_per`）、
- *    以 `add_`/`diff_` 开头（`add_sh`、`diff_fy_per2`）的键，单次剥离会**多剥一层**，
- *    于是 `add_bj_per`（= `add_` + `bj_per`）、`diff_sh_per_per`（= `diff_sh_per` + `_per`）
- *    等 **22 个类型合法键被误拒**。
+ *    那是错的：核心表里本身就有以 `_per` 结尾（`crit_per`、`diff_damage_per`）、
+ *    以 `add_`/`diff_` 开头（`add_damage`、`diff_damage_per2`）的键，单次剥离会
+ *    **多剥一层**，于是 `add_crit_per`（= `add_` + `crit_per`）、
+ *    `diff_damage_per_per`（= `diff_damage_per` + `_per`）等
+ *    **22 个类型合法键被误拒**。
  *
  * ✅ 正确做法：**按 6 个族各自独立判定**，任一命中即合法 —— 与类型定义一一对应。
  *    等价性由 `tests/g3-constants.test.ts` 用「类型全量展开 vs 守卫」双向对账守住，
  *    不靠人工枚举。
  *
- * ⚠️ 反面样本：`per`（容貌）本身是合法核心键，同时又是派生后缀词，极易被误伤。
+ * ★ 2026-10-18 §66：`per`（容貌）已改名 `appearance` ⇒ **"核心键恰好等于派生后缀词"
+ *   这颗雷拆掉了**（`isPropKey('per')` 现在返回 `false`，不再有歧义）。
+ *   但反过来要注意：`appearance` 与形近的 `_per` 后缀不再有任何关系，别把
+ *   `appearance_per` 当成"容貌百分比"写进内容 —— 它在类型上是合法的
+ *   （= `appearance` + `_per`），语义上却没有消费者。
  */
 export function isPropKey(x: string): x is PropKey {
   // 族 1: `c`
@@ -996,3 +1053,37 @@ export const GENDER_LABELS: Readonly<Record<Gender, string>> = {
   1: '男性',
   2: '女性',
 };
+
+/**
+ * **境界名**（0–6 档）—— 面板与 `score` 显示的"这个人练到什么份上"。
+ *
+ * ★★ 这是本项目的**新造表**，不是从 wushen 抄来的：wushen **没有境界名**，
+ *   它只有 27 档「技能火候」描述（`os/char/chara_comm.js:209-235` 的 `skill_levels`：
+ *   初学乍练 / 粗通皮毛 / … / 深不可测 / 返璞归真），那是"某**一门**武功练到几成"，
+ *   与"这个人整体什么层次"不是一个概念。把两件事混成一张表，就会得到
+ *   "你的整体境界是『半生不熟』"这种读起来像骂人的话。
+ *
+ * ★ 词取自传统 MUD 的通行说法（`登堂入室` / `一代宗师` / `深不可测` 三档在 wushen
+ *   那张火候表里也有，属同源措辞；其余是武侠小说里的常见分档）。
+ *
+ * ★ 档位与**阈值**分开：名字表在这里（显示，前后端都要读），阈值在
+ *   `server/engine/skill.ts#SKILL_FORMULA.realmThresholds`（规则，只有引擎读）。
+ *   两者靠 `REALM_NAMES.length === realmThresholds.length + 1` 对齐（有单测钉）。
+ */
+export const REALM_NAMES = [
+  '初出茅庐',
+  '略知皮毛',
+  '崭露头角',
+  '登堂入室',
+  '融会贯通',
+  '一代宗师',
+  '深不可测',
+] as const;
+
+/** 境界名（先钳到 `0..len-1` 再取；**不抛**：显示层不该因为数错一档就崩） */
+export function realmName(realm: number): string {
+  const n = Number.isFinite(realm) ? Math.trunc(realm) : 0;
+  const i = Math.min(Math.max(n, 0), REALM_NAMES.length - 1);
+  // `?? ''` 在 `noUncheckedIndexedAccess` 下是必须的；钳过之后**不可达**
+  return REALM_NAMES[i] ?? '';
+}

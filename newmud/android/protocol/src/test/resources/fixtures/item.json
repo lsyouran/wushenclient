@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "type": "item",
+  "id": "p0b0gw3m96",
+  "name": "店小二",
+  "desc": "店小二\n一个手脚麻利、见人就笑的店小二。",
+  "commands": [
+    {
+      "cmd": "look p0b0gw3m96",
+      "name": "查看"
+    },
+    {
+      "cmd": "skills p0b0gw3m96",
+      "name": "技能"
+    },
+    {
+      "cmd": "ask p0b0gw3m96",
+      "name": "打听"
+    }
+  ]
+}

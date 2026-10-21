@@ -30,6 +30,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   EXIT_CRASH,
   EXIT_FAIL,
@@ -44,12 +45,42 @@ import {
 installCrashGuard('gate:mutation');
 
 /**
+ * 崩溃守卫的**预载**地址（与 `run-all.mjs` 同一份语义，理由见 `preload.mjs` 头部）。
+ *
+ * ★ 为什么元闸门**必须**带它：本文件判"变异后是 FAIL 还是 CRASH"**只读退出码**。
+ *   若闸门 import 的模块有语法错误而没预载，退出码是 node 默认的 **1** ——
+ *   与 `EXIT_FAIL` 同码，元闸门会把它记成"这条规则可证明会红"（FG-23 的原形态）。
+ *   `EXIT_CRASH = 3` 这个独立码只有在**预载挂上之后**才覆盖得到加载期。
+ * ★ `pathToFileURL` 而不是拼字符串：Windows 盘符路径不是合法 URL（实测报
+ *   `ERR_UNSUPPORTED_ESM_URL_SCHEME`）。
+ */
+const PRELOAD_URL = pathToFileURL(join(GATE_DIR, 'preload.mjs')).href;
+
+/**
  * 会承载"夹具 / 被打补丁文件"的源码根。
  * ★ `src` 必须在列：G14 的变异样本就地改 `src/**`，而**崩溃恢复**靠 `walkAll()`
  *   扫 SCAN_ROOTS 找 `.mutbak`。漏掉 `src` 就有一段"运行被中断后，前端源码
  *   留在被改坏状态、而没人认得那份病历"的窗口（FG-8 的同一族问题）。
+ * ★ `../docs` 同理必须在列（2026-10-19 加）：G16 的样本**只能**往文档里注入坏引用
+ *   （它扫的就是 `docs/`）。若不在恢复范围里，一次中断就会把
+ *   「注入的幽灵引用」永久留在文档里，而且**没有任何闸门会告诉你是谁干的** ——
+ *   那正是本条注释开头说的那个窗口，只是换了个目录。
+ *   跨到兄弟目录同样是 `join(ROOT, '..', 'docs')` 推出来的，不写死绝对路径。
  */
-const SCAN_ROOTS = ['shared', 'server', 'world', 'src', 'tools', 'tests'];
+const SCAN_ROOTS = ['shared', 'server', 'world', 'src', 'tools', 'tests', '../docs'];
+
+/**
+ * G16 的注入目标：**项目 29 册**（相对工程根，跨目录用 `../docs`）。
+ * 选它的三个条件（少一条样本就会失效）：
+ *   ① 它是**项目册** —— `本册 §X` 才有解析对象（非册文件里写"本册"无从判）；
+ *   ② 它的节号密集（§29.0–§29.14），注入 §999 不会撞上既有节号；
+ *   ③ 它是**现行规范册**，不是历史记录册（26 册那种）—— 后者本来就该保留过期引用。
+ */
+const DOC_29 = '../docs/29-属性与派生数值设计.md';
+/** 00 册 —— G16.5 的样本要动 §2 那张册清单表 */
+const DOC_00 = '../docs/00-总纲与文档索引.md';
+/** 32 册 —— G18 的样本要动"标识生成块" */
+const DOC_32 = '../docs/32-标识字典.md';
 
 /**
  * ── 还原机制：**只写不删** ─────────────────────────────────────────────────────
@@ -216,8 +247,13 @@ const ALL_MUTATIONS = [
     name: '把台账里的一行销掉、而那个包仍然没有生产者（"声明了却没人发"不许静默）',
     apply: () =>
       patchFile('shared/protocol.ts', (t) =>
-        // 锚点带 `satisfies`：`SERVER_PACKET_TYPES` 结尾是 `] as const;`，不会误命中
-        t.replace("  'emote',\n  'dialog',\n] as const satisfies", "  'emote',\n] as const satisfies"),
+        // 锚点带 `satisfies`：`SERVER_PACKET_TYPES` 结尾是 `] as const;`，不会误命中。
+        // ★★ 下面三条 G2.8 样本锚的都是**台账末尾两行**（`pay` / `emote`）。
+        //   2026-10-18 §62 把 `dialog` 销账后，原锚点（`'emote'` + `'dialog'`）
+        //   当场失配、三条全报 ERR —— 这正是「样本按源文本匹配」那条铁律的现场：
+        //   **动过被样本盯着的那段源码，就必须重跑 mutation**。
+        //   以后再销账 / 加条目，记得同步这三行锚点（`'emote'` 是最后一条的真实值）。
+        t.replace("  'pay',\n  'emote',\n] as const satisfies", "  'pay',\n] as const satisfies"),
       ),
   },
   {
@@ -228,8 +264,8 @@ const ALL_MUTATIONS = [
     apply: () =>
       patchFile('shared/protocol.ts', (t) =>
         t.replace(
-          "  'emote',\n  'dialog',\n] as const satisfies",
-          "  'emote',\n  'dialog',\n  'warn',\n] as const satisfies",
+          "  'emote',\n] as const satisfies",
+          "  'emote',\n  'warn',\n] as const satisfies",
         ),
       ),
   },
@@ -241,8 +277,8 @@ const ALL_MUTATIONS = [
     apply: () =>
       patchFile('shared/protocol.ts', (t) =>
         t.replace(
-          "  'emote',\n  'dialog',\n] as const satisfies",
-          "  'emote',\n  'dialog',\n  'nosuchpkt',\n] as const satisfies",
+          "  'emote',\n] as const satisfies",
+          "  'emote',\n  'nosuchpkt',\n] as const satisfies",
         ),
       ),
   },
@@ -269,7 +305,10 @@ const ALL_MUTATIONS = [
     gate: 'G3',
     script: 'g3-propkeys.mjs',
     rule: 'G3.A prop 字面量',
-    name: '内容层 prop 里出现非核心属性键',
+    // ★ 2026-10-18 §67：原样本塞的是 `gj: 1`（当时非法）；改名后 `attack: 1` 变成**合法**，
+    //   于是"变异后仍然 PASS"= 假绿。现在改用"**形似派生、其实不在允许集**"的键
+    //   （`attack_per2`）—— 它同时钉住"半改/抄错后缀"这一族。
+    name: '内容层 prop 里出现非核心属性键（形似派生：attack_per2）',
     apply: () =>
       putFile(
         'world/npc/pub/__mut_g3a.ts',
@@ -279,10 +318,55 @@ const ALL_MUTATIONS = [
           "defineNpc('pub/__mut_g3a', {",
           "  name: '变异样本',",
           "  desc: 'G3.A 变异',",
-          '  prop: { attack: 1 },',
+          '  prop: { attack_per2: 1 },',
           '});',
           '',
         ].join('\n'),
+      ),
+  },
+  // ---- G3.A 的四条分支（2026-10-18 §66 重写：数据键英文化 + 删别名层之后，
+  //      内容层必须写**字面量键**，旧拼音键从"必须包一层别名"变成"直接违规"）。
+  //      ★ 四条各自证明一条分支真的在工作，缺一条就有分支没人走：
+  //        ① 旧拼音键（wushen 移植时最容易写回来）② 拼错的核心键
+  //        ③ 空 prop 块（"没解析出来"≠"没有键"）④ 计算键（静态看不见 ⇒ 违规）----
+  {
+    gate: 'G3',
+    script: 'g3-propkeys.mjs',
+    rule: 'G3.A 旧拼音键',
+    name: '把 blade 的 `attack` 写回 wushen 的 `gj` —— 移植兼容层若存在，这条就会一直绿',
+    apply: () =>
+      patchFile('world/skill/base/blade.ts', (t) =>
+        t.replace('attack: derivedPassive(lv)', 'gj: derivedPassive(lv)'),
+      ),
+  },
+  {
+    gate: 'G3',
+    script: 'g3-propkeys.mjs',
+    rule: 'G3.A 键名拼错',
+    name: '`attak`（少一个 c）—— 既不是核心键也不是旧拼音，必须红而不是静默失效',
+    apply: () =>
+      patchFile('world/skill/base/blade.ts', (t) =>
+        t.replace('attack: derivedPassive(lv)', 'attak: derivedPassive(lv)'),
+      ),
+  },
+  {
+    gate: 'G3',
+    script: 'g3-propkeys.mjs',
+    rule: 'G3.A 空 prop 块',
+    name: '`prop: { }` —— 解析出 0 个键时必须报"没解析出来"，不能当空块放行',
+    apply: () =>
+      patchFile('world/skill/base/blade.ts', (t) =>
+        t.replace('prop: { attack: derivedPassive(lv) }', 'prop: { }'),
+      ),
+  },
+  {
+    gate: 'G3',
+    script: 'g3-propkeys.mjs',
+    rule: 'G3.A 计算键',
+    name: "`['attack']: 1` 计算键 —— 静态闸门解析不出真实键名，放行等于给对账开后门",
+    apply: () =>
+      patchFile('world/skill/base/blade.ts', (t) =>
+        t.replace('attack: derivedPassive(lv)', "['attack']: derivedPassive(lv)"),
       ),
   },
   {
@@ -309,14 +393,17 @@ const ALL_MUTATIONS = [
     gate: 'G3',
     script: 'g3-propkeys.mjs',
     rule: 'G3.C 引擎层属性键',
-    name: '引擎层使用非核心属性键',
+    // ★ §67：原样本写的是 `getProp(me, 'attack')`（当时 `attack` 不是核心键）；
+    //   数据键英文化之后它变成**合法**⇒假绿。改用旧拼音 `gj`：它现在是引擎层
+    //   最典型的"非核心键"（从 wushen 抄公式时最容易写回来的那个）。
+    name: '引擎层使用了非核心属性键（旧拼音 gj）',
     apply: () =>
       putFile(
         'server/engine/__mut_g3c.ts',
         [
           '// 变异样本：应被 G3.C 捕获',
           'export function probe(me: unknown): unknown {',
-          "  return getProp(me, 'attack');",
+          "  return getProp(me, 'gj');",
           '}',
           '',
         ].join('\n'),
@@ -369,14 +456,16 @@ const ALL_MUTATIONS = [
     gate: 'G3',
     script: 'g3-propkeys.mjs',
     rule: 'G3.D 与 MOD 族冲突',
-    name: 'registerExtProp 使用了核心派生键（add_gj）',
+    // ★ §67：`add_gj` 改名后不再是合法 PropKey（`gj` 已废）⇒ 冲突消失、样本假绿。
+    //   改成 `add_attack`（= `add_` + `attack`，当下正是 MOD 族成员）。
+    name: 'registerExtProp 使用了核心派生键（add_attack）',
     apply: () =>
       putFile(
         'world/item/__mut_g3mod.ts',
         [
           "import { registerExtProp } from '@shared/constants.js';",
           '',
-          "const K = registerExtProp('add_gj', {",
+          "const K = registerExtProp('add_attack', {",
           "  display: '变异',",
           "  owner: 'item:probe',",
           '});',
@@ -415,41 +504,31 @@ const ALL_MUTATIONS = [
         [
           '// 变异样本：应被 G3.E 捕获',
           'export function probe(holder: { props: Map<string, number> }): void {',
-          "  holder.props.set('gj', 1);",
+          "  holder.props.set('attack', 1);",
           '}',
           '',
         ].join('\n'),
       ),
   },
 
-  // ---- G3.F 别名表（2026-10-14 新增：`formula.ts` 改用 `PROP.attack` 后，
-  //      G3.C 的字面量计数归零 ⇒ 覆盖搬到别名表上，必须有样本证明它会红）----
-  {
-    gate: 'G3',
-    script: 'g3-propkeys.mjs',
-    rule: 'G3.F 别名表键合法性',
-    name: "把 PROP 的某个别名指向一个不存在的键（'atack'）—— 别名层是引擎唯一的键来源，拼错必须当场红",
-    apply: () =>
-      patchFile('shared/constants.ts', (t) => t.replace("  attack: 'gj',", "  attack: 'atack',")),
-  },
-  {
-    gate: 'G3',
-    script: 'g3-propkeys.mjs',
-    rule: 'G3.F 别名表无重复值',
-    name: '让两个别名指向同一个键（defense 也指到 gj）—— 读代码的人会以为它们是两回事',
-    apply: () =>
-      patchFile('shared/constants.ts', (t) => t.replace("  defense: 'fy',", "  defense: 'gj',")),
-  },
+  // ---- G3.F **已撤销**（2026-10-18 §66）----
+  //  ★ 它原来守 `PROP` 别名表的值；§66 把数据键改成英文后别名层删除，
+  //    对账对象不复存在 ⇒ 规则与它的 2 条样本一并删掉。
+  //    别把它们加回来：一条永远通过的规则比没有更糟（它会让人以为这里有守卫）。
+  //  ★ 撤掉的前提是 **G3.C 的输入回来了**（`formula.ts` 又写裸字面量）——
+  //    由 §COVERAGE 里 `['G3.C 引擎属性调用', …, true]` 那行钉住。
 
   // ---- G3.G 命名空间隔离（2026-10-14 新增：属性改成英文可读名之后，重新踩到
   //      wushen 那条"属性=拼音 / 技能=英文"的分界线 ⇒ 必须有东西守住）----
   {
     gate: 'G3',
     script: 'g3-propkeys.mjs',
-    rule: 'G3.G 别名键 ⊥ 技能槽',
-    name: "把 PROP 别名键改成技能 id（hit → parry）—— 数值侧与技能槽重名，grep 分不清",
+    rule: 'G3.G 核心键 ⊥ 技能槽',
+    name: '往 PROPERTIES 里塞一个与技能槽同名的键（parry）—— 数值侧与技能槽重名，grep 分不清',
     apply: () =>
-      patchFile('shared/constants.ts', (t) => t.replace("  hit: 'mz',", "  parry: 'mz',")),
+      patchFile('shared/constants.ts', (t) =>
+        t.replace("  hit: '命中', // ← mz", "  hit: '命中', // ← mz\n  parry: '招架',"),
+      ),
   },
   {
     gate: 'G3',
@@ -1151,11 +1230,16 @@ const ALL_MUTATIONS = [
     gate: 'SKL',
     label: 'SKL(测试)',
     rule: 'SKL.5 学习条件（D5 声明式）',
-    name: '让学习条件不再拦人（条件不满足也照学，且不提示）',
+    name: '让基本功门槛不再拦人（`minSlot` 不满足也照学）',
+    // ★★ 锚点在 26 册 §64 改过（2026-10-18）：`#learnBlockReason` 从"自己拼中文"
+    //   变成 `#conditionRefusal()` "只出结构"。旧锚点（`return \`你的${name}等级不够…\``）
+    //   已不存在 ⇒ 注入不生效 ⇒ 元闸门报 `注入失败：变异未生效`。
+    //   这正是 harness 那道自检的价值：**样本随重构失配**是静默假绿的常见成因。
+    //   ★ 新锚点仍然锚**同一处判断**（`minSlot` 那一支），只是形态从"返回文案"变成"返回结构"。
     apply: () =>
       patchFile('server/engine/skill.ts', (t) =>
         t.replace(
-          '        const name = this.activeTemplate(slot)?.name ?? slot;\n        return `你的${name}等级不够 ${need}，无法学习${tpl.name}。`;',
+          "        const name = this.activeTemplate(slot)?.name ?? slot;\n        return { kind: 'refused', reason: 'slot', slot, need, name };",
           '        const name = this.activeTemplate(slot)?.name ?? slot;\n        void name;',
         ),
       ),
@@ -1326,6 +1410,43 @@ const ALL_MUTATIONS = [
         ),
       ),
   },
+  {
+    kind: 'test',
+    // ★ 宿主选 `skill-curves.test.ts` 而不是引擎测试：这条规则的判据有三层 ——
+    //   ① 曲线函数本身的值；② 曲线形状（凸，后期增量必须更大）；
+    //   ③ `Character.recount` 之后派生值真的变了。
+    //   只有那个文件同时钉住三层（"学满 6 门 ⇒ attack 260 / hit 130"）。
+    file: 'tests/skill-curves.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.17 基本技能被动曲线（幂律，凸：后期更值钱）',
+    name: '把曲线从幂律换成平方根 —— 退回"后期越练越不值钱"的凹曲线（本批第一版就是这个错）',
+    // ★ 这条样本守的是 2026-10-18 最终定稿的设计：**成本涨 1000 倍，收益必须涨得够多**。
+    //   换成 sqrt 之后：值表（attrPassive(30) 期望 1、实际 10）、凸性断言
+    //   （后半程增量必须大于前半程）、100 级逐项派生值会同时红 ——
+    //   三处都红才算真的"这条曲线被消费"。
+    apply: () =>
+      patchFile('server/world/skill-curves.ts', (t) =>
+        t.replace(
+          '  return Math.trunc(maxGain * Math.pow(ratio, exponent));',
+          '  return Math.trunc(maxGain * Math.sqrt(ratio));',
+        ),
+      ),
+  },
+  {
+    kind: 'test',
+    // ★ 宿主同样选 `skill-curves.test.ts`：它有一条"硬顶 = 曲线标定点"的断言
+    //   （`levelLimit(1e12, 6)` 必须回到 1000，且练满就拿满额加成）。
+    file: 'tests/skill-curves.test.ts',
+    gate: 'SKL',
+    label: 'SKL(测试)',
+    rule: 'SKL.18 技能等级硬顶（= 曲线标定点）',
+    name: '去掉 `levelLimit` 的 `Math.min(..., limitMaxLevel)` —— 高境界 + 巨量经验会算出 1.8 万级，曲线函数再悄悄截断',
+    apply: () =>
+      patchFile('server/engine/skill.ts', (t) =>
+        t.replace('  return Math.min(byExp, SKILL_FORMULA.limitMaxLevel);', '  return byExp;'),
+      ),
+  },
 
   // ---- A 批（26 册 §28）：口径对账六项 —— 每条"我修好了"都必须能被改坏 ----
   // ★ 这六项里 FG-15 / FG-17 是**撤回不实陈述**（注释层面的修法），没有可执行的
@@ -1415,7 +1536,13 @@ const ALL_MUTATIONS = [
   },
   {
     kind: 'test',
-    file: 'tests/engine-skill.test.ts',
+    // ★★ 宿主文件在 26 册 §64 从 `engine-skill.test.ts` 换到 `skill-learn.test.ts`：
+    //   `learn()` 改成返回判别联合后，引擎测试只断言 `{reason:'gender', gender}` ——
+    //   它**故意**不再锚文案（文案归指令层）。于是"改 `GENDER_LABELS` 会让谁变红"
+    //   就没答案了，本样本当场假绿（2026-10-18 实测）。
+    //   ⇒ 判据跟着**文案的归属层**走：`LEARN_MESSAGES.refuse()` 在 `train/learn.ts`，
+    //     钉它的用例就应该和它住同一个测试文件。*改的是宿主，不是规则语义*。
+    file: 'tests/skill-learn.test.ts',
     gate: 'SKL',
     label: 'T18(测试)',
     rule: 'T18 性别三档（文案单源）',
@@ -1519,6 +1646,236 @@ const ALL_MUTATIONS = [
       patchFile('server/net/hub.ts', (t) => `${t}\n// 见 docs/99-不存在.md（幽灵文档路径）\n`),
   },
 
+  // ---- G16 文档内部引用（册号 + 节号存在性）------------------------------------
+  // ★ 与 G15 的样本**必须分开**：G15 注入到**代码注释**里，G16 扫的是 `docs/`。
+  //   两条闸门守的是两个方向（代码→册 / 册→册），共用一个样本就意味着其中一条永远
+  //   没被证明过 —— 那正是"闸门全绿 ≠ 每条规则都可达"的老问题。
+  // ★ 注入目标选 29 册：它是**项目册**（`本册 §X` 才有解析对象），且 §29.x 节号密集，
+  //   注入一个 §999 不会与既有节号撞名（撞名会变成"合法引用"，样本当场失效 ——
+  //   24 册铁律 11 的第 5 种假绿）。
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.1 幽灵册号（文档内）',
+    name: '往 docs/29 尾部加一行正文，引用一个不存在的册号 —— G15 明确不扫 docs/，所以这条漂移此前**没有任何闸门**管',
+    apply: () =>
+      patchFile(DOC_29, (t) => `${t}\n\n见 99 册的写法（本行由变异测试注入）。\n`),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.2 幽灵文档路径（文档内）',
+    name: '往 docs/29 尾部加一行正文，引用 `docs/` 下不存在的路径（G16.1 只认 `NN 册`，这是第二条通道，同 G15.2 的理由）',
+    apply: () =>
+      patchFile(DOC_29, (t) => `${t}\n\n见 docs/99-不存在.md 的写法（本行由变异测试注入）。\n`),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.3 绑定式幽灵节号',
+    name: '往 docs/29 尾部加「26 册 §999.1」—— 册号真、节号假。这条证明"节号存在性"已经机械化了：2026-10-19 之前它被记成"不可机械化"的窄口',
+    apply: () => patchFile(DOC_29, (t) => `${t}\n\n见 26 册 §999.1 的写法（本行由变异测试注入）。\n`),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.4 幽灵本册自指',
+    name: '往 docs/29 尾部加「本册 §999」—— 显式自指走的是**另一条**解析路径（本文件所属册），不复用 G16.3 的绑定式，所以单独证一次',
+    apply: () => patchFile(DOC_29, (t) => `${t}\n\n本册 §999 的写法（本行由变异测试注入）。\n`),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16 死规则守卫',
+    name: '把 g16-docsrefs.mjs 的绑定式正则改成永不命中 —— G16.3 覆盖数归零。"这条子规则此刻什么都没判"必须判**失败**，而不是"没有可查对象"就报通过（FG-7）',
+    apply: () =>
+      patchFile('tools/gate/g16-docsrefs.mjs', (t) =>
+        t.replace(
+          'const BOUND_SEC_REF = /(?<!\\d)(\\d{2})\\s*册\\s*§\\s*(\\d+(?:\\.\\d+)*)/g;',
+          'const BOUND_SEC_REF = /(?!)x/g;',
+        ),
+      ),
+  },
+
+  // ---- G17 导出符号消费者（死代码 / 假契约）------------------------------------
+  // ★ 这一组样本守的是**元层**，和上面按闸门分组的那批不同：G17 不扫业务代码，
+  //   它扫的是 `tools/` 自己的导出面。所以样本也只能往 `tools/` 里注。
+  // ★ 两条样本必须**分开**：G17.1（哪儿都没用）与 G17.2（只在本文件用）走的是
+  //   同一条统计结果的**两个分支**。合成一条就永远只证明了其中一个分支
+  //   —— 铁律 2 的"缺省分支也要测"。
+  // ★ 为什么注入 `lib.mjs` 而不用现成的 `docs-index.mjs`：`lib.mjs` 是每个闸门都
+  //   import 的公共库，往里加符号最能代表"有人顺手加了个工具函数"这个真实场景。
+  {
+    gate: 'G17',
+    script: 'g17-exports.mjs',
+    rule: 'G17.1 死代码（导出零引用）',
+    name: '往 tools/gate/lib.mjs 尾部加一个 `export const __mutNobodyUses = 1`（全仓无人引用）—— 这正是 `hasBook` 的形态：导出了、没人调、读代码的人以为存在这条路径',
+    apply: () => patchFile('tools/gate/lib.mjs', (t) => `${t}\nexport const __mutNobodyUses = 1;\n`),
+  },
+  {
+    gate: 'G17',
+    script: 'g17-exports.mjs',
+    rule: 'G17.2 假契约（只有本文件在用）',
+    name: '往 tools/gate/lib.mjs 尾部加一对「导出的函数 + 同文件里的一个使用者」—— 内部 1 处、外部 0 处，`export` 关键字在说假话。这条和 G17.1 走的是**同一个统计的另一个分支**，必须单独证',
+    apply: () =>
+      patchFile(
+        'tools/gate/lib.mjs',
+        (t) => `${t}\nexport function __mutOwnOnly() {\n  return 1;\n}\nconst __mutLocalUser = __mutOwnOnly;\n`,
+      ),
+  },
+  {
+    gate: 'G17',
+    script: 'g17-exports.mjs',
+    rule: 'G17 死规则守卫',
+    name: '把 g17-exports.mjs 的 `EXPORT_RE` 从 `^export` 改成 `^xexport`（永不命中）—— 解析出 0 个导出，覆盖数归零。「这条规则此刻什么都没判」必须判**失败**（FG-7）',
+    apply: () =>
+      patchFile('tools/gate/g17-exports.mjs', (t) => t.replace('const EXPORT_RE = /^export', 'const EXPORT_RE = /^xexport')),
+  },
+
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.5 漏登记的册',
+    name: '从 00 册 §2 的表格里删掉一行（`**33**`）—— 磁盘上有 11 个册文件、表格只剩 10 行。这一条证明"新增一册忘了登记"会当场变红，而不是安静地让那册在索引里不存在',
+    apply: () =>
+      patchFile(DOC_00, (t) => t.replace(/^\| \*\*33\*\* \|.*\r?\n/m, '')),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.5 幽灵册行',
+    name: '往 00 册 §2 的表格末尾插一行 `**99**`（磁盘上没有这个文件）—— 这是**反方向**：G16.5 必须双向判，只判"漏登记"的话，删掉一册后残留的索引行永远查不出来',
+    apply: () =>
+      patchFile(DOC_00, (t) =>
+        t.replace(/(^\| \*\*33\*\* \|.*)$/m, '$1\n| **99** | 幽灵册 | 活 | 由变异测试注入 | — |'),
+      ),
+  },
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'G16.5 死规则守卫',
+    name: '把 00 册 §2 的**整张册清单表**删掉（11 行全没）—— G16.5 覆盖数归零。"这张表此刻什么都没判"必须判**失败**，不能因为"表里没有行 ⇒ 没有漏登记"就报通过（FG-7 的典型形态）',
+    apply: () => patchFile(DOC_00, (t) => t.replace(/^\| \*\*\d{2}\*\* \|.*\r?\n/gm, '')),
+  },
+
+  // ---- G18 标识清单对账（32 册生成块 ⊥ 代码枚举）-------------------------------
+  // ★ 样本必须动**文档里的生成块**，而不是动代码：G18 守的是"文档持有了一份不完整
+  //   副本"这件事。动代码（比如删一个 world/skill/*.ts）需要新建/删除文件，而还原
+  //   机制是"只写不删"（FG-8），做不到。
+  // ★ 也不能靠"改一条真 id"来造 —— 那会同时改掉代码事实，`before` 就不绿了。
+  //
+  // ★★ 2026-10-19 §71.8 九组全部建块之后，样本要按**解析家族**铺开，
+  //   而不是"每组一条"：同族共享同一条支路，重复铺只会让 mutation 变慢而不增信息。
+  //   四个家族 + 两条守卫分支：
+  //     ① 目录遍历   `idsFromDir()`        —— G18.1（skill）
+  //     ② 数组字面量 `stringsIn()`         —— G18.3（packet）
+  //     ③ 对象键名   `keysIn()`            —— G18.2（error）
+  //     ④ 展开合并   `...KINDS`            —— G18.4（reserved，唯一一支）
+  //     ⑤ 块缺失     `findBlock() === null` —— G18.5（kind）
+  //     ⑥ 守卫      组解析归零 / 闸门空转   —— 最后两条
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18.1 文档少了/多了 id',
+    name: '把 32 册生成块里的 `wd/taijijian` 改成不存在的 `wd/taiji` —— 代码有、文档缺 + 文档有、代码无，两条同时触发。这条正是 2026-10-19 实测缺口（技能 id 文档 3 个 / 代码 7 个）的机械化形态',
+    apply: () =>
+      patchFile(DOC_32, (t) => t.replace('| 7 | `wd/taijijian` |', '| 7 | `wd/taiji` |')),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18 死规则守卫（组解析归零）',
+    name: '把 ids-index.mjs 里 skill 组的采集改成返回 `[]` —— 解析出 0 项时必须判**失败**，不能因为"代码里没有 id ⇒ 文档也不需要"就报通过（FG-7 的形态）',
+    apply: () =>
+      patchFile('tools/ids-index.mjs', (t) =>
+        t.replace("get: () => idsFromDir('world/skill'),", 'get: () => [],'),
+      ),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18 死规则守卫（闸门空转）',
+    name: '删掉 ids-index.mjs 里**全部** `blocked: true` —— 没有任何组参与对账时闸门会空转（`BLOCK_GROUPS` 为 0）。这条与上一条打的是**不同的分支**：上一条是"某组坏了"，这条是"整道闸门没有对象"',
+    // ★★ 必须是**全部**删掉，不能只删第一处：2026-10-19 §71.8 九组全部建块之后，
+    //   `t.replace('    blocked: true,\n', '')` 只摘掉 `command` 那一行 ⇒ 还剩 8 组
+    //   ⇒ `BLOCK_GROUPS` 不为 0 ⇒ 闸门照常通过 ⇒ 本条样本**静默变成假绿**。
+    //   这正是 24 册铁律 11「改名/扩量批次要重看样本里那个名字还算不算数」的形态。
+    apply: () =>
+      patchFile('tools/ids-index.mjs', (t) => t.replace(/^ {4}blocked: true,\n/gm, '')),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18.2 文档值与代码不一致（keysIn 族）',
+    name: '把 32 册 error 块里的 `PAY_DUPLICATE` 改成不存在的 `PAY_DUP` —— 覆盖 `keysIn` 那条解析路径（对象键名），它与 `stringsIn`（数组字面量）和目录遍历是**三种不同的采集方式**，坏掉的方式也不同',
+    apply: () =>
+      patchFile(DOC_32, (t) =>
+        t.replace('| 28 | `PAY_DUPLICATE` |', '| 28 | `PAY_DUP` |'),
+      ),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18.3 文档值与代码不一致（stringsIn 族）',
+    name: '把 32 册 packet 块里的 `dialog` 改成不存在的 `dialogx` —— 覆盖 `stringsIn` 那条路径（数组里的字符串字面量）。★ 这一组当年就是**既多又少**的那张表（多 command/ping、少 disobj/changepfm/clearDistime）',
+    apply: () =>
+      patchFile(DOC_32, (t) => t.replace('| 35 | `dialog` |', '| 35 | `dialogx` |')),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18.4 `...KINDS` 展开失效',
+    name: '把 ids-index.mjs 里 reserved 组的 `spreadKinds` 判成恒 false —— 九组里**只有** reserved 要跟随 `...KINDS` 展开，把这条支路写坏时其余八组全绿，只有 reserved 会从 15 掉到 7',
+    apply: () =>
+      patchFile('tools/ids-index.mjs', (t) =>
+        t.replace(
+          "const spreadKinds = (lines ?? []).some((l) => l.includes('...KINDS'));",
+          'const spreadKinds = false;',
+        ),
+      ),
+  },
+  {
+    gate: 'G18',
+    script: 'g18-ids.mjs',
+    rule: 'G18.5 标记块缺失',
+    name: '删掉 32 册 kind 块的 `<!-- ids:begin kind -->` 一行 —— 打的是 `findBlock() === null` 那条分支（与"块内容不对"是两个不同的报错，修法也不同：一个要手工插块，一个跑 `--write`）',
+    apply: () => patchFile(DOC_32, (t) => t.replace('<!-- ids:begin kind -->\n', '')),
+  },
+
+  // ---- G19 前端包字段对账（26 册 §76）----------------------------------------
+  // ★ 这道闸门平时输出 **0 处违规**，所以每条样本都必须真的把它推红 ——
+  //   尤其是最后那条"死规则守卫"：解析器全废时它也会输出 0 处，两者日志同形。
+  {
+    gate: 'G19',
+    script: 'g19-frontend-contract.mjs',
+    rule: 'G19.1 前端读了 schema 里不存在的键',
+    name: '把 world.ts 里 room handler 的 `p[\'desc\']` 改成 `p[\'descr\']` —— 这正是真实故障的形态：前端软访问，键写错了界面只是少一块，tsc 与所有单测都不会红',
+    apply: () =>
+      patchFile('src/process/handlers/world.ts', (t) =>
+        t.replace("desc: asString(p['desc']),", "desc: asString(p['descr']),"),
+      ),
+  },
+  {
+    gate: 'G19',
+    script: 'g19-frontend-contract.mjs',
+    rule: 'G19.2 handler 注册了协议里不存在的包',
+    name: '往 social.ts 尾部注册一个 `registerHandler(\'nosuchpacket\', (p) => …)` —— 打的是"类型不在 SERVER_PACKET_TYPES 里"那条分支（G2 也会红，但本条只判 G19 的退出码）',
+    apply: () =>
+      patchFile('src/process/handlers/social.ts', (t) =>
+        `${t}\nregisterHandler('nosuchpacket', (p) => {\n  pushLine(asString(p['content']));\n});\n`,
+      ),
+  },
+  {
+    gate: 'G19',
+    script: 'g19-frontend-contract.mjs',
+    rule: 'G19 死规则守卫（解析归零）',
+    name: '把 g19 的注册正则从 `registerHandler` 改成 `xregisterHandler`（永不命中）—— 解析出 0 个 handler，违规数同样是 0，与"全部通过"的日志一模一样。覆盖数归零必须判**失败**（FG-7）',
+    apply: () =>
+      patchFile('tools/gate/g19-frontend-contract.mjs', (t) =>
+        t.replace('const re = /registerHandler\\(', 'const re = /xregisterHandler\\('),
+      ),
+  },
+
   // ---- ★ FG-23：**元闸门自己的判据**（不按闸门分组，因为它守的不是某条扫描规则）----
   // 这条样本问的不是"G2 的某条规则可达吗"，而是
   //   「**G2 死了（而不是发现违规）时，元闸门认不认得出**」。
@@ -1535,6 +1892,23 @@ const ALL_MUTATIONS = [
       // ★ 锚点用**正则**而不是整行字面量：import 列表会随"多了一个工具函数"变化
       //   （G14.2 断链那条样本踩过，见 26 册 §20.9.7）。
       patchFile('tools/gate/g2-protocol.mjs', (t) => t.replace(/\n  rel,\n  report,/, '\n  report,')),
+  },
+
+  // ---- ★ FG-23 的**第二条通道**：**加载期**崩溃（2026-10-19 实测踩出来的）----
+  // 上一条证明的是"运行期抛错 ⇒ CRASH"。但 ESM 是**先把整张 import 图加载完再执行本模块**，
+  // 所以"被 import 的模块有语法错误"发生在任何 `installCrashGuard()` 之前 ——
+  // node 默认退出码 **1**，与 `EXIT_FAIL` 同码 **且零输出**。
+  // 现场：给共享模块加注释时写了含「星号 + 斜杠」的 glob，注释提前闭合 ⇒ G15 与 G16 各 exit 1、
+  // 一行输出都没有，套件里显示为 `❌ FAIL`，与"真的发现违规"**完全一样**。
+  // 修法是 `--import preload.mjs`（run-all 与元闸门两处 spawn 都挂）。
+  // ★ 本条同时也是"预载真的生效"的证明：没有它，after 会是 1 ⇒ 本条当场变红。
+  {
+    gate: 'G16',
+    script: 'g16-docsrefs.mjs',
+    rule: 'FG-23 加载期崩溃 ≠ 违规（预载）',
+    expectAfter: EXIT_CRASH,
+    name: '把共享模块 docs-index.mjs 变成**语法错误**（末尾加一行 `const = 1;`）：加载期就死，闸门连一行输出都没有 —— 元闸门必须记为 CRASH(3)。没有 `--import preload.mjs` 时这里是 1，与"发现违规"同码',
+    apply: () => patchFile('tools/gate/docs-index.mjs', (t) => `${t}\nconst = 1;\n`),
   },
 ];
 
@@ -1564,7 +1938,7 @@ function runCheck(m) {
   const argv =
     m.kind === 'test'
       ? [join(ROOT, 'node_modules', 'vitest', 'vitest.mjs'), 'run', m.file]
-      : [join(GATE_DIR, m.script)];
+      : ['--import', PRELOAD_URL, join(GATE_DIR, m.script)];
   const r = spawnSync(process.execPath, argv, {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',

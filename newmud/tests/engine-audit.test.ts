@@ -194,7 +194,7 @@ describe('A3 读档时的装配槽冲突', () => {
         name: '审查剑法甲',
         type: SKILL_TYPES.SKILL,
         can_enables: ['sword'],
-        enableProp: () => ({ sword: { prop: { gj: 10 } } }),
+        enableProp: () => ({ sword: { prop: { attack: 10 } } }),
       },
     },
     {
@@ -203,7 +203,7 @@ describe('A3 读档时的装配槽冲突', () => {
         name: '审查剑法乙',
         type: SKILL_TYPES.SKILL,
         can_enables: ['sword'],
-        enableProp: () => ({ sword: { prop: { gj: 100 } } }),
+        enableProp: () => ({ sword: { prop: { attack: 100 } } }),
       },
     },
   ];
@@ -295,7 +295,7 @@ describe('A7 零级技能的属性贡献', () => {
           type: SKILL_TYPES.SKILL,
           can_enables: ['sword'],
           // ★ 关键：属性值**与 lv 无关**，所以"跳过 0 值"这条规则救不了场
-          passiveProp: () => ({ prop: { gj: 5 } }),
+          passiveProp: () => ({ prop: { attack: 5 } }),
         },
       },
     ].map((d) => ({ id: d.id, def: d.def as SkillDef })));
@@ -309,11 +309,11 @@ describe('A7 零级技能的属性贡献', () => {
     });
 
     npc.skills.setLevel('audit/const', 0);
-    expect(getProp(npc, 'gj')).toBe(0);
+    expect(getProp(npc, 'attack')).toBe(0);
 
     // 升到 1 级后应当生效（别把"0 级不加"误修成"永远不加"）
     npc.skills.setLevel('audit/const', 1);
-    expect(getProp(npc, 'gj')).toBe(5);
+    expect(getProp(npc, 'attack')).toBe(5);
   });
 
   it('0 级的**已装配**技能同样不贡献 ② 档属性', () => {
@@ -324,8 +324,8 @@ describe('A7 零级技能的属性贡献', () => {
           name: '审查常数技能乙',
           type: SKILL_TYPES.SKILL,
           can_enables: ['sword'],
-          passiveProp: () => ({ prop: { gj: 1 } }),
-          enableProp: () => ({ sword: { prop: { fy: 7 } } }),
+          passiveProp: () => ({ prop: { attack: 1 } }),
+          enableProp: () => ({ sword: { prop: { defense: 7 } } }),
         },
       },
     ].map((d) => ({ id: d.id, def: d.def as SkillDef })));
@@ -340,11 +340,11 @@ describe('A7 零级技能的属性贡献', () => {
 
     npc.skills.learn('audit/const2', 1);
     npc.skills.enable('sword', 'audit/const2');
-    expect(getProp(npc, 'fy')).toBe(7);
+    expect(getProp(npc, 'defense')).toBe(7);
     npc.skills.setLevel('audit/const2', 0);
     // 装配关系还在，但等级归零 → ① ② 两档都不该继续生效
     expect(npc.skills.entryOf('audit/const2')?.enabled).toBe('sword');
-    expect(getProp(npc, 'fy')).toBe(0);
+    expect(getProp(npc, 'defense')).toBe(0);
   });
 });
 

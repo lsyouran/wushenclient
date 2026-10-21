@@ -5,15 +5,125 @@
 import { registerHandler } from '../registry.js';
 import { pushChat } from '../../ui/stream.js';
 import { noteChat } from '../../ui/input.js';
-import { clearPanelRows, closePanel, openPanel, removePanelRow } from '../../ui/panel.js';
+import { clearPanelRows, closePanel, openDataPanel, openPanel, removePanelRow } from '../../ui/panel.js';
+import { buildAttrPanel } from '../../ui/attr.js';
+import { buildSkillsPanel } from '../../ui/skills.js';
 import { state } from '../../state.js';
 import { DIALOG_CONTROL_FIELDS } from '../../../shared/constants.js';
+import type { AttrView, AttrValueView, SkillEntryView, SkillsView } from '../../../shared/protocol.js';
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
 
+/** 有限数才认，其余（缺失 / 字符串 / NaN / Infinity）一律 0 —— 面板不显示 `NaN` */
+const asNum = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+const asObj = (v: unknown): Record<string, unknown> =>
+  typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {};
+
+/**
+ * `dialog:score` 的载荷 → `AttrView`（**每个字段都过一道类型检查**）。
+ *
+ * ★ 为什么不像别处那样直接 `p['hp'] as number`：`dialog` 的 zod schema 是
+ *   passthrough 的（`protocol.ts` 留了未知字段的口子），所以**编译期没人保证**
+ *   载荷里那几个键真在。漏一个就变成 `undefined` 摆进面板 —— 玩家看到的是
+ *   「气血：undefined / 100」。这里缺什么就退成 0，至少是能读的。
+ * ★ 四维那一段逐项过滤：`attrs` 里混进非对象（老版本 / 手搓的包）时跳过那一项，
+ *   而不是整块面板崩掉。
+ */
+function readAttrView(p: Record<string, unknown>): AttrView {
+  const rawAttrs = Array.isArray(p['attrs']) ? p['attrs'] : [];
+  const attrs: AttrValueView[] = [];
+  for (const item of rawAttrs) {
+    const o = asObj(item);
+    const key = asString(o['key']);
+    if (key === '') continue; // 没有键名的项没法查中文名，跳过
+    attrs.push({
+      key,
+      innate: asNum(o['innate']),
+      bonus: asNum(o['bonus']),
+      total: asNum(o['total']),
+    });
+  }
+
+  const c = asObj(p['combat']);
+  const level = asNum(p['level']);
+  return {
+    name: asString(p['name']),
+    gender: asNum(p['gender']),
+    level,
+    // ★ 老版本的包没有 `realmName`（本次新增）⇒ 退回数字，面板不空一格。
+    //   不在这里查 `REALM_NAMES`：前端只有一张表会漂，名字一律服务端给。
+    realmName: asString(p['realmName']) || String(level),
+    exp: asNum(p['exp']),
+    pot: asNum(p['pot']),
+    hp: asNum(p['hp']),
+    maxHp: asNum(p['maxHp']),
+    mp: asNum(p['mp']),
+    maxMp: asNum(p['maxMp']),
+    attrs,
+    combat: {
+      attack: asNum(c['attack']),
+      defense: asNum(c['defense']),
+      hit: asNum(c['hit']),
+      evasion: asNum(c['evasion']),
+      deflect: asNum(c['deflect']),
+      crit: asNum(c['crit']),
+    },
+    // ★ `skillLimit` 允许 `Infinity`（NPC 的面板）—— 上面那个 `asNum` 会把它归零，
+    //   所以这里单独判：不是有限数时**保留**它（前端渲染成 ∞）。
+    skillLimit:
+      typeof p['skillLimit'] === 'number' && !Number.isNaN(p['skillLimit'])
+        ? p['skillLimit']
+        : 0,
+  };
+}
+
+/**
+ * `dialog:skills` 的载荷 → `SkillsView`（与 `readAttrView` 同一条纪律：逐字段过一遍）。
+ *
+ * ★ 为什么条目要**逐项筛**而不是整块信：`dialog` 的 schema 是 passthrough 的，
+ *   缺字段时面板上会出现 `undefined 级 / NaN%`。这里缺什么就退成能读的值；
+ *   连 `id` 都没有的项直接跳过 —— 没有 id 就拼不出命令，留着只能是死行。
+ */
+function readSkillsView(p: Record<string, unknown>): SkillsView {
+  const raw = Array.isArray(p['items']) ? p['items'] : [];
+  const items: SkillEntryView[] = [];
+  for (const item of raw) {
+    const o = asObj(item);
+    const id = asString(o['id']);
+    if (id === '') continue;
+    const canEnables = Array.isArray(o['canEnables'])
+      ? o['canEnables'].filter((s): s is string => typeof s === 'string')
+      : [];
+    const enabled = asString(o['enabled']);
+    const note = asString(o['note']);
+    const slot = asString(o['slot']);
+    items.push({
+      id,
+      // 没有名字就退回 id 的末段：`wd/taijijian` → `taijijian`。
+      // 玩家看到拼音很怪，但比看到空白行更能定位问题。
+      name: asString(o['name']) || (id.split('/')[1] ?? id),
+      kind: asString(o['kind']) || 'skill',
+      grade: asNum(o['grade']),
+      level: asNum(o['level']),
+      // ★ 进度是 0–100 的百分数，先钳再截断：服务端就算给了 130 / -3，面板也不显示
+      progress: Math.max(0, Math.min(100, Math.trunc(asNum(o['progress'])))),
+      enabled: enabled === '' ? null : enabled,
+      canEnables,
+      slot: slot === '' ? null : slot,
+      ...(note === '' ? {} : { note }),
+    });
+  }
+  return {
+    title: asString(p['title']),
+    limit: asNum(p['limit']),
+    pot: asNum(p['pot']),
+    items,
+  };
+}
+
 const formatField = (v: unknown): string =>
   typeof v === 'object' ? JSON.stringify(v) : String(v);
-
 /** 是不是 `dialog` 帧的**控制字段**（名单单源 = `DIALOG_CONTROL_FIELDS`） */
 const isControlField = (k: string): boolean => (DIALOG_CONTROL_FIELDS as readonly string[]).includes(k);
 
@@ -115,6 +225,30 @@ registerHandler('dialog', (p) => {
   }
 
   const name = asString(p['dialog']);
+
+  // ★★ `score` 走**专用渲染器**（§62）：属性卡是分段的（`.score-section`），
+  //   一行一个 `<p>` 盛不下 —— 那正是它跟物件面板的区别。wushen 也是每个面板
+  //   自带模板（`dialog/score.js` 的 `template_score`），不是通用键值列表。
+  //   ★ 只认**自己渲染得了**的那几个面板名；其余照旧落到通用分支（如实列出
+  //     `k: v`，不假装处理了 —— 见本函数开头的说明）。
+  if (name === 'score') {
+    openDataPanel('score', '属性', () => buildAttrPanel(readAttrView(p)));
+    return;
+  }
+
+  // ★★ `skills` 走**第三段结构**的面板（§64.10）：页签 + 列表 + 动作栏。
+  //   与 `score` 的差别是它**有内部状态**（哪一页、选了哪一项），所以构建器
+  //   拿得到 `redraw` —— 那是 §63.3 给操作型面板留的地基。
+  //   标题带上限：上限由经验决定（26 册 §56），它是"这门技能还能练到几级"的答案，
+  //   放在标题里与 wushen 的 `Dialog.title(data.title)` 同一个位置。
+  if (name === 'skills') {
+    const view = readSkillsView(p);
+    openDataPanel('skills', `技能 · 上限 ${String(view.limit)} 级`, (redraw) =>
+      buildSkillsPanel(view, redraw),
+    );
+    return;
+  }
+
   const rows = contentKeys.map((k) => `${k}: ${formatField(p[k])}`);
   openPanel(name === '' ? '面板' : name, rows.length === 0 ? ['（空面板）'] : rows);
 });

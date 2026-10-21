@@ -18,7 +18,7 @@
  *   - 主要包真的把内容画到了 DOM 上（房间 / 出口 / 物件 / 动作 / 数值 / 聊天 / 面板）
  *   - 工具条每一格都有归属（没有点不动的按钮）
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,13 +35,25 @@ function mountHtml(): void {
   expect(document.getElementById('app')).not.toBeNull();
 }
 
-type Vitals = { hp: number; maxHp: number; mp: number; maxMp: number; qi: number; level: number };
+/**
+ * `src/state.ts` 里那个单例的**真实形状**。
+ *
+ * ★ 为什么用 `typeof import(...)` 而不是手抄一份字段清单：手抄的那份漏了
+ *   `fighting` / `statuses` / `cooldowns`（§78 加「战报回消息流」断言时才撞出来
+ *   ⇒ `error TS2339: Property 'fighting' does not exist`）。从源派生之后，
+ *   `state.ts` 再加字段，测试这边自动跟上 —— 与闸门那条"清单别手抄"（G16.5 /
+ *   G17 / `run-all` 自检）是同一族：第二份清单迟早会漂。
+ *
+ * ★ `import type` 语义：这里只是**类型位置**的引用，不产生运行期依赖，
+ *   与 `beforeAll` 里那个 `await import('../src/state.js')` 各管一段，不冲突。
+ */
+type AppState = typeof import('../src/state.js')['state'];
 
 let mod: {
   dispatchPacket: (type: string, payload: Record<string, unknown>) => boolean;
   registeredTypes: () => readonly string[];
   SERVER_PACKET_TYPES: readonly string[];
-  state: () => { vitals: Vitals; roleId: string; items: readonly unknown[] };
+  state: () => AppState;
   resetNodeCache: () => void;
   // room
   bindRoom: (h: {
@@ -51,6 +63,12 @@ let mod: {
   renderScene: () => void;
   renderActionBar: () => void;
   renderAll: () => void;
+  /** 滚轮 → 横向滚动的位移换算（纯函数，抽出来就是为了可单测） */
+  wheelScrollDelta: (cur: number, max: number, deltaY: number) => number;
+  /** 冷却推进表：某条指令当前还剩百分之多少（`null` = 没在冷却） */
+  cooldownRatioOf: (cmd: string) => number | null;
+  /** 停掉冷却推进表（换角色 / 回认证屏时清模块级状态） */
+  stopCooldownTicker: () => void;
   // map
   bindMap: () => void;
   renderMap: () => void;
@@ -87,11 +105,38 @@ let mod: {
   resetInputs: () => void;
   // panel
   bindPanel: () => void;
-  openPanel: (title: string, rows: readonly string[], cmds?: readonly { cmd: string; name: string }[]) => void;
+  openPanel: (
+    title: string,
+    rows: readonly string[],
+    cmds?: readonly { cmd: string; name: string }[],
+    /** §80：面板身份（`item.id`），`warn.context` 与它相等才投进来 */
+    id?: string,
+  ) => void;
+  /** §74：面板内的按钮发令（= 新一轮交互，正文从基线重来） */
+  runPanelCommand: (cmd: string) => void;
+  setPanelRunner: (fn: (cmd: string) => void) => void;
+  /**
+   * 数据面板（`dialog:<name>` 那一档）。
+   * ★ `build` 收一个 `redraw`：面板内部状态变了（背包选中/技能页签）就地重画，
+   *   不必等下一次服务端推帧。属性面板不用它（快照），操作型面板全靠它。
+   */
+  openDataPanel: (
+    name: string,
+    title: string,
+    build: (redraw: () => void) => HTMLElement,
+  ) => void;
   closePanel: () => void;
   isPanelOpen: () => boolean;
   panelRows: () => readonly string[];
-  notePanel: (line: string) => void;
+  /** §80：投递一条面板文本；返回是否投出去了（`false` ⇒ 调用方该落消息流） */
+  notePanel: (panelId: string, line: string) => boolean;
+  panelTop: (o: {
+    readonly anchor: number;
+    readonly height: number;
+    readonly viewport: number;
+    readonly reserve: number;
+  }) => number;
+  setPanelAnchor: (fn: () => number) => void;
   showWarn: (content: string, cmds: readonly { cmd: string; name: string }[]) => void;
   closeWarn: () => void;
   // status / stream
@@ -107,6 +152,8 @@ let mod: {
   currentScreen: () => 'auth' | 'game';
   validateName: (name: string) => string | null;
   serverUrl: () => string;
+  resetSkillsPanel: () => void;
+  skillsState: () => { tab: 'base' | 'special'; selected: string | null; confirming: string | null };
 };
 
 /** 委托回调最终会走到这里（测试用它观察"点了之后发什么指令"） */
@@ -133,6 +180,7 @@ beforeAll(async () => {
   const stream = await import('../src/ui/stream.js');
   const auth = await import('../src/ui/auth.js');
   const screens = await import('../src/ui/screens.js');
+  const skills = await import('../src/ui/skills.js');
 
   dom.resetNodeCache();
 
@@ -146,6 +194,9 @@ beforeAll(async () => {
     renderScene: room.renderScene,
     renderActionBar: room.renderActionBar,
     renderAll: room.renderAll,
+    wheelScrollDelta: room.wheelScrollDelta,
+    cooldownRatioOf: room.cooldownRatioOf,
+    stopCooldownTicker: room.stopCooldownTicker,
     bindMap: map.bindMap,
     renderMap: map.renderMap,
     setMapRunner: map.setMapRunner,
@@ -174,10 +225,15 @@ beforeAll(async () => {
     resetInputs: input.resetInputs,
     bindPanel: panel.bindPanel,
     openPanel: panel.openPanel,
+    runPanelCommand: panel.runPanelCommand,
+    setPanelRunner: panel.setPanelRunner,
+    openDataPanel: panel.openDataPanel,
     closePanel: panel.closePanel,
     isPanelOpen: panel.isPanelOpen,
     panelRows: panel.panelRows,
     notePanel: panel.notePanel,
+    panelTop: panel.panelTop,
+    setPanelAnchor: panel.setPanelAnchor,
     showWarn: panel.showWarn,
     closeWarn: panel.closeWarn,
     renderStatus: status.renderStatus,
@@ -191,6 +247,11 @@ beforeAll(async () => {
     currentScreen: screens.currentScreen,
     validateName: auth.validateName,
     serverUrl: auth.serverUrl,
+    // ★ 技能面板的页签 / 选中态是**模块变量**（`ui/skills.ts`）：测试之间不清就串味 ——
+    //   上一个用例选中的技能会成为下一个用例的既成事实，于是"点一行"变成了"取消选中"。
+    //   生产代码里清它的地方是 `main.ts#backToAuth()`（换角色必须清）。
+    resetSkillsPanel: skills.resetSkillsPanel,
+    skillsState: skills.skillsState,
   };
 
   // ── 模拟 main.ts 的接线（**只绑一次**；渲染与绑定分离正是为此）──
@@ -328,6 +389,60 @@ describe('房间区（wushen 的 .content-room）', () => {
     expect(document.getElementById('roomExits')?.textContent).toContain('没有明显的出口');
   });
 
+  /**
+   * ★★ 换房间要有**反馈**（2026-10-18 真机走查）。
+   *
+   * 走查证据：从「中央广场」走到「北大街」，`#roomName` 变了、`#output` **一行没加**
+   * （`linesBefore === linesAfter`）—— 消息流完全不动。只有「北大街」恰好写了
+   * `on_enter` 钩子的房间才会说一句，其余房间是静默切换。
+   *
+   * wushen 不会这样：`Process.room`（`src/process.js:297-306`）在默认档
+   * （`Setting.keep_msg == 0`）**清屏**，`keep_msg` 档则
+   * `ReceiveMessage("你来到了" + room.name + "。")`。两种档位都保证
+   * "换了地方"这件事在屏幕上有个交代。
+   *
+   * 本项目保留历史（不清屏），于是照 `keep_msg` 档：一条分隔线 + 一句「你来到了 X。」。
+   * ★ 这不违反「房间信息在房间区」—— 描述文本仍然只在房间区，进消息流的是一**事件**。
+   * ★ 首次进房间（`state.room === null`）**不播报**：那条路径已经有登录欢迎语和
+   *   房间自己的 `on_enter`，再来一句就是同一件事说两遍。
+   */
+  it('★★ 换房间：消息流得到一条分隔线 + 「你来到了 X。」（wushen 的 keep_msg 档）', () => {
+    mod.clearStream();
+    mod.dispatchPacket('room', {
+      path: 'yz/guangchang',
+      name: '中央广场',
+      desc: '人来人往。',
+      commands: [],
+    });
+    const out = document.getElementById('output');
+    // 首次进房间不播报（交给登录欢迎语 / 房间 on_enter）
+    expect(out?.textContent ?? '').not.toContain('你来到了');
+
+    mod.dispatchPacket('room', {
+      path: 'yz/beidajie',
+      name: '北大街',
+      desc: '车马不绝。',
+      commands: [],
+    });
+    expect(out?.textContent ?? '').toContain('你来到了北大街。');
+    // ★★ 分隔线已删（2026-10-20 §74）：wushen 的 `Process.room` 两档都没有这个元素，
+    //   而"换房间"只播一句"你来到了X。"已经足够断开上下文。真机观感是
+    //   "每进一个房间就多一块日志区、中间有道横线"。
+    //   ⚠️ 这条断言是**反向**的（要求不存在）—— 若有人把 `pushRule` 加回来，它会红。
+    expect(out?.querySelectorAll('.rule').length).toBe(0);
+    // 房间**描述**仍不进消息流（这一条是 `room` 包的老约定，不能顺手破掉）
+    expect(out?.textContent ?? '').not.toContain('车马不绝');
+
+    // 同一房间再推一次 `room` 帧（服务端对账会重推）⇒ 不重复播报
+    mod.dispatchPacket('room', {
+      path: 'yz/beidajie',
+      name: '北大街',
+      desc: '车马不绝。',
+      commands: [],
+    });
+    expect((out?.textContent ?? '').match(/你来到了/g)?.length).toBe(1);
+  });
+
   it('items 包 → 列出人与物（玩家带 .pl 档位）；点它 = 看详情', () => {
     fired.length = 0;
     picked.length = 0;
@@ -439,8 +554,13 @@ describe('房间区（wushen 的 .content-room）', () => {
     // wushen `main.css:189-193`：`.progress-bar` = 这里的 `.bar`（同一个东西，只是改了名）
     expect(declValue(css, '.progress>.bar', 'height')).toBe('100%');
     expect(declValue(css, '.progress>.bar', 'border')).toBe('1px solid transparent');
-    // ★ `float: right` 是观感特征：条子钉在右边，掉血时长出来的是**左边**的空档
-    expect(declValue(css, '.progress>.bar', 'float')).toBe('right');
+    // ★ `float` 原先是 `right`（wushen 的观感特征：条子钉在右边，掉血时长出来的
+    //   是**左边**的空档）。⇒ 2026-10-18 真机反馈：玩家读成"血条只有一半、
+    //   还跑到右边去了"，明确说不对（26 册 §60）。现改成**从左往右**填充
+    //   （与状态条 `.fill` 同向）—— 这是**登记在册的刻意差别**，不是"照抄 wushen"
+    //   的反例：本用例其余七项（边 / 高 / 宽 / 定位 / 边距 / 盒模型 / 内缩 1px）
+    //   仍逐值照抄 wushen。
+    expect(declValue(css, '.progress>.bar', 'float')).toBe('left');
 
     // wushen `main.css:161-172`：暗红 / 暗蓝 + 1s 宽度过渡（只 hp 有过渡，mp 没有）
     expect(declValue(css, ':root', '--hp')).toBe('darkred');
@@ -503,17 +623,22 @@ describe('房间区（wushen 的 .content-room）', () => {
     expect(pfms).toEqual(['perform sword']);
   });
 
-  it('★★ item 包 → 描述与命令条都进**消息流**，**不开**面板（wushen `Process.item`）', () => {
+  it('★★ item 包 → 开**物件面板**（描述 + 按钮），消息流**一行不增**（26 册 §57 订正）', () => {
     mod.clearStream();
     mod.closePanel();
+    const before = document.querySelectorAll('#output > *').length;
     mod.dispatchPacket('item', { id: 'x', name: '铁剑', desc: '一把铁剑。', commands: [{ cmd: 'get x', name: '拿起' }] });
 
-    // wushen `process.js:380-403`：`ReceiveMessage(item.desc)` + 命令条 `item-commands`
-    // 都落消息流；`.dialog` 是地图 / 属性 / 背包那些面板的地盘，不接物件详情。
-    expect(document.getElementById('output')?.textContent).toContain('一把铁剑。');
-    expect(mod.isPanelOpen(), 'wushen 的物件详情不进 .dialog').toBe(false);
+    // ★ 旧版本这条断言写的是 wushen 的相反结论（"描述与命令条都进消息流、不开面板"）。
+    //   真机反馈证明那条移植是错的：点 NPC 之后描述、动作按钮、下一层动作
+    //   层层叠进日志区，日志成了操作记录本。现在改开面板，日志一行不增。
+    expect(mod.isPanelOpen()).toBe(true);
+    expect(document.getElementById('dlgTitle')?.textContent).toBe('铁剑');
+    expect(document.getElementById('dlgBody')?.textContent).toContain('一把铁剑。');
+    expect(document.querySelectorAll('#output > *')).toHaveLength(before);
 
-    const btn = document.querySelector('#output .item-commands [data-cmd]');
+    // ★ 命令按钮在**下带**（`#dlgFoot` = wushen `.dialog-footer`），不在正文 `#dlgBody` 里
+    const btn = document.querySelector('#dlgFoot .item-commands [data-cmd]');
     expect(btn?.getAttribute('data-cmd')).toBe('get x');
     fired.length = 0;
     click(btn);
@@ -528,9 +653,48 @@ describe('房间区（wushen 的 .content-room）', () => {
 describe('消息流（wushen 的 .content-message）', () => {
   it('warn 包（服务端文本主通道）→ 追加一行', () => {
     mod.clearStream();
+    // ★ 前置把面板关掉：物件面板会**吸收**播报（26 册 §57），留着它这条就测不到消息流
+    mod.closePanel();
     mod.dispatchPacket('warn', { content: '你看到一只野狼。' });
     expect(document.querySelectorAll('#output .ln')).toHaveLength(1);
     expect(document.getElementById('output')?.textContent).toContain('你看到一只野狼。');
+  });
+
+  it('★★ 物件面板开着 + 帧上声明了 `context` ⇒ warn **只进面板**，消息流不加行', () => {
+    mod.clearStream();
+    mod.dispatchPacket('item', { id: 'n', name: '店小二', desc: '一个店小二。', commands: [] });
+    // ★ `context` = 刚才 `item` 帧给的 id（服务端声明"这句话属于这块面板"）
+    mod.dispatchPacket('warn', {
+      content: '店小二陪笑道：住店要1000文钱，客官。',
+      context: 'n',
+    });
+
+    expect(document.querySelectorAll('#output .ln')).toHaveLength(0);
+    expect(document.getElementById('dlgBody')?.textContent).toContain('住店要1000文钱');
+  });
+
+  it('★★ 物件面板开着但帧上**没有** `context` ⇒ 进消息流，面板不动（安全默认）', () => {
+    // ★ 与上一条**只差一个字段**。这条钉住的是"面板开着 ≠ 面板吸收"：
+    //   §57 起的 `absorb` 机制就是"开着就吸"，§78 那个真机 bug 正是它的直接后果。
+    mod.clearStream();
+    mod.dispatchPacket('item', { id: 'n', name: '店小二', desc: '一个店小二。', commands: [] });
+    mod.dispatchPacket('warn', { content: '店小二陪笑道：住店要1000文钱，客官。' });
+
+    expect(document.getElementById('output')?.textContent).toContain('住店要1000文钱');
+    expect(document.getElementById('dlgBody')?.textContent).not.toContain('住店要1000文钱');
+    mod.closePanel();
+  });
+
+  it('★ 数据面板（`dialog` 帧）**不**接回显：房间广播只进消息流', () => {
+    mod.clearStream();
+    mod.closePanel();
+    mod.dispatchPacket('dialog', { dialog: '属性', hp: 100 });
+    mod.dispatchPacket('warn', { content: '有人在你背后走过。' });
+
+    expect(document.getElementById('output')?.textContent).toContain('有人在你背后走过。');
+    // ★ §80 推翻了 §74 的"面板是附加视图、同一句两边都写"：落点二选一，
+    //   没有 `context` 就只有消息流这一份（数据面板是快照，更不该被播报冲淡）。
+    expect(document.getElementById('dlgBody')?.textContent).not.toContain('有人在你背后走过。');
   });
 
   it('★ 带 cmds 的 warn → 弹提示框，不重复进消息流（那种是要玩家拿主意的）', () => {
@@ -825,14 +989,16 @@ describe('小地图（点着走）', () => {
     mod.dispatchPacket('exits', { items: { north: '客栈' } });
     const one = viewBoxOf();
     expect(one.h).toBeGreaterThan(0);
-    expect(one.h, '只有一个出口时框还是满高 96 —— 全是空的').toBeLessThan(96);
+    // ★ 112 = 满三行的高度（行距 39×2 + 格高 26 + 上下留白 4×2）—— 尺寸随
+    //   `map.ts` 的 `CANVAS_W` 那组常数走，改了常数这里的数要跟着重算。
+    expect(one.h, '只有一个出口时框还是满高 112 —— 全是空的').toBeLessThan(112);
 
     mod.dispatchPacket('exits', {
       items: { north: '客栈', south: '药铺', east: '东市', west: '西市', northeast: '巷口' },
     });
     const many = viewBoxOf();
     expect(many.h).toBeGreaterThan(one.h);
-    expect(many.h).toBeLessThanOrEqual(96);
+    expect(many.h).toBeLessThanOrEqual(112);
 
     // 宽度**不**跟着收：比例恒定，否则换个房间字号就变了（wushen 也是把格子居中摆在
     // 整个容器宽度里，横向留白是原样照抄的）
@@ -885,12 +1051,12 @@ describe('小地图（点着走）', () => {
   it('★ 只有东西向时，框的高度就是**一行**（不含南北行的空档）', () => {
     mod.dispatchPacket('exits', { items: { east: '东市', west: '西市' } });
     const vb = viewBoxOf();
-    // 一行 = 格子高 18 + 上下留白；留白给足 4 也只到 26
-    expect(vb.h).toBeLessThanOrEqual(30);
+    // 一行 = 格子高 26 + 上下留白；留白给足 4 也只到 34
+    expect(vb.h).toBeLessThanOrEqual(40);
     // 中心格必须完整在框里
     const centre = document.querySelector('#mapSvg .ccg rect');
     expect(Number(centre?.getAttribute('y'))).toBeGreaterThanOrEqual(vb.y);
-    expect(Number(centre?.getAttribute('y')) + 18).toBeLessThanOrEqual(vb.y + vb.h);
+    expect(Number(centre?.getAttribute('y')) + 26).toBeLessThanOrEqual(vb.y + vb.h);
   });
 
   it('★ `north` 与 `up` 同时存在 → 两个格子**不重叠**（否则后画的把先画的盖掉）', () => {
@@ -974,8 +1140,19 @@ describe('底部工具条', () => {
     const acts = mod.barActions();
     expect(acts.length).toBeGreaterThan(0);
     // 服务端内容层当前认的指令（world/command/）+ 两个浮层
-    const owned = new Set(['look', 'cmd', 'chat']);
+    // ★ `score`（属性）：`world/command/info/score.ts` 已实现（别名 `attr`），
+    //   此前**没有前端入口**，玩家只能手敲 —— wushen 的工具条上它就有一格（「属性」）。
+    // ★ `skills`（技能）：同理（`world/command/info/skills.ts` + `dialog:skills` 帧，
+    //   26 册 §64.10）。★ 这份名单是**白名单**：加一格就必须在这里加一个名字，
+    //   于是"点一下回『什么？』"的按钮进不来。
+    const owned = new Set(['look', 'cmd', 'chat', 'score', 'skills']);
     expect(acts.filter((a) => !owned.has(a))).toEqual([]);
+  });
+
+  it('★ 「属性」格 → 发 `score`（不是自造的假按钮）', () => {
+    fired.length = 0;
+    click(document.querySelector('.tool-item[data-act="score"]'));
+    expect(fired).toEqual(['score']);
   });
 
   it('点「环顾」→ 发 look', () => {
@@ -1070,12 +1247,366 @@ describe('面板（服务端驱动）', () => {
     });
   });
 
-  it('★ 面板开着时 `warn` 回显同时进面板（wushen 的 dialog 模型）', () => {
-    mod.openPanel('店小二', ['一个跑堂的。']);
-    mod.dispatchPacket('warn', { content: '店小二打量了你一眼。' });
+  // -------------------------------------------------------------------------
+  // §62 属性面板：`dialog:score` 走**数据面板**形态（照 wushen `.dialog-score`）
+  // -------------------------------------------------------------------------
+  //
+  // wushen 的属性面板**不是浮窗**：`Dialog.init()` 把 `.content-room` 加 `hide`
+  // 再让 `.dialog` 顶上（`src/dialog/base.js:101-104`），**没有遮罩**。
+  // 消息流 / 聊天预览 / 工具条全都在，照样能滚能点。
+  // 所以这里断言三件事：分段渲染、没有遮罩、房间区不被藏（盖住即可）。
+  it('★ `dialog:score` → 开**数据面板**：分段渲染 + 不遮屏（照 wushen）', () => {
+    mod.closePanel();
+    mod.dispatchPacket('dialog', {
+      dialog: 'score',
+      name: '张三',
+      gender: 1,
+      level: 9,
+      exp: 1200,
+      pot: 300,
+      hp: 80,
+      maxHp: 100,
+      mp: 40,
+      maxMp: 60,
+      attrs: [
+        { key: 'str', innate: 20, bonus: 5, total: 25 },
+        { key: 'con', innate: 18, bonus: 0, total: 18 },
+      ],
+      combat: { attack: 31, defense: 12, hit: 200, evasion: 180, deflect: 150, crit: 5 },
+      skillLimit: 40,
+    });
+
+    // ① 标题是中文，不是协议里的 `score`
+    expect(document.getElementById('dlgTitle')?.textContent).toBe('属性');
+
+    // ①b 图标是「人」—— wushen 的 `score.js:47` 就是 `Dialog.icon("user")`。
+    //     通用方块不是错，但它让"属性"和"某样东西的详情"在第一眼上分不开。
+    expect(document.getElementById('dlgIcon')?.className).toContain('glyphicon-user');
+
+    // ② 照 wushen 的 `.score-section` 分段（不是一列 `k: v`）
+    const sections = document.querySelectorAll('#dlgBody .score-section');
+    expect(sections.length).toBeGreaterThanOrEqual(3);
+
+    // ③ 三档数值：有加成才展开括号，没加成只报合计（与改前的文本口径一致）
+    const body = document.getElementById('dlgBody')?.textContent ?? '';
+    expect(body).toContain('臂力');
+    expect(body).toContain('25');
+    expect(body).toContain('先天 20 + 后天 5');
+    expect(body).toContain('根骨');
+    expect(body).not.toContain('先天 18 + 后天 0');
+
+    // ④ ★ 关键：**没有遮罩**。旧的 `openPanel` 会把 `#mask` 亮出来糊住整屏，
+    //    那正是"看属性时什么都不能点"的来源。
+    expect(document.getElementById('mask')?.hidden).toBe(true);
+
+    // ⑤ 房间区没被藏（面板盖在它上面，不是把它藏掉 —— 藏了消息流会跳）
+    expect(document.getElementById('roomPanel')?.hidden).toBe(false);
+
+    mod.closePanel();
+  });
+
+  it('★ 属性面板开着时播报**仍进消息流**（数据面板是快照，不吸收对话）', () => {
+    mod.clearStream();
+    mod.dispatchPacket('dialog', { dialog: 'score', name: '张三', attrs: [], combat: {} });
+    mod.dispatchPacket('warn', { content: '风从北边吹来。' });
+
+    // ① 消息流里有它（房间发生的事必须留得住，关掉面板还找得回来）
+    expect(document.getElementById('output')?.textContent).toContain('风从北边吹来。');
+    // ② ★ 面板正文里**没有**它 —— 快照就是快照。物件面板才会吸收回显（§57 的对照）。
+    expect(document.getElementById('dlgBody')?.textContent ?? '').not.toContain('风从北边吹来。');
+    mod.closePanel();
+  });
+
+  it('★ 「属性」按第二次 = **收起**（wushen `Dialog.show` 的同键切换）', () => {
+    mod.closePanel();
+    mod.dispatchPacket('dialog', { dialog: 'score', name: '张三', attrs: [], combat: {} });
+    expect(mod.isPanelOpen()).toBe(true);
+
+    fired.length = 0;
+    click(document.querySelector('.tool-item[data-act="score"]'));
+    // 收起，且**不再发一次指令**（否则服务端又推一份快照，面板刚关又开）
+    expect(mod.isPanelOpen()).toBe(false);
+    expect(fired).toEqual([]);
+  });
+
+  it('★★ 数据面板的 `build` 拿到 `redraw`：面板内部状态变了能就地重画', () => {
+    // 场景：背包。点一件物品 → 面板内部"当前选中"变了 → 详情/动作要换。
+    // ★ 这是**操作型面板**（背包/技能）的地基：属性面板是纯快照，不需要它，
+    //   但第一个操作型面板会把这个签名钉死，所以它必须在写面板之前就成立。
+    let picked = '';
+    mod.openDataPanel('pack', '行囊', (redraw) => {
+      const box = document.createElement('div');
+      const btn = document.createElement('span');
+      btn.className = 'pick';
+      btn.textContent = '挑一件';
+      btn.addEventListener('click', () => {
+        picked = '丹药';
+        redraw();
+      });
+      box.appendChild(btn);
+      box.appendChild(document.createTextNode(`选中:${picked}`));
+      return box;
+    });
+
+    expect(document.getElementById('dlgBody')?.textContent).toContain('选中:');
+    expect(picked).toBe('');
+
+    click(document.querySelector('#dlgBody .pick'));
+
+    // ① 内部状态变了（click 真跑过）
+    expect(picked).toBe('丹药');
+    // ② 面板**已经重画**：新状态出现在正文里，而不是等下一次服务端推帧
+    expect(document.getElementById('dlgBody')?.textContent).toContain('选中:丹药');
+    mod.closePanel();
+  });
+
+  it('★ `build` 里同步调 `redraw` 不会递归（防递归标志真的在挡）', () => {
+    // build 执行期间 `render()` 正在跑；此时再 `redraw()` 会 clear + 重新 build。
+    // ★★ 判据不能只是"没崩" —— 没有那道标志时同步递归会栈溢出（RangeError），
+    //   而"没崩"在两种实现下都可能成立。真正的判据是 **build 只跑了一次**。
+    let calls = 0;
+    mod.openDataPanel('pack', '行囊', (redraw) => {
+      calls += 1;
+      redraw(); // 故意的（合法时机之外）
+      const box = document.createElement('div');
+      box.textContent = '一';
+      return box;
+    });
+    expect(document.getElementById('dlgBody')?.textContent).toBe('一');
+    expect(calls).toBe(1);
+    mod.closePanel();
+  });
+
+  it('★ 开着**物件面板**时按「属性」→ 换成属性面板（不是"关掉"了事）', () => {
+    mod.openPanel('店小二', ['一个手脚麻利的店小二。']);
+    fired.length = 0;
+    click(document.querySelector('.tool-item[data-act="score"]'));
+    // ★ 判据是"开着的**就是**属性面板"，不是"开着一个面板" —— 否则在
+    //   店小二详情里按属性只会把详情关掉，什么也不显示。
+    expect(fired).toEqual(['score']);
+  });
+
+  it('★ 服务端声明 `context` 且与面板 id 相同 ⇒ 文本落进面板（不再镜像进消息流）', () => {
+    // ★★ 这一条**推翻**了 §74 的"面板是附加视图，同一句两边都写"：
+    //   §80 之后落点是**二选一**，有归属就只进面板，没归属就只进消息流。
+    //   两处都写等于同一个信息两份，读的时候要去分辨哪份是新的。
+    mod.openPanel('店小二', ['一个跑堂的。'], [], 'npc-xiaoer');
+    mod.dispatchPacket('warn', { content: '店小二打量了你一眼。', context: 'npc-xiaoer' });
     expect(mod.panelRows()).toContain('店小二打量了你一眼。');
-    // 消息流里照样有一份（面板是附加视图，不是替代）
-    expect(document.getElementById('output')?.textContent).toContain('店小二打量了你一眼。');
+    expect(document.getElementById('output')?.textContent).not.toContain('店小二打量了你一眼。');
+    mod.closePanel();
+  });
+
+  it('★★ `context` 与面板 id **对不上** ⇒ 进消息流（不许投给眼前这块面板）', () => {
+    // 服务端说这句话属于另一块面板（比如玩家已经点了别人）—— 前端不许"就近投递"。
+    mod.openPanel('店小二', ['一个跑堂的。'], [], 'npc-xiaoer');
+    const out = document.getElementById('output');
+    out!.textContent = '';
+
+    mod.dispatchPacket('warn', { content: '木人桩纹丝不动。', context: 'npc-murenzhuang' });
+
+    expect(out?.textContent ?? '').toContain('木人桩纹丝不动。');
+    expect(mod.panelRows()).not.toContain('木人桩纹丝不动。');
+    mod.closePanel();
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // §74（2026-10-20 真机反馈）：面板**不累积历史**
+  //   病象：点教头 → 面板；然后在输入框连敲 `learn`，面板从"教头+一句回显"
+  //   长到"教头+三条学习记录+七行技能表"，日志区一行不动。
+  //   玩家原话：「每次向教头请教，信息都一直在弹窗里」。
+  //   ★ §80 改了触发方式（回显靠 `context` 声明，不再靠"命令从哪来"），
+  //     但"每一轮从基线重来"这条**判据本身没变**，所以测试照留。
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('★ 面板内再发一次命令 ⇒ 正文从**基线**重来，不累积上一轮', () => {
+    mod.openPanel(
+      '教头',
+      ['教头', '一位身材精悍的中年汉子。'],
+      [{ cmd: 'ask x', name: '请教' }],
+      'npc-jiaotou',
+    );
+
+    mod.runPanelCommand('ask x');
+    mod.dispatchPacket('warn', { content: '第一轮：想学武？', context: 'npc-jiaotou' });
+    expect(mod.panelRows()).toEqual(['教头', '一位身材精悍的中年汉子。', '第一轮：想学武？']);
+
+    mod.runPanelCommand('learn base/sword from 教头');
+    mod.dispatchPacket('warn', {
+      content: '第二轮：你向教头请教基本剑法。',
+      context: 'npc-jiaotou',
+    });
+
+    // ★ 判据一：描述还在（基线不丢）
+    expect(mod.panelRows()[0]).toBe('教头');
+    expect(mod.panelRows()).toContain('一位身材精悍的中年汉子。');
+    // ★ 判据二：上一轮那句**必须消失** —— 这才是"不堆叠"
+    expect(mod.panelRows()).not.toContain('第一轮：想学武？');
+    // ★ 判据三：本轮那句在
+    expect(mod.panelRows()).toContain('第二轮：你向教头请教基本剑法。');
+    mod.closePanel();
+  });
+
+  it('★★ `notePanel` 投递失败时返回 `false` —— 调用方据此落消息流（文本不许消失）', () => {
+    // ★ 这是 §80 的结构保证：`system.ts` 只有"投进去了"才 return，
+    //   否则一定往下走 `pushLine`。返回 `void` 的话调用方没有依据，只能猜。
+    mod.closePanel();
+    expect(mod.notePanel('npc-xiaoer', '面板没开时的话')).toBe(false);
+
+    mod.openPanel('教头', ['教头'], [], 'npc-jiaotou');
+    // 面板开着，但 id 对不上
+    expect(mod.notePanel('npc-xiaoer', '给别块面板的话')).toBe(false);
+    // id 对得上
+    expect(mod.notePanel('npc-jiaotou', '给这块面板的话')).toBe(true);
+    expect(mod.panelRows()).toContain('给这块面板的话');
+    mod.closePanel();
+  });
+
+  it('★ 数据面板永不接回显（快照不许被播报冲淡）', () => {
+    mod.openDataPanel('score', '属性', () => document.createElement('div'));
+    expect(mod.notePanel('score', '房间里有人说话。')).toBe(false);
+    mod.closePanel();
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // §78（2026-10-21 真机反馈）：**战斗不属于面板回显**
+  //   病象：点木人桩 → 面板 → 点面板里的「比试」→ 开战。
+  //   之后每一拍的战报（服务端 `warn`）都被吸进「木人桩」这块面板，
+  //   日志区一行不动 —— 玩家原话："我和木人切磋，居然数据写在木人的操作框里"。
+  //   当时根因：`absorb` 的边界只按"命令从哪来"判（§74），而**战斗是一条长会话**，
+  //   从面板里点一次「比试」，整场战斗都被算成"这条命令的回显"。
+  //   ★ §80 之后这批用例的**判据没变**（战报必须进消息流），
+  //     但保它的机制变了：不再靠词表 + 开战清标志，而是靠"战报本来就不带 context"。
+  //     所以下面这些用例保留原样跑 —— 它们是**回归网**，不该跟着实现一起重写。
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('★★ 从面板点「比试」开战后，战报必须回到消息流（面板不许吞战斗播报）', () => {
+    mod.openPanel(
+      '木人桩',
+      ['木人桩', '一具用硬木扎成的假人。'],
+      [{ cmd: 'fight 3v3cl6ifhs', name: '比试' }],
+      'npc-murenzhuang',
+    );
+    mod.runPanelCommand('fight 3v3cl6ifhs');
+    mod.dispatchPacket('combat', { start: 1 });
+
+    const out = document.getElementById('output');
+    out!.textContent = '';
+    mod.dispatchPacket('warn', { content: '木人桩的状态不是很好，你想趁人之危吗？' });
+
+    expect(out?.textContent ?? '').toContain('木人桩的状态不是很好');
+    expect(mod.panelRows()).not.toContain('木人桩的状态不是很好，你想趁人之危吗？');
+    mod.closePanel();
+  });
+
+  // ★ 原有一条"开战那一帧本身就把吸收关掉 —— 脱战后也不会续上旧面板的吸收"，
+  //   已随 §80 撤销：它测的是 `stopAbsorb()` 这个调用，而那个 API 连同 `absorb`
+  //   标志一起删掉了。等价判据由下面两条覆盖 ——
+  //   ① "面板开着 + 不带 context ⇒ 进消息流"（脱战后当然也不带 context）；
+  //   ② "`notePanel` 投递失败返回 false"（没有开关可忘了关，也就没有"续上"可言）。
+
+  it('★★ 面板里点「比试」被拒 ⇒ 拒绝文案必须进消息流（不许留在木人桩面板里）', () => {
+    // ★ 这是用户报的那个形态：切磋被拒（`target-wounded`），
+    //   文案却写进了「木人桩」这块面板，日志区一行不动。
+    mod.openPanel(
+      '木人桩',
+      ['木人桩', '一具用硬木扎成的假人。'],
+      [{ cmd: 'fight 3v3cl6ifhs', name: '比试' }],
+      'npc-murenzhuang',
+    );
+    mod.runPanelCommand('fight 3v3cl6ifhs');
+
+    const out = document.getElementById('output');
+    out!.textContent = '';
+    mod.dispatchPacket('warn', { content: '木人桩的状态不是很好，你想趁人之危吗？' });
+
+    expect(out?.textContent ?? '').toContain('趁人之危');
+    expect(mod.panelRows()).not.toContain('木人桩的状态不是很好，你想趁人之危吗？');
+    mod.closePanel();
+  });
+
+  it('★ 对照：面板里点「打听」的回显**仍留在面板**（靠 context 声明，不靠词表）', () => {
+    // ★ 守卫自身也要证不误伤：§74 的"打听 → 下一层"必须照旧留在面板，
+    //   否则这次修法就把上一批的真机反馈又打回去了。
+    //   ★ 与上面两条的差别**只在帧上有没有 `context`** —— 命令词是什么不参与判断。
+    mod.openPanel(
+      '店小二',
+      ['一个手脚麻利的店小二。'],
+      [{ cmd: 'ask 3x', name: '打听' }],
+      'npc-xiaoer',
+    );
+    mod.runPanelCommand('ask 3x');
+    mod.dispatchPacket('warn', { content: '你想打听什么？', context: 'npc-xiaoer' });
+    expect(mod.panelRows()).toContain('你想打听什么？');
+    mod.closePanel();
+  });
+
+  it('★★ 同一条命令、同一句话，只因为帧上多一个 `context` 落点就不同', () => {
+    // ★ 这条是 §80 的**核心判据**：落点由声明决定，与命令词、与当前局面无关。
+    //   两条一模一样的前置（都从面板点「打听」），只改 `context`：
+    const run = (context?: string): { inPanel: boolean; inStream: boolean } => {
+      mod.openPanel('店小二', ['店小二'], [{ cmd: 'ask 3x', name: '打听' }], 'npc-xiaoer');
+      mod.runPanelCommand('ask 3x');
+      const out = document.getElementById('output');
+      out!.textContent = '';
+      const p = context === undefined ? { content: '你想打听什么？' } : { content: '你想打听什么？', context };
+      mod.dispatchPacket('warn', p);
+      const r = {
+        inPanel: mod.panelRows().includes('你想打听什么？'),
+        inStream: (out?.textContent ?? '').includes('你想打听什么？'),
+      };
+      mod.closePanel();
+      return r;
+    };
+
+    // 服务端声明了归属 ⇒ 只进面板
+    expect(run('npc-xiaoer')).toEqual({ inPanel: true, inStream: false });
+    // 服务端没声明 ⇒ 只进消息流（**默认安全**：漏写只会掉到流里，不会掉进面板）
+    expect(run(undefined)).toEqual({ inPanel: false, inStream: true });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // §80（2026-10-21）：**文本自带归属**，前端不再猜
+  //   §57 / §74 / §78 三次真机反馈是同一个病：`warn` 帧只有一根字符串，
+  //   前端用"命令从哪来 + 是否战斗中 + 面板是否吸收"三个**间接信号**猜落点。
+  //   启发式必然有漏 —— 每加一个状态就漏一次。修法是把默认方向反过来：
+  //   **不声明归属的文本一律进消息流**，要进面板必须由服务端在帧里点名。
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('★★ 面板开着 + 不带 context 的 warn ⇒ 必须进消息流（安全默认：不声明就不进面板）', () => {
+    // 这条是 §78 那个真机 bug 的**根本判据**：不靠战斗词表、不靠 fighting 判断，
+    // 只要服务端没说"这条属于这块面板"，它就不许被吸进去。
+    mod.openPanel(
+      '木人桩',
+      ['木人桩', '一具用硬木扎成的假人。'],
+      [{ cmd: 'fight x', name: '比试' }],
+      'npc-murenzhuang',
+    );
+    const out = document.getElementById('output');
+    out!.textContent = '';
+
+    mod.dispatchPacket('warn', { content: '木人桩的状态不是很好，你想趁人之危吗？' });
+
+    expect(out?.textContent ?? '').toContain('趁人之危');
+    expect(mod.panelRows()).not.toContain('木人桩的状态不是很好，你想趁人之危吗？');
+    mod.closePanel();
+  });
+
+  it('★★ 数据面板 → 物件面板：inline left/width 必须清掉（否则左移半个身位跑出屏幕）', () => {    const dialog = document.getElementById('dialog')!;
+    mod.openDataPanel('score', '属性', () => {
+      const box = document.createElement('div');
+      return box;
+    });
+    // `place()` 在数据面板分支写下的几何（jsdom 量不到真实矩形，这里手工模拟）
+    dialog.style.left = '7px';
+    dialog.style.width = '568px';
+
+    mod.openPanel('教头', ['教头']);
+
+    // ★ 物件面板靠 CSS 的 `left:50% + translateX(-50%)` 居中；inline 一留着，
+    //   就是 `left:7px` 再左移一半宽度 —— 真机实测 l=−231（窗口 582）。
+    expect(dialog.style.left).toBe('');
+    expect(dialog.style.width).toBe('');
     mod.closePanel();
   });
 
@@ -1113,9 +1644,257 @@ describe('面板（服务端驱动）', () => {
   it('面板底部的命令按钮点了就执行', () => {
     fired.length = 0;
     mod.openPanel('铁剑', ['一把铁剑。'], [{ cmd: 'get x', name: '拿起' }]);
-    click(document.querySelector('#dlgBody .item-commands span'));
+    // 命令按钮在**下带** `#dlgFoot`（wushen `.dialog-footer`）
+    click(document.querySelector('#dlgFoot .item-commands span'));
     expect(fired).toEqual(['get x']);
     mod.closePanel();
+  });
+
+  // -------------------------------------------------------------------------
+  // 2026-10-18 真机反馈：点在**上面**的人/物，操作面板却贴在**屏幕底部**
+  // （`bottom: calc(var(--bottom-chrome) + 0.5em)`）⇒ 两头跑、两只手。
+  // -------------------------------------------------------------------------
+  describe('面板贴在**被点的东西旁边**（不贴屏幕底）', () => {
+    it('★ `panelTop` 把面板放在锚点正下方（差一个 gap）', () => {
+      expect(mod.panelTop({ anchor: 300, height: 130, viewport: 900, reserve: 100 })).toBe(312);
+    });
+
+    it('★ 放不下时**往上钳**，不许越过底部的工具条/动作栏', () => {
+      // 锚点在 800，面板 300 高 ⇒ 312+300=612 > 900-100 ⇒ 贴到 500
+      expect(mod.panelTop({ anchor: 800, height: 300, viewport: 900, reserve: 100 })).toBe(500);
+    });
+
+    it('★ 锚点很低、面板又很高时也不会被顶出屏幕（top 不为负）', () => {
+      expect(mod.panelTop({ anchor: 890, height: 1000, viewport: 900, reserve: 100 })).toBe(12);
+    });
+
+    it('★ 开面板时真的把算出来的 top 写进 `#dialog`', () => {
+      mod.setPanelAnchor(() => 400);
+      mod.openPanel('店小二', ['一个跑堂的。']);
+      const top = document.getElementById('dialog')?.style.top ?? '';
+      expect(top === '', '面板还靠 CSS 贴底定位，没有就近落点').toBe(false);
+      mod.closePanel();
+      mod.setPanelAnchor(() => 0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 2026-10-18 真机反馈：没钱时连点「人字号客房」五次 ⇒ 同一句回显堆 5 行、
+  // 面板一路长高（130px → 214px）。
+  // -------------------------------------------------------------------------
+  it('★ 连续重复同一句回显**不堆叠**（点几次都只留一行）', () => {
+    mod.openPanel('店小二', ['一个跑堂的。'], [], 'npc-xiaoer');
+    const before = mod.panelRows().length;
+    for (let i = 0; i < 5; i += 1) mod.notePanel('npc-xiaoer', '你身上没有那么多的钱给店小二。');
+    expect(mod.panelRows().length, '同一句被重复追加了').toBe(before + 1);
+    // 中间换一句，之后再重复那一句 ⇒ 仍只追加（"最后一行相同"才算重复）
+    mod.notePanel('npc-xiaoer', '店小二摇了摇头。');
+    mod.notePanel('npc-xiaoer', '你身上没有那么多的钱给店小二。');
+    expect(mod.panelRows().length).toBe(before + 3);
+    expect(mod.panelRows().at(-1)).toBe('你身上没有那么多的钱给店小二。');
+    mod.closePanel();
+  });
+});
+
+describe('★★ 技能面板（wushen `dialog/skills.js` 的三段版，26 册 §64.10）', () => {
+  /** 一门基本功：占 `sword` 槽，`canEnables` 空、`enabled` 恒 null */
+  const baseSword = {
+    id: 'base/sword',
+    name: '基本剑法',
+    kind: 'base',
+    grade: 0,
+    level: 12,
+    progress: 40,
+    enabled: null,
+    canEnables: [],
+    slot: 'sword',
+  };
+  /** 一门武功：能装到 `sword`，`slot` 是 null（它不是基本功） */
+  const taiji = {
+    id: 'wd/taijijian',
+    name: '太极剑法',
+    kind: 'skill',
+    grade: 3,
+    level: 1,
+    progress: 10,
+    enabled: null,
+    canEnables: ['sword'],
+    slot: null,
+    note: '需基本剑法 30 级',
+  };
+
+  /** 发一帧 `dialog:skills` 并返回面板根节点里的三段容器 */
+  function openSkills(items: readonly unknown[]): {
+    tabs: Element[];
+    rows: Element[];
+    actions: Element | null;
+  } {
+    mod.dispatchPacket('dialog', {
+      dialog: 'skills',
+      title: `你共学会 ${String(items.length)} 项技能`,
+      limit: 22,
+      pot: 1300,
+      items,
+    });
+    return {
+      tabs: Array.from(document.querySelectorAll('#dlgBody .skill-tab')),
+      rows: Array.from(document.querySelectorAll('#dlgBody .skill-item')),
+      actions: document.querySelector('#dlgBody .item-commands'),
+    };
+  }
+
+  const tabOf = (label: string): Element | undefined =>
+    Array.from(document.querySelectorAll('#dlgBody .skill-tab')).find((n) => n.textContent === label);
+
+  afterEach(() => {
+    mod.closePanel();
+    mod.resetSkillsPanel();
+    fired.length = 0;
+  });
+
+  it('帧一到就开**数据面板**：无遮罩 · 标题带技能上限 · 三段齐全', () => {
+    const { tabs, rows } = openSkills([baseSword, taiji]);
+    expect(document.getElementById('dialog')?.classList.contains('is-data')).toBe(true);
+    expect(document.getElementById('mask')?.hidden).toBe(true);
+    expect(document.getElementById('dlgTitle')?.textContent).toBe('技能 · 上限 22 级');
+    // 页签：**带数目**（空页与坏页要分得开）
+    expect(tabs.map((n) => n.textContent)).toEqual(['基础 1', '特殊 1']);
+    // 默认在「基础」页 ⇒ 只看得见基本功
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.textContent).toContain('基本剑法');
+    // 底部统计：学会几项 + 潜能（省一次 score）
+    expect(document.querySelector('#dlgBody .skill-meta')?.textContent).toContain('潜能 1300');
+  });
+
+  it('★ 换页签是**前端状态**：不发任何命令，只是换一批行', () => {
+    const { rows } = openSkills([baseSword, taiji]);
+    fired.length = 0;
+    click(tabOf('特殊 1'));
+    expect(fired, '换页签竟然发了命令').toEqual([]);
+    const now = Array.from(document.querySelectorAll('#dlgBody .skill-item'));
+    expect(now.length).toBe(1);
+    expect(now[0]?.textContent).toContain('太极剑法');
+    // 页签的选中态也换了（`is-on` 只有一个）
+    expect(document.querySelectorAll('#dlgBody .skill-tab.is-on').length).toBe(1);
+    expect(rows.length).toBe(1);
+  });
+
+  it('★ 已装配的行带 ✓；没装配的不带（`enable-flag` 只在装上的那一行出现）', () => {
+    openSkills([baseSword, taiji]);
+    click(tabOf('特殊 1'));
+    expect(document.querySelector('#dlgBody .skill-item .skill-flag')).toBeNull();
+    openSkills([baseSword, { ...taiji, enabled: 'sword' }]);
+    click(tabOf('特殊 1'));
+    expect(document.querySelector('#dlgBody .skill-item .skill-flag')?.textContent).toBe('✓');
+  });
+
+  it('★★ 选中武功 → 动作栏出现「装配基本剑法」（基本功在**另一页**也要查得到）', () => {
+    openSkills([baseSword, taiji]);
+    click(tabOf('特殊 1'));
+    click(document.querySelector('#dlgBody .skill-item'));
+    const labels = Array.from(document.querySelectorAll('#dlgBody .item-commands span')).map(
+      (n) => n.textContent,
+    );
+    // 装配按钮的文案来自**基本功自己的名字**（wushen `装备基本剑法` 同款），
+    // 不是拼音槽名 —— 也正因为要查名字，基本功在另一页时最容易漏掉。
+    expect(labels).toContain('装配基本剑法');
+    expect(labels).toContain('练习');
+    expect(labels).toContain('遗忘');
+  });
+
+  it('装配 = 发 `enable <槽> <技能id>`，再**重取一次面板**（否则数据是旧的）', () => {
+    openSkills([baseSword, taiji]);
+    click(tabOf('特殊 1'));
+    click(document.querySelector('#dlgBody .skill-item'));
+    const btn = Array.from(document.querySelectorAll('#dlgBody .item-commands span')).find(
+      (n) => n.textContent === '装配基本剑法',
+    );
+    fired.length = 0;
+    click(btn);
+    expect(fired).toEqual(['enable sword wd/taijijian', 'skills']);
+  });
+
+  it('★ 不会基本功就没有「装配」按钮 —— 不留点不动的格子', () => {
+    // 只有武功、没有 `base/sword`：装配到 sword 的前提不成立
+    openSkills([taiji]);
+    click(tabOf('特殊 1'));
+    click(document.querySelector('#dlgBody .skill-item'));
+    const labels = Array.from(document.querySelectorAll('#dlgBody .item-commands span')).map(
+      (n) => n.textContent,
+    );
+    expect(labels).not.toContain('装配基本剑法');
+    expect(labels).toContain('练习'); // 别的动作照常
+  });
+
+  it('★ 遗忘要**两步**（第一步只换个按钮，不发命令）', () => {
+    openSkills([baseSword, taiji]);
+    click(tabOf('特殊 1'));
+    click(document.querySelector('#dlgBody .skill-item'));
+    const forget = (): Element | undefined =>
+      Array.from(document.querySelectorAll('#dlgBody .item-commands span')).find(
+        (n) => n.textContent === '遗忘',
+      );
+    fired.length = 0;
+    click(forget());
+    expect(fired, '第一次点「遗忘」就发出去了 —— 误触即永久遗忘').toEqual([]);
+    const confirm = Array.from(document.querySelectorAll('#dlgBody .item-commands span')).find(
+      (n) => n.textContent === '确定遗忘？',
+    );
+    expect(confirm).toBeDefined();
+    click(confirm);
+    expect(fired).toEqual(['forget wd/taijijian', 'skills']);
+  });
+
+  it('★ 基本功没有「遗忘」（引擎会拒，面板不该摆一颗必然失败的按钮）', () => {
+    openSkills([baseSword, taiji]);
+    click(document.querySelector('#dlgBody .skill-item')); // 基础页那一行
+    const labels = Array.from(document.querySelectorAll('#dlgBody .item-commands span')).map(
+      (n) => n.textContent,
+    );
+    expect(labels).not.toContain('遗忘');
+    expect(labels).toContain('练习');
+  });
+
+  it('缺字段的条目被跳过、进度被钳在 0–100（面板不显示 `NaN` / `130%`）', () => {
+    mod.dispatchPacket('dialog', {
+      dialog: 'skills',
+      title: '',
+      limit: 10,
+      pot: 0,
+      items: [
+        { name: '没有 id 的项' },
+        { ...baseSword, progress: 130 },
+        { ...baseSword, id: 'base/force', name: '基本内功', progress: -5 },
+      ],
+    });
+    const rows = Array.from(document.querySelectorAll('#dlgBody .skill-item'));
+    expect(rows.length).toBe(2);
+    expect(rows[0]?.textContent).toContain('100%');
+    expect(rows[1]?.textContent).toContain('0%');
+  });
+
+  it('★ 工具条「技能」格：点一下发 `skills`，再点一次收起（与「属性」同一条判据）', () => {
+    const btn = Array.from(document.querySelectorAll('#app .tool-item')).find(
+      (n) => n.getAttribute('data-act') === 'skills',
+    );
+    expect(btn, '工具条上没有「技能」这一格').toBeDefined();
+    fired.length = 0;
+    click(btn);
+    expect(fired).toEqual(['skills']);
+    // 面板开着时再点 = 收起（wushen `Dialog.show` 的同一个键开关）
+    mod.openDataPanel('skills', '技能 · 上限 22 级', () => document.createElement('div'));
+    fired.length = 0;
+    click(btn);
+    expect(fired).toEqual([]);
+    expect(mod.isPanelOpen()).toBe(false);
+  });
+});
+
+describe('气血条（房间列表）', () => {
+  it('★ 填充比例 = hp/max（满血占满、半血一半）', () => {
+    mod.dispatchPacket('items', { items: [{ id: 'n1', name: '店小二', hp: 50, max_hp: 100 }] });
+    const bar = document.querySelector('#roomItems .progress.hp>.bar') as HTMLElement | null;
+    expect(bar?.style.width).toBe('50%');
   });
 });
 
@@ -1166,9 +1945,23 @@ describe('指令浮层（wushen 没有的那一个）', () => {
     const cmds = Array.from(document.querySelectorAll('#cmdChips .chip')).map((n) =>
       n.getAttribute('data-cmd'),
     );
-    const real = new Set(['look', 'go', 'say', 'chat', 'shout', 'tell']);
+    // ★ `score`：服务端 `info/score.ts` 已实现。窄屏（≤480px）底部工具条会把
+    //   「属性」那一格收起（4 格挤掉气血/内力的数值，见 style.css 的媒体查询），
+    //   于是它是小屏上唯一的属性入口 —— 不能只挂在工具条上。
+    const real = new Set(['look', 'go', 'say', 'chat', 'shout', 'tell', 'score']);
     expect(cmds.length).toBeGreaterThan(0);
     expect(cmds.filter((c) => c === null || !real.has(c))).toEqual([]);
+    // ★ 上面那条是"只许"型 —— 把 `score` 从 CHIPS 里删掉它照样绿。
+    //   所以这里再钉一次"必须有"：小屏的工具条上没有「属性」格，这是唯一入口。
+    expect(cmds, '小屏唯一的属性入口是这条 chip').toContain('score');
+  });
+
+  it('★ 点 `score` chip → 执行并把浮层收起（否则属性文本被卡片挡着看不见）', () => {
+    fired.length = 0;
+    mod.openCmd();
+    click(document.querySelector('#cmdChips .chip[data-cmd="score"]'));
+    expect(fired).toEqual(['score']);
+    expect(mod.cmdOpen(), '无参 chip 执行后浮层应关闭：结果在消息流里，卡片会挡住它').toBe(false);
   });
 
   it('点常用 chip（看）→ 直接执行；点缺参数的 chip（走）→ 只预填', () => {
@@ -1529,18 +2322,24 @@ function declValue(css: string, sel: string, prop: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// ★★ 点实体：详情落在**消息流**（wushen `Process.item` / `Process.cmds`）
+// ★★ 点实体：详情落在**物件面板**（26 册 §57 订正 wushen 的落点）
 // ---------------------------------------------------------------------------
 //
-// wushen 里这条链路的落点就是消息流（`process.js:380-403`）：
+// wushen 的落点是消息流（`process.js:380-403`）：
 //   `ReceiveMessage(item.desc)`                       → 描述一行
 //   `ReceiveMessage("<div class='item-commands'>…")`  → 命令条一行
-// 它**不开** dialog —— `.dialog` 是地图 / 属性 / 背包 / 技能那些面板的地盘。
-// 本仓库此前把 `item` 包接给了 `openPanel`，而**全仓库没有任何生产者**，
-// 于是整条链路是死的：点谁都只是把房间描述再打一遍（真机复核，26 册 §20.3）。
+// 本项目**照抄过这一条，然后改掉了**（26 册 §57，真机反馈）：
+//   照抄的表现是"点店小二 → 描述进日志 → 点打听 → 人字号客房进日志"，
+//   玩家的每一次操作都变成历史记录里的一行，下一层按钮要往回翻才点得到。
+//   现在改为开物件面板（描述 + 底部按钮），并且**吸收**这期间的播报。
+//   `cmds` 包在面板开着时换按钮、面板没开时仍落消息流（保留原来那条落点）。
+//
+// ⚠️ 历史上另有一条相反的订正（26 册 §20.3）：`item` 包曾被接给 `openPanel`，
+//   而当时**全仓库没有生产者**，于是整条链路是死的、点谁都只是把房间描述再打一遍。
+//   那条说的是"生产者缺席"，本条说的是"有生产者之后该落在哪"—— 两回事，别互相推翻。
 
-describe('★★ 点实体：详情落在消息流（wushen `Process.item`）', () => {
-  it('★ `item` 包 → 描述进消息流 + 一条**可点**的命令条；不开面板', () => {
+describe('★★ 点实体：详情落在**物件面板**（26 册 §57 订正）', () => {
+  it('★ `item` 包 → 面板标题是物件名、正文是描述、底部一条**可点**命令', () => {
     mod.clearStream();
     mod.closePanel();
     mod.dispatchPacket('item', {
@@ -1550,13 +2349,14 @@ describe('★★ 点实体：详情落在消息流（wushen `Process.item`）', 
       commands: [{ cmd: 'ask npc1', name: '打听' }],
     });
 
-    const out = document.getElementById('output') as HTMLElement;
-    // 判据落在**描述文字**上（不是"消息流多了一个节点就算数"）
-    expect(out.textContent).toContain('手脚麻利');
-    expect(mod.isPanelOpen(), 'wushen 的物件详情进消息流，不开 .dialog').toBe(false);
+    expect(mod.isPanelOpen()).toBe(true);
+    expect(document.getElementById('dlgTitle')?.textContent).toBe('店小二');
+    // 判据落在**描述文字**上（不是"面板开了就算数"）
+    expect(document.getElementById('dlgBody')?.textContent).toContain('手脚麻利');
 
-    const btn = out.querySelector('.item-commands [data-cmd]') as HTMLElement | null;
-    expect(btn, '命令条要在消息流里，而且得是**可点**节点').not.toBeNull();
+    // 命令条在**下带** `#dlgFoot`（wushen `.dialog-footer`）里
+    const btn = document.querySelector('#dlgFoot .item-commands [data-cmd]') as HTMLElement | null;
+    expect(btn, '命令条要在面板里，而且得是**可点**节点').not.toBeNull();
     expect(btn?.textContent).toBe('打听');
     fired.length = 0;
     click(btn);
@@ -1571,12 +2371,32 @@ describe('★★ 点实体：详情落在消息流（wushen `Process.item`）', 
     expect(line?.textContent).toBe('第一行\n第二行');
   });
 
-  it('★ `cmds` 包 = **一条命令条**（wushen `Process.cmds`），不是"全局指令表"', () => {
+  it('★ `cmds` 包（面板**没开**）→ 仍是**一条命令条**，不是"全局指令表"', () => {
     mod.clearStream();
+    mod.closePanel();
     mod.dispatchPacket('cmds', { items: [{ cmd: 'give x/1000 money', name: '交镖银' }] });
     const btn = document.querySelector('#output .item-commands [data-cmd]');
     expect(btn?.getAttribute('data-cmd')).toBe('give x/1000 money');
     expect(btn?.textContent).toBe('交镖银');
+  });
+
+  it('★★ `cmds` 包（物件面板**开着**）→ 换掉面板底部的按钮，不落日志（26 册 §57）', () => {
+    mod.clearStream();
+    mod.dispatchPacket('item', {
+      id: 'npc1',
+      name: '店小二',
+      desc: '一个店小二。',
+      commands: [{ cmd: 'ask npc1', name: '打听' }],
+    });
+    // 点「打听」之后服务端发回下一层动作
+    mod.dispatchPacket('cmds', { items: [{ cmd: 'give npc1 1000 money', name: '人字号客房' }] });
+
+    // 按钮换了（不是"多了一条"）
+    const btns = Array.from(document.querySelectorAll('#dlgFoot .item-commands [data-cmd]'));
+    expect(btns.map((b) => b.getAttribute('data-cmd'))).toEqual(['give npc1 1000 money']);
+    expect(btns[0]?.textContent).toBe('人字号客房');
+    // 日志区一行都没有 —— 这就是真机反馈里"人字号客房还在日志区"的修复
+    expect(document.querySelectorAll('#output .ln')).toHaveLength(0);
   });
 });
 
@@ -1629,6 +2449,133 @@ describe('★★ 动作栏是单点合成（wushen `Combat.create_actions`）', 
     expect(btn?.textContent, '按钮显示名').toBe('打听');
     click(btn);
     expect(fired, '点下去发的必须是 data-cmd，不是显示名').toEqual(['ask npc1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★★ 动作栏横向可滚（照 wushen `src/combat.js:10-13` 的 `Combat.Scroll`）
+// ---------------------------------------------------------------------------
+//
+// 两条动作栏都是 `white-space: nowrap` + `overflow-x: auto`：动作一多就横向
+// 溢出，而全站 `scrollbar-width: none` 又把滚动条藏了。触屏能横滑，鼠标却
+// **什么都没有** —— wushen 靠 `Combat.Scroll` 把竖向滚轮的 `deltaY` 加到
+// `scrollLeft` 上补这一路，本仓库此前完全没接。
+//
+// ★ 判据为什么要先"造出溢出条件"：jsdom **没有布局**，`scrollWidth` /
+//   `clientWidth` 恒为 0 ⇒ 换算出的位移恒为 0 ⇒ 不拦事件。直接派一次滚轮
+//   会得到一条"我什么都不做它也绿"的假断言（铁律 8），所以几何要手工装上。
+
+describe('动作栏横向可滚（滚轮 → scrollLeft）', () => {
+  // ★ 冷却推进表是 `ui/room.ts` 的**模块级**状态：不清就会跨用例残留。
+  //   实测踩到：上一条用例 arm 出去的定时器还挂着 ⇒ 下一条里
+  //   `cdTimer === null` 不成立 ⇒ 表没被重新 arm ⇒ fake timers 推了 1500ms
+  //   却什么也没发生（断言拿到上一拍的 100%）。与 `resetSkillsPanel` 同一条规矩。
+  afterEach(() => {
+    mod.stopCooldownTicker();
+  });
+
+  /** jsdom 无布局：临时给盒子装上"可横向滚动"的几何，用完**必须**恢复 */
+  function withOverflow(box: HTMLElement, client: number, total: number, fn: () => void): void {
+    let left = 0;
+    const defs: Array<[string, PropertyDescriptor]> = [
+      ['clientWidth', { value: client, configurable: true }],
+      ['scrollWidth', { value: total, configurable: true }],
+      ['scrollLeft', { get: () => left, set: (v: number) => { left = v; }, configurable: true }],
+    ];
+    for (const [key, desc] of defs) Object.defineProperty(box, key, desc);
+    try {
+      fn();
+    } finally {
+      // 实例属性是 configurable ⇒ 删掉就回到原型上的原生实现
+      for (const [key] of defs) delete (box as unknown as Record<string, unknown>)[key];
+    }
+  }
+
+  it('★ 位移换算：钳在 [0, max] 内，滚到头就不再给位移', () => {
+    expect(mod.wheelScrollDelta(50, 300, 120)).toBe(120); // 正常
+    expect(mod.wheelScrollDelta(0, 300, -120)).toBe(0); // 已在最左
+    expect(mod.wheelScrollDelta(280, 300, 120)).toBe(20); // 只够滚 20 到最右
+    expect(mod.wheelScrollDelta(300, 300, 120)).toBe(0); // 已在最右
+    expect(mod.wheelScrollDelta(50, 300, 0)).toBe(0); // 没有竖向位移
+  });
+
+  for (const id of ['verbs', 'pfms'] as const) {
+    it(`★ \`#${id}\` 上的滚轮必须转成横向滚动（动作溢出时鼠标也够得着）`, () => {
+      const box = document.getElementById(id) as HTMLElement;
+      withOverflow(box, 100, 400, () => {
+        const ev = new WheelEvent('wheel', { deltaY: 120, cancelable: true });
+        box.dispatchEvent(ev);
+        expect(box.scrollLeft, '滚轮没被转成横向位移').toBe(120);
+        expect(ev.defaultPrevented, '滚得动时要拦住，别再冒泡去滚消息流').toBe(true);
+      });
+    });
+  }
+
+  it('★ 已在最左还往上滚 ⇒ 不拦事件（让消息流照常滚）', () => {
+    const box = document.getElementById('verbs') as HTMLElement;
+    withOverflow(box, 100, 400, () => {
+      box.scrollLeft = 0;
+      const ev = new WheelEvent('wheel', { deltaY: -120, cancelable: true });
+      box.dispatchEvent(ev);
+      expect(box.scrollLeft).toBe(0);
+      expect(ev.defaultPrevented, '不该把滚轮白白吃掉').toBe(false);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // ★★ 冷却要有**视觉进度**（照 wushen `combat.js:173-242`）
+  //   wushen 给每个招式铺一层灰色渐变，横向比例 = 剩余比例，靠右对齐
+  //   （`background-size: N% 100%` + `background-position: 100% 100%`），
+  //   每 300ms 推进一拍 ⇒ 冷却走完，灰色从右边退干净。
+  //   本仓库的 CSS 把这条渐变**写好了**，却没有任何代码去推它 ⇒ 恒为 0%，
+  //   招式冷却在界面上等于没有反馈（只能去 `pFlags` 看「冷却 N」几个字）。
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('★ `dispfm` 帧 ⇒ 对应按钮盖上冷却遮罩（`background-size` = 剩余比例）', () => {
+    mod.dispatchPacket('perform', {
+      items: [{ cmd: 'perform 3v3cl6ifhs', name: '降龙十八掌' }],
+    });
+    mod.dispatchPacket('dispfm', { id: '3v3cl6ifhs', time: 3000, rtime: 3000 });
+
+    const btn = document.querySelector('#pfms .pfm-item[data-cmd="perform 3v3cl6ifhs"]');
+    expect(btn, '招式按钮为什么没进招式栏？').not.toBeNull();
+    // ★ 刚发帧 ⇒ 剩余 ≈ 100%（遮罩几乎盖满整格）
+    expect(Number.parseFloat((btn as HTMLElement).style.backgroundSize)).toBeGreaterThan(90);
+  });
+
+  it('★ 冷却会**自己走完** ⇒ 到点遮罩退干净（不留一条灰）', () => {
+    vi.useFakeTimers();
+    try {
+      mod.dispatchPacket('perform', { items: [{ cmd: 'perform abc', name: '某招' }] });
+      mod.dispatchPacket('dispfm', { id: 'abc', time: 3000, rtime: 3000 });
+
+      const btn = () => document.querySelector('#pfms .pfm-item[data-cmd="perform abc"]') as HTMLElement;
+      expect(Number.parseFloat(btn().style.backgroundSize)).toBeGreaterThan(90);
+
+      vi.advanceTimersByTime(1500);
+      // ★ 走了一半 ⇒ 遮罩也退掉一半（这里正是"以前永远不动"的那条）
+      const mid = Number.parseFloat(btn().style.backgroundSize);
+      expect(mid).toBeGreaterThan(40);
+      expect(mid).toBeLessThan(60);
+
+      vi.advanceTimersByTime(1600);
+      expect(btn().style.backgroundSize, '冷却走完了，遮罩就该退干净').toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('★ 没有冷却的按钮：不许凭空多出一条遮罩', () => {
+    mod.dispatchPacket('perform', {
+      items: [
+        { cmd: 'perform x', name: '甲' },
+        { cmd: 'perform y', name: '乙' },
+      ],
+    });
+    mod.dispatchPacket('dispfm', { id: 'x', time: 3000, rtime: 3000 });
+
+    const other = document.querySelector('#pfms .pfm-item[data-cmd="perform y"]') as HTMLElement;
+    expect(other.style.backgroundSize, '没在冷却的按钮不该被盖').toBe('');
   });
 });
 
@@ -1725,6 +2672,22 @@ describe('#pFlags · 战斗 / 状态 / 冷却摘要（R6 / R7，2026-10-17 审�
     expect(flags()).toContain('战斗中');
     mod.dispatchPacket('combat', { start: 0 });
     expect(flags()).not.toContain('战斗中');
+  });
+
+  it('★ combat 开打 → #pfms 出现「逃跑」；停手 → 收起（战斗动作入口）', () => {
+    // 先清掉上一条用例可能留在 state.pfms 里的招式（本文件没有逐例重置状态）
+    mod.dispatchPacket('perform', { items: [] });
+
+    const labels = (): string[] =>
+      Array.from(document.querySelectorAll('#pfms .pfm-item')).map((n) => n.textContent ?? '');
+
+    mod.dispatchPacket('combat', { start: 1 });
+    expect(labels()).toEqual(['逃跑']);
+    // 点下去的触发词必须是 `flee`（服务端 `combat/flee` 的别名之一）
+    expect(document.querySelector('#pfms .pfm-item')?.getAttribute('data-cmd')).toBe('flee');
+
+    mod.dispatchPacket('combat', { start: 0 });
+    expect(labels()).toEqual([]);
   });
 
   it('status 帧 → 名字进摘要；clear → 清空', () => {

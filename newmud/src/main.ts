@@ -17,8 +17,8 @@ import { MudClient } from './net/client.js';
 import { LOGIN_TIMEOUT_MS, LoginWatchdog } from './net/login-watchdog.js';
 import { ReconnectPolicy, decideOnClose } from './net/reconnect.js';
 import { dispatchPacket, setErrorSink } from './process/index.js';
-import { bindStream, clearStream, pushLine, pushRule, setStreamRunner } from './ui/stream.js';
-import { bindRoom, renderActionBar, renderAll, renderScene } from './ui/room.js';
+import { bindStream, clearStream, pushLine, setStreamRunner } from './ui/stream.js';
+import { bindRoom, renderActionBar, renderAll, renderScene, stopCooldownTicker } from './ui/room.js';
 import { bindMap, renderMap, setMapRunner } from './ui/map.js';
 import { bindBars } from './ui/bars.js';
 import {
@@ -30,7 +30,16 @@ import {
   resetInputs,
   setChatTarget,
 } from './ui/input.js';
-import { bindPanel, closePanel, closeWarn, openPanel, resetPanels, setPanelRunner } from './ui/panel.js';
+import {
+  bindPanel,
+  closePanel,
+  closeWarn,
+  openPanel,
+  resetPanels,
+  setPanelAnchor,
+  setPanelRunner,
+} from './ui/panel.js';
+import { resetSkillsPanel } from './ui/skills.js';
 import { renderStatus } from './ui/status.js';
 import {
   bindAuth,
@@ -107,6 +116,10 @@ const loginWatchdog = new LoginWatchdog(LOGIN_TIMEOUT_MS, () => {
 function run(cmd: string): void {
   const text = cmd.trim();
   if (text === '') return;
+  // ★★ 这里原先有一句 `if (!consumePanelIssue()) stopAbsorb();`（§74 的修法）：
+  //   靠"这条命令是不是面板按钮发的"来猜回显该落在哪儿。
+  //   §80 之后文本自带归属（`warn.context`），发令方**不需要**再表态 ——
+  //   面板里点的按钮和输入框敲的命令走同一条路，落点由服务端声明。
   client.sendCommand(text);
 }
 
@@ -197,6 +210,13 @@ setErrorSink((type, e) => {
 function backToAuth(): void {
   resetWorldFacts();
   resetPanels();
+  // ★ 技能面板的页签 / 选中项是**模块变量**（`ui/skills.ts`）。不清的话，
+  //   换个角色进来一开面板，动作栏会对着上一个角色选中的那门技能 ——
+  //   而新角色的技能簿里没有它。
+  resetSkillsPanel();
+  // ★ 冷却推进表也是模块级状态（`ui/room.ts` 的 `cdTimer`）：
+  //   不清的话，上一局 arm 出去的定时器会挂到下一局才自愈（要等它空转一拍）。
+  stopCooldownTicker();
   resetInputs();
   closeWarn();
   clearStream();
@@ -324,6 +344,9 @@ function bind(): void {
 
   // ⑤ 面板（属性 / 行囊 …）与提示框
   setPanelRunner(run);
+  // ★ 面板贴**"此处有"列表**的下面（`panel.ts` 只留注入口，谁最近由接线层说）：
+  //   玩家在上面点人/物，操作就落在那一块的正下方，不用两头跑。
+  setPanelAnchor(() => document.getElementById('roomItems')?.getBoundingClientRect().bottom ?? 0);
   bindPanel();
 
   // ⑥ 消息流：滚到底就把"回到底部"浮标收掉；点命令条里的按钮也走 `run()`
@@ -373,6 +396,5 @@ Object.assign(window as unknown as Record<string, unknown>, {
     renderMap,
     renderAll,
     renderStatus,
-    pushRule,
   },
 });

@@ -23,6 +23,7 @@
 import { existsSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { isAbsolute, join, resolve } from 'node:path';
+import { networkInterfaces } from 'node:os';
 
 import { describeWorld } from './bootstrap.js';
 import { createGameServer } from './main.js';
@@ -95,6 +96,33 @@ function writeProcessError(kind: ProcessErrorKind, error: unknown): void {
   process.stderr.write(`[${kind}] 未捕获异常（进程继续运行，请查这条）：${detail}\n`);
 }
 
+/**
+ * "通配地址"：监听它 = 放开到**全部网卡**（局域网可达）。
+ * ★ 与 `DEFAULT_WS_HOST`（只绑本机）相对；启动日志按这里分流提示。
+ */
+export const WILDCARD_HOSTS: readonly string[] = ['0.0.0.0', '::'];
+
+export function isWildcardHost(host: string): boolean {
+  return WILDCARD_HOSTS.includes(host);
+}
+
+/**
+ * 本机的局域网 IPv4 地址（供启动日志打印"手机连这个"）。
+ * ★ 只要**非内部**的 IPv4：`::1`/`127.x` 是本机回环，`169.254.x` 是没连上的
+ *   链路本地地址 —— 打印出来都是噪音。
+ */
+export function lanAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const ni of list ?? []) {
+      if (ni.internal || ni.family !== 'IPv4') continue;
+      if (ni.address.startsWith('169.254.')) continue;
+      out.push(ni.address);
+    }
+  }
+  return out;
+}
+
 export interface CliOptions {
   readonly port: number;
   /** 监听地址（缺省 `127.0.0.1`；对外要显式 `--host 0.0.0.0`） */
@@ -118,6 +146,7 @@ export function usage(): string {
     '选项：',
     '  --port <n>             监听端口（缺省 ' + String(DEFAULT_PORT) + '；0 = 由系统分配）',
     '  --host <addr>          监听地址（缺省 ' + DEFAULT_WS_HOST + '；对外请显式给 0.0.0.0）',
+    '  --lan                  局域网可连（等价 --host 0.0.0.0；启动后打印局域网地址）',
     '  --web-root <dir>       前端产物目录（缺省在项目根下的 dist/web）',
     '  --no-web               只提供 WebSocket，不发前端',
     '  --max-connections <n>  同时在线人数上限（缺省取常量表里的 MAX_CONNECTIONS）',
@@ -190,6 +219,9 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         break;
       case '--host':
         host = readHost('--host', takeValue());
+        break;
+      case '--lan':
+        host = '0.0.0.0';
         break;
       case '--max-connections':
         maxConnections = readInt('--max-connections', takeValue(), 1, 100_000);
@@ -284,6 +316,20 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.stdout.write(`页面      http://${host}:${server.port}/\n`);
   }
   process.stdout.write(`WebSocket ${wsUrl}\n`);
+  // ★ 局域网提示（显式不静默）：绑了通配地址就把"手机/别的机器连哪个"打出来；
+  //   只绑本机时也要说一句怎么放开 —— 否则"手机上打不开"只能靠翻源码。
+  if (isWildcardHost(host)) {
+    const lan = lanAddresses();
+    if (lan.length === 0) {
+      process.stdout.write('局域网    未检测到局域网网卡（没联网？）——本机浏览器仍可访问上面的地址\n');
+    } else {
+      for (const ip of lan) {
+        process.stdout.write(`局域网    http://${ip}:${String(server.port)}/   （手机/其他机器连这个）\n`);
+      }
+    }
+  } else {
+    process.stdout.write('（当前只监听本机；要让手机/局域网设备连入：npm start -- --lan）\n');
+  }
   process.stdout.write(`READY ${JSON.stringify({ port: server.port })}\n`);
 
   // 收到信号就优雅关闭：清定时器 → 断连接 → 关监听 → 事件循环自然排空后退出

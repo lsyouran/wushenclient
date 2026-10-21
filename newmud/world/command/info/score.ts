@@ -1,18 +1,21 @@
 import { defineCommand } from '@engine/world/define.js';
-import { propLabel } from '@shared/constants.js';
 
 /**
- * `score` / `attr` —— 看自己的**属性三档**：合计、先天、后天加成。
+ * `score` / `attr` —— 看自己的**属性面板**。
  *
- * 对照 wushen `world/cmd/dialog/score.js`（属性面板）。那里把一整个
- * `{type:"dialog",dialog:"score"}` 载荷发给前端弹**对话框**；本项目的前端对话框
- * 子系统尚未接通（26 册 §35 遗留 35-E），所以这里先走 `notify` 把同样的三档数字
- * **打成文本** —— 数据口径与 wushen 一致：`score.js:90-97` 单独发的
- * `str_add/con_add/dex_add/int_add` 就是 `query_prop()`，即"后天加成"那一档。
+ * 对照 wushen `world/cmd/dialog/score.js`：它把一整个结构化对象发下去
+ * （`{type:"dialog",dialog:"score",str:…,str_add:…}`），前端模板里每个
+ * `data-prop="str"` 逐格填值。
  *
- * ★ 数值来自 `CommandActor.attrBreakdowns()`（→ `formula.ts#computeAttrBreakdowns`），
- *   与 `SkillActor.str`、`learnCondition.minAttr` **同一个数**（先天 + 加成，
- *   26 册 §37 归一）—— 面板显示的、门槛判定的、内容层读的，三者不可能各说各话。
+ * ★★ 2026-10-18（26 册 §62）之前这里是 `me.notify(文本)` —— 看一眼属性就往
+ *   消息流刷九行。日志区是**流水账**，属性是**快照**：混在一起的效果是
+ *   "刷完就找不回，想再看一眼还得重敲"。现在改发 `dialog:score` 帧，
+ *   落点是 `src/ui/panel.ts` 的数据面板（照 wushen `.dialog-score` 分段渲染）。
+ *
+ * ★ 数值来自 `CommandActor.attrView()`（→ `formula.ts#computeAttrBreakdowns` /
+ *   `computeDerived`），与 `SkillActor.str`、`learnCondition.minAttr` **同一个数**
+ *   （先天 + 加成，26 册 §37）—— 面板显示的、门槛判定的、内容层读的，三者不可能各说各话。
+ *   战斗那几格同理：面板上的「攻击」就是出招时读的 `#derived.attack`。
  *
  * ★ 别名 `attr` 是英文口令：`ALIAS_RE` 只收 `[a-z][a-z0-9_]*`，中文进不来；
  *   主名 `score` 照抄 wushen。
@@ -28,22 +31,7 @@ defineCommand('info/score', {
   allow_die: true,
 
   run: (me) => {
-    const lines = ['【属性】'];
-    for (const a of me.attrBreakdowns()) {
-      const label = propLabel(a.key);
-      // 有加成才展开三档；没加成时只报合计，免得每行都是"先天 X + 后天 0"
-      lines.push(
-        a.bonus === 0
-          ? `${label}：${a.total}`
-          : `${label}：${a.total}（先天 ${a.innate} + 后天 ${a.bonus}）`,
-      );
-    }
-    // ★ 成长面（26 册 §56）：经验抬高**技能等级上限**，潜能用来在 `practice` 里换等级。
-    //   这两行是关键引导 —— 没有它们，玩家打到经验也不知道"这个数有什么用"。
-    //   ★ NPC 的 `skillLimit()` 是 `Infinity`（它们不走这条曲线），显示成 ∞ 而不是天文数字。
-    const limit = me.skillLimit();
-    lines.push(`\n经验：${String(me.exp)}　潜能：${String(me.pot)}`);
-    lines.push(`技能等级上限：${Number.isFinite(limit) ? String(limit) : '∞'} 级`);
-    me.notify(lines.join('\n'));
+    // ★ 内容层只负责"摆"：账全在引擎里算好（见 `AttrView` 的注释）。
+    me.showAttr(me.attrView());
   },
 });

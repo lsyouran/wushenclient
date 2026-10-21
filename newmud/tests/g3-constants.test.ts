@@ -19,6 +19,7 @@ import {
   ENABLE_SLOTS,
   EQUIP_TYPE,
   GRADE_COMBINE_COUNT,
+  LEGACY_PINYIN_KEYS,
   MAX_GRADE,
   PROPERTIES,
   SKILL_TYPES,
@@ -71,39 +72,59 @@ describe('G3.1 isPropKey() ≡ PropKey（类型 ↔ 运行时守卫等价）', (
       'add_',
       'diff__per',
       'add__per',
-      'attack',
-      'defence',
-      'defense',
-      'gjsd_peer',
-      'gj_pere',
-      'GJ',
-      'PER',
+      // ★ 2026-10-18 §66：数据键改英文后，噪声样本同步换成**英文本名的近邻错误**
+      //   —— 用旧拼音当噪声已经没有意义了（`gj` 不在表里，谁都会拒）
+      'per', // 纯后缀词，不是核心键（容貌已改名 appearance）
+      'defence', // 英式拼写
+      'defens', // 少一个 e
+      'attacke',
+      'attack_speeds',
+      'eveision', // 换位
+      'APPEARANCE', // 大小写
       'diff_Per',
-      'diff_GJ',
-      'gj-per',
-      'diff_gj_per2',
-      'add_gj_per2',
+      'diff_ATTACK',
+      'attack-per', // 连字符
+      'diff_attack_per2', // 尾数 2 只对 damage/defense 两族登记过
+      'add_attack_per2',
       'diff_foo',
       'foo_per',
-      'diff_diff_gj_per_per_per',
-      '0gj',
-      ' gj',
-      'gj ',
+      'diff_diff_attack_per_per_per',
+      '0attack',
+      ' attack',
+      'attack ',
+      // 旧拼音键：现在是**非法**的，必须被拒（wushen 移植时最容易写回来的一批）
+      'gj',
+      'fy',
+      'ds',
+      'zj',
+      'mz',
+      'bj_per',
+      'gjsd',
+      'gj_per',
+      'diff_sh_per',
+      'add_bjsh_per',
     ];
     const wronglyAccepted = noise.filter((k) => isPropKey(k));
     expect(wronglyAccepted, `以下键类型非法但运行时守卫接受：${wronglyAccepted.join(', ')}`).toEqual([]);
   });
 
-  it('短键 `per`（容貌）是合法核心键，绝不能被当成噪声拒掉', () => {
-    // 反向锚点：`per` 同时是 ModProp 的后缀词，容易在守卫里被误伤
-    expect(isCoreProp('per')).toBe(true);
-    expect(isPropKey('per')).toBe(true);
+  it('`appearance`（容貌）是合法核心键，而纯后缀词 `per` 不是', () => {
+    // ★ 2026-10-18 §66：旧键 `per` 本身是核心键、又恰好是 ModProp 的后缀词，
+    //   守卫里极易被误伤（旧注释把它列为反面样本）。改名 `appearance` 之后
+    //   这颗雷拆掉了 —— 于是这里能反过来断言：`per` 就是**不合法**。
+    //   ★ 注意这**不是**风格问题：`isCoreProp('per')` 若为 true，说明有人把
+    //     旧键写回了核心表，而 `baseline` 里的旧拼音样本会同时变绿。
+    expect(isCoreProp('appearance')).toBe(true);
+    expect(isPropKey('appearance')).toBe(true);
+    expect(isCoreProp('per')).toBe(false);
+    expect(isPropKey('per')).toBe(false);
   });
 
   it('★ 回归锚点：以 `_per` 结尾的核心键，其 `_per` 派生键不得被漏判', () => {
-    // 这是首轮实测发现的真实漏判：`diff_sh_per` 本身是核心键，
-    // 于是 `diff_sh_per_per` 在类型上合法，但旧守卫"剥一层 diff_ + 剥一层 _per"
-    // 得到 `sh_per`（非核心）→ 误判为非法。
+    // 这是首轮实测发现的真实漏判：`diff_damage_per`（旧 `diff_sh_per`）本身是核心键，
+    // 于是 `diff_damage_per_per` 在类型上合法；同理 `add_crit`（旧 `add_bj_per`）
+    // 也合法。而旧守卫会**一次剥掉前缀 + 后缀**，多剥一层之后拿到 `damage_per`
+    // / `crit` 之类非核心词 ⇒ 误判为非法。修法是按 6 个族各自独立判定。
     const tailPerCore = CORE_KEYS.filter((c) => c.endsWith('_per'));
     expect(tailPerCore.length).toBeGreaterThan(0); // 前提：表里确实有这类键
 
@@ -112,6 +133,46 @@ describe('G3.1 isPropKey() ≡ PropKey（类型 ↔ 运行时守卫等价）', (
       .filter((k) => !isPropKey(k))
       .sort();
     expect(anchors, `漏判的 _per 派生键：${anchors.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('G3.1b 旧拼音对照表（LEGACY_PINYIN_KEYS，§66 改名时冻结）', () => {
+  const entries = Object.entries(LEGACY_PINYIN_KEYS);
+
+  it('表非空（G3.A 的"请改用 X"文案靠它，空了就只剩一句泛泛的报错）', () => {
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it('每个值都是**当下合法**的核心键 —— 再改一次名会编译失败/这里变红，逼着同步', () => {
+    const bad = entries.filter(([, v]) => !isCoreProp(v)).map(([k, v]) => `${k}→${v}`);
+    expect(bad, `指向了不存在的核心键：${bad.join(', ')}`).toEqual([]);
+  });
+
+  it('★★ 每个旧键都**不再是**合法 PropKey —— 否则"改名"没改干净', () => {
+    // 这条是反向锚：若谁把旧拼音键又加回 PROPERTIES（"为了兼容"），
+    // 这里立刻变红，而 G3.A 的黑名单也会同时失去意义（旧键不再违规）。
+    const stillValid = entries.filter(([k]) => isPropKey(k)).map(([k]) => k);
+    expect(stillValid, `以下旧键仍是合法 PropKey：${stillValid.join(', ')}`).toEqual([]);
+  });
+
+  it('映射互不重复（两个旧键指到同一个新键 = 抄错了）', () => {
+    const seen = new Map<string, string>();
+    const dup: string[] = [];
+    for (const [k, v] of entries) {
+      const prev = seen.get(v);
+      if (prev === undefined) seen.set(v, k);
+      else dup.push(`${prev} 与 ${k} 都指向 ${v}`);
+    }
+    expect(dup, `重复映射：${dup.join('; ')}`).toEqual([]);
+  });
+
+  it('★ 抽样钉住几个最容易抄错的（不是全表对账，是防"整表被换掉"）', () => {
+    expect(LEGACY_PINYIN_KEYS.gj).toBe('attack');
+    expect(LEGACY_PINYIN_KEYS.bj_per).toBe('crit');
+    expect(LEGACY_PINYIN_KEYS.per).toBe('appearance');
+    expect(LEGACY_PINYIN_KEYS.con1).toBe('innate_con');
+    expect(LEGACY_PINYIN_KEYS.dazuo).toBe('meditation');
+    expect(LEGACY_PINYIN_KEYS.score).toBe('instance_score');
   });
 });
 
@@ -288,13 +349,13 @@ describe('G3.4 其余常量表的一致性', () => {
 
 describe('G3.5 registerExtProp 契约（EXT 层开放集，但必须登记）', () => {
   it('拒绝不符合命名法的键（大写 / 连字符 / 空）', () => {
-    for (const bad of ['Tjj_Gj', 'tjj-gj', '', '1abc', 'tjj gj']) {
+    for (const bad of ['Tjj_Attack', 'tjj-attack', '', '1abc', 'tjj attack']) {
       expect(() => registerExtProp(bad, { display: 'x', owner: 'skill:t' }), bad).toThrow();
     }
   });
 
   it('拒绝与核心属性重名的扩展键（否则双层结构失去意义）', () => {
-    expect(() => registerExtProp('gj', { display: 'x', owner: 'skill:t' })).toThrow();
+    expect(() => registerExtProp('attack', { display: 'x', owner: 'skill:t' })).toThrow();
   });
 
   it('★ 回归锚点：与**派生键（MOD 族）**冲突的扩展键必须被拒绝', () => {
@@ -304,8 +365,8 @@ describe('G3.5 registerExtProp 契约（EXT 层开放集，但必须登记）', 
     // 既是合法 `PropKey`（参与核心公式）又是 `ExtProp`（不参与核心公式），
     // 24 册 §3.3 的"扩展键永不参与核心公式"当场失效。
     const modOnlySamples = [
-      'add_gj', // = add_ + gj
-      'diff_mz', // = diff_ + mz
+      'add_attack', // = add_ + attack
+      'diff_hit', // = diff_ + hit
       'con_per', // = con + _per
       'add_con', // = add_ + con
       'diff_con_per', // = diff_ + con + _per

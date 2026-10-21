@@ -404,10 +404,21 @@ describe('★★ 移动：走出口 → 服务端对账房间并重推三帧', (
     await until(() => (ofType(c, 'room').length >= 3 ? true : undefined));
     expect(ofType(c, 'room')[2]?.['name']).toBe(startName);
 
-    // ★ 内容层的 `on_enter` 是**到达时**跑，不是移动前 —— 而且只有目标房间有钩子
-    //   （北大街没写 `on_enter`，所以这句只在回到广场时出现）
+    // ★★ 2026-10-20 §74：广场的 `on_enter`（"你来到了中央广场。"）**已删除** ——
+    //   它与前端 `room` 处理器统一播的「你来到了<全名>。」重复，真机上就是
+    //   日志里同一件事说两遍。所以这里先钉住"它**不再**出现"。
     const texts = c.received.map((p) => String(p['content'] ?? ''));
-    expect(texts.filter((t) => t.includes('你来到了中央广场')).length).toBe(1);
+    expect(texts.filter((t) => t.includes('你来到了中央广场'))).toEqual([]);
+
+    // ★ 但 `on_enter` 这个机制本身要证明还活着 ⇒ 换到**仍有钩子**的房间：
+    //   广场 --north--> 北大街 --west--> 武馆（`yz/wuguan.ts` 的 on_enter 是场景白描，
+    //   不重复"你来到了哪里"，正是 on_enter 该有的用法）
+    c.ws.send('north');
+    await until(() => (ofType(c, 'room').length >= 4 ? true : undefined));
+    c.ws.send('west');
+    await until(() => (ofType(c, 'room').length >= 5 ? true : undefined));
+    const texts2 = c.received.map((p) => String(p['content'] ?? ''));
+    expect(texts2.filter((t) => t.includes('武馆教头正在厅中走拳')).length).toBe(1);
 
     // `look` 不会换房间 —— 房间帧的条数不该再涨（对账不是"每条指令都重推"）
     const before = ofType(c, 'room').length;
@@ -732,6 +743,136 @@ describe('★★ 点实体：`select` → `item` 包（这条链路此前整条�
     c.ws.send(`select ${npc?.id ?? ''}`);
     await until(() => (ofType(c, 'item').length > 0 ? true : undefined));
     expect(ofType(c, 'item')[0]?.['name']).toBe('店小二');
+    c.ws.close();
+  });
+
+  /**
+   * ★★ 点 NPC 的面板按 wushen `os/char/npc.js:63-75` 给出「查看 / 比试 / 击杀」，
+   * 并过两道闸：房间 `noFight`（广场 / 武馆）与目标自身 `noFight` / `noKill`（老师、店主）。
+   *
+   * ★ 之前 `commandsOf()` 只列 `obj.actions`：点任何 NPC 都只有「打听」——
+   *   `fight` / `kill` 明明已经落地，面板上却**没有入口**，玩家只能靠猜指令。
+   * ★ 这条用例同时钉住"反例"：禁武房不能出格斗按钮，否则玩家点了只会得到
+   *   「这里不允许战斗」，看起来像按钮坏了。
+   */
+  it('★★ 点 NPC：可战斗房间给「比试/击杀」，禁武房间不给', async () => {
+    const port = await start();
+    const c = await connect(port);
+    send(c.ws, { type: 'login', token: 't'.repeat(20), role_id: '张三' });
+    await until(() => (ofType(c, 'room').length > 0 ? true : undefined));
+
+    const namesOfLastItem = (): string[] => {
+      const cmds = (ofType(c, 'item').at(-1)?.['commands'] ?? []) as Array<{ name: string }>;
+      return cmds.map((x) => x.name);
+    };
+
+    // ① 广场（`yz/guangchang.ts:9` 的 no_fight: true）：店小二不该出现比试 / 击杀
+    const shop = running?.world.startRoom?.items.find((o) => o.name === '店小二');
+    expect(shop, '起点该有店小二').toBeDefined();
+    c.ws.send(`select ${shop?.id ?? ''}`);
+    await until(() => (ofType(c, 'item').length > 0 ? true : undefined));
+    expect(namesOfLastItem()).toContain('查看');
+    expect(namesOfLastItem(), '会武功的 NPC 才有「技能」').toContain('技能');
+    expect(namesOfLastItem()).not.toContain('比试');
+    expect(namesOfLastItem()).not.toContain('击杀');
+
+    // ② 北大街（可战斗）：木人桩 —— 比试 / 击杀都在；它一门武功都不会 ⇒ 无「技能」
+    c.ws.send('north');
+    await until(() => (ofType(c, 'room').length >= 2 ? true : undefined));
+    await until(() => {
+      const items = ofType(c, 'items').at(-1)?.['items'] as Array<{ name: string }> | undefined;
+      return items?.some((o) => o.name === '木人桩') === true ? true : undefined;
+    });
+    const dummy = (
+      ofType(c, 'items').at(-1)?.['items'] as Array<{ id: string; name: string }>
+    ).find((o) => o.name === '木人桩');
+    c.ws.send(`select ${dummy?.id ?? ''}`);
+    await until(() => (ofType(c, 'item').length >= 2 ? true : undefined));
+    const cmds = (ofType(c, 'item').at(-1)?.['commands'] ?? []) as Array<{
+      cmd: string;
+      name: string;
+    }>;
+    // 触发词必须带**实例 id**：同名怪不会打错
+    expect(cmds.find((x) => x.name === '比试')?.cmd).toBe(`fight ${dummy?.id ?? ''}`);
+    expect(cmds.find((x) => x.name === '击杀')?.cmd).toBe(`kill ${dummy?.id ?? ''}`);
+    expect(cmds.some((x) => x.name === '技能'), '木人桩不会武功，不该摆「技能」').toBe(false);
+    c.ws.close();
+  });
+
+  /**
+   * ★★ 地面物品必须有「捡起」按钮（2026-10-18 真机走查）。
+   *
+   * 走查证据：点地面的「丹药」，面板出来了、描述也对，但 `commands` 是**空数组** ——
+   * 玩家在界面上没有任何办法把它捡起来，只能猜到要手敲 `get 丹药`。
+   *
+   * wushen 不是这样：`OBJ.query_desc`（`os/item/obj.js:32-47`）**无条件** push 一条
+   * `{ cmd: "get " + this.id, name: "捡起" }`。本项目的 `detailOf()` 只列
+   * `obj.actions`（那是 NPC / 房间的"自己的动作"），而物品的 `actions` 是空的 ——
+   * 于是"物品没有按钮"这个结果被注释写成了"物品暂无"，实际是**整条捡起路径断了**。
+   */
+  it('★★ `select <地面物品>` → 详情里带「捡起」（wushen `OBJ.query_desc` 的做法）', async () => {
+    const port = await start();
+    const c = await connect(port);
+    send(c.ws, { type: 'login', token: 't'.repeat(20), role_id: '张三' });
+    await until(() => (ofType(c, 'room').length > 0 ? true : undefined));
+
+    // ★ 对照组：起始房间真的有地面物品（没有它这条用例没有区分力）
+    const ground = running?.world.startRoom?.items.find((o) => o.kind === 'item');
+    expect(ground, '起始房间该有地面物品（丹药）—— 没有它这个用例没有区分力').toBeDefined();
+
+    c.ws.send(`select ${ground?.name ?? ''}`);
+    await until(() => (ofType(c, 'item').length > 0 ? true : undefined));
+
+    const pkt = ofType(c, 'item')[0];
+    expect(pkt?.['id']).toBe(ground?.id);
+    const cmds = (pkt?.['commands'] ?? []) as Array<{ cmd: string; name: string }>;
+    const pick = cmds.find((x) => x.name === '捡起');
+    expect(pick, '地面物品的详情里必须有「捡起」').toBeDefined();
+    // 触发词带**实例 id**：同名物品不会捡错
+    expect(pick?.cmd).toBe(`get ${ground?.id ?? ''}`);
+    c.ws.close();
+  });
+
+  /**
+   * ★★ `score` 必须发 `dialog:score` 帧，不是打一行文本进消息流（§62）。
+   *
+   * wushen 的属性是**面板**（`world/cmd/dialog/score.js` 收一个结构化载荷，
+   * 再拿 `data-prop` 逐格填值），不是 `ReceiveMessage` 的一段文字。
+   * 本项目原先走 `notify` —— 于是看一眼属性就往日志区刷九行，
+   * 想再看一眼还得重敲，而玩家真正需要的是"一张随时能翻的卡"。
+   */
+  it('★★ `score` → `dialog:score` 帧（结构化字段，不是一行文本）', async () => {
+    const port = await start();
+    const c = await connect(port);
+    send(c.ws, { type: 'login', token: 't'.repeat(20), role_id: '张三' });
+    await until(() => (ofType(c, 'room').length > 0 ? true : undefined));
+
+    const before = ofType(c, 'warn').length;
+    c.ws.send('score');
+    await until(() => (ofType(c, 'dialog').length > 0 ? true : undefined));
+
+    const pkt = ofType(c, 'dialog')[0];
+    expect(pkt?.['dialog']).toBe('score');
+
+    // ★ 字段是**结构化**的，不是前端拿正则去切文本
+    expect(typeof pkt?.['maxHp']).toBe('number');
+    expect(typeof pkt?.['skillLimit']).toBe('number');
+    const attrs = pkt?.['attrs'] as Array<{ key: string; innate: number; bonus: number; total: number }>;
+    expect(Array.isArray(attrs)).toBe(true);
+    // 四维全在，且三档口径成立（total === innate + bonus）
+    expect(attrs.map((a) => a.key).sort()).toEqual(['con', 'dex', 'int', 'str']);
+    for (const a of attrs) expect(a.total).toBe(a.innate + a.bonus);
+
+    const combat = pkt?.['combat'] as Record<string, number>;
+    expect(typeof combat['attack']).toBe('number');
+    expect(typeof combat['defense']).toBe('number');
+
+    // ★ 反向：消息流里**不该**再多出那一坨文本（否则同一个数有两份出口）
+    const texts = ofType(c, 'warn');
+    expect(
+      texts.slice(before).some((t) => String(t['content'] ?? '').includes('【属性】')),
+      '属性不该再往消息流刷文本',
+    ).toBe(false);
     c.ws.close();
   });
 });

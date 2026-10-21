@@ -30,10 +30,18 @@ function gauge(fillId: string, textId: string, value: number, max: number): void
   if (max <= 0) {
     fill.style.width = '0%';
     text.textContent = '—';
+    // 上限都不知道，就别猜危不危险 —— 两档都撤掉
+    text.classList.remove('warn', 'danger');
     return;
   }
+  const ratio = value / max;
   fill.style.width = `${String(pct(value, max))}%`;
   text.textContent = `${String(value)}/${String(max)}`;
+  // ★ 数值按比例上色（阈值照 wushen `process.js:259-265` 的 `get_hpnum()`）。
+  //   只挂 class、**不改 textContent** —— 数值文本是既有断言的对象
+  //   （`tests/web-ui.test.ts`：「30/60」/「—」）。
+  text.classList.toggle('warn', ratio <= 0.5 && ratio > 0.2);
+  text.classList.toggle('danger', ratio <= 0.2 && ratio > 0);
 }
 
 /**

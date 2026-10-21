@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        明文（ws:// / http://）必须显式允许：Android 9（API 28）起默认禁止明文流量，
+        而本项目的服务端默认是 `ws://127.0.0.1:8123`（无 TLS）。
+        ★ 这一条**只适合开发包**。上线时服务端要上 wss://，然后把这里改回 false ——
+          带着它发布的后果不只是"不安全"，还包括被某些应用商店直接拒审。
+    -->
+    <application
+        android:allowBackup="false"
+        android:label="新武林"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

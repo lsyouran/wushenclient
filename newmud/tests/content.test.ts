@@ -13,15 +13,18 @@ import { validateWorld } from '../server/world/validate.js';
 describe('真实 world/ 内容加载', () => {
   it('各 kind 计数正确', () => {
     expect(countOf('area')).toBe(1);
-    expect(countOf('skill')).toBe(3); // base/force + base/sword + wd/taijijian
-    expect(countOf('item')).toBe(3); // drug/yao + #0 + #1
-    expect(countOf('npc')).toBe(2); // pub/xiaoer + pub/muren（练功桩）
-    expect(countOf('room')).toBe(2);
+    expect(countOf('skill')).toBe(7); // 6 门基本技能（内功/轻功/招架/拳脚/剑法/刀法）+ 太极剑法
+    expect(countOf('item')).toBe(5); // drug/yao + #0 + #1 + book/taijijian + book/sword（§75 秘籍）
+    expect(countOf('npc')).toBe(3); // pub/xiaoer + pub/muren（练功桩）+ pub/jiaotou（教头）
+    expect(countOf('room')).toBe(3); // yz/guangchang + yz/beidajie1 + yz/wuguan（武馆）
     // action/look + action/select + move/go + chat/say + chat/shout + chat/tell + info/score
     // + obj/get + obj/drop + obj/give + obj/use（B 批四条物品指令）
     // + train/practice（成长批次：潜能换技能等级）
+    // + train/learn + train/enable + train/forget + info/skills（§64 技能链）
+    // + admin/addxp（2026-10-19 测试指令）
+    // + combat/flee（逃跑闭环，2026-10-20）
     // （移动方向不在这里 —— 它由房间的 `exits` **派生**，不是内容文件，见 server/engine/room.ts）
-    expect(countOf('command')).toBe(15);
+    expect(countOf('command')).toBe(23); // + train/study（研读）+ train/stop（中断），§75
   });
 
   it('变体展开：继承基对象字段 + 被覆盖字段生效', () => {

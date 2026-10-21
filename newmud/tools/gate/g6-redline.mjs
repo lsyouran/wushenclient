@@ -54,6 +54,7 @@ import {
   installCrashGuard,
   isDir,
   readCode,
+  readText,
   rel,
   report,
   sizeOf,
@@ -143,19 +144,35 @@ const RULES = [
   },
   {
     id: 'R6.11',
-    name: '闸门脚本未安装崩溃守卫（每个 `tools/gate/*.mjs` 必须调一次 `installCrashGuard`）',
+    name: '闸门脚本未安装崩溃守卫（每个 `tools/gate/*.mjs` 入口必须调一次 `installCrashGuard`）',
     // ★ 本规则是 RULES 里**唯一一条"必须命中"型**（`must`），与 R6.8 的 `empty`
     //   同族：判据落在**文件级的存在性**上，而不是"某一行写了什么"。
     //   它守的是 FG-23 的修法自身 —— 漏装守卫的闸门崩溃时仍旧退回退出码 1
     //   ⇒ "崩溃"与"发现违规"在**那个**闸门里又变得不可区分（26 册 §27）。
     //   不加这条的话，"新写一个闸门脚本"就是一个纯靠人记得的窗口。
     //
-    //   范围只认**入口脚本**（`tools/gate/*.mjs`，不含子目录）：`lib.mjs` 是
-    //   守卫的**定义处**、`tools/dev/ts-loader.ts` 之类根本不是闸门。
+    //   ★★ 2026-10-19 收窄：原判据是"`tools/gate/*.mjs` 里除 `lib.mjs` 外都必须装"，
+    //     于是新增一个**公共库**（`docs-index.mjs`）就当场把它判红。两条出路里，
+    //     给规则再加一个文件名例外是**逐案扩白名单**（每加一个库改一次规则），
+    //     而"库不需要装守卫"本来是可判的：**守卫是进程级的 —— 谁决定退出码，
+    //     谁才需要它**。所以判据补一条：文件里**从不调用 `process.exit`** ⇒ 它是库，不是入口。
+    //     这道收窄**不会漏掉闸门**：任何闸门最终都要用 `process.exit` 给出四态之一，
+    //     所以它一定落在"要装守卫"那一侧（`lib.mjs` 仍按文件名排除 —— 它是守卫的
+    //     **定义处**，命中 `must` 是巧合，不是它装了守卫）。
     must: /installCrashGuard\s*\(/,
     dirs: TOOL_DIRS,
-    appliesTo: (relPosix) =>
-      /^tools\/gate\/[^/]+\.mjs$/.test(relPosix) && relPosix !== 'tools/gate/lib.mjs',
+    appliesTo: (relPosix) => {
+      if (!/^tools\/gate\/[^/]+\.mjs$/.test(relPosix)) return false;
+      if (relPosix === 'tools/gate/lib.mjs') return false;
+      // 从不决定退出码 ⇒ 纯库（判据见上；读不到内容时按"入口"处理，宁可误报不漏报）
+      let text = '';
+      try {
+        text = readText(join(ROOT, relPosix));
+      } catch {
+        return true;
+      }
+      return /process\.exit\s*\(/.test(text);
+    },
   },
 ];
 

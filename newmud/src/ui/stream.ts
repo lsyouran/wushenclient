@@ -183,12 +183,11 @@ export function pushChat(ch: string, who: string, text: string): void {
   box.scrollTop = box.scrollHeight;
 }
 
-/** 分隔线（进新房间这类视觉断点） */
-export function pushRule(): void {
-  const node = host();
-  node.appendChild(el('div', 'rule'));
-  trim(node, MAX_LINES);
-}
+// ★ 2026-10-20 §74：`pushRule()`（往消息流插一条分隔线）已删除。
+//   它只在"换房间"一处被调用，而 wushen 的 `Process.room` 两档都**没有**分隔线
+//   （`src/process.js:297-306`：默认清屏、`keep_msg` 档只播一句"你来到了X。"）。
+//   真机观感是"每进一个房间就多一块新日志区，中间还有道横线" —— 那正是这条线
+//   加上下面那句播报一起造成的。要断点就靠那一句播报，别再加一条线。
 
 export function clearStream(): void {
   const node = host();

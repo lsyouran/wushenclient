@@ -89,6 +89,61 @@
 （限流必须在解析前）；★ ws 连 text frame 也交 Buffer ⇒ 靠 `message(data, isBinary)` 区分；
 ★ `hub.forget()` ≠ 关连接（先回调 → `conn.close()` → forget）。未做：ws-server **没有 `'drain'` 出队路径**。
 
+## 读档准入（26 册 §40）
+
+★★ **读档 = 分级**：① 结构性坏 ⇒ **抛**；② 条目级坏 ⇒ 丢 + 记账；②′ 正常过期 ⇒ 丢 + **不**记账；
+③ **`rejected` 非空即读档失败**。★★ `SkillBook.load()` **绕过** `learn()/enable()` ⇒ 准入必须写在**数据入口**。
+
+## 活体与钩子短路（26 册 §41）
+
+★★ **活体 = `Actor.isAlive`**（属性，从 `CommandActor` 上提到 `Actor`）；短路只放 `room.ts#hooked()` **开头**。
+★ `Item` 非 `Actor` ⇒ 类型层就能挡（§53 起 `Item` 也持 `def`，别顺手当活体）。
+
+## 背压两档
+
+★ `MAX_OUTBOUND_QUEUE`(256) **非**运行时判据；`MAX_BUFFERED_BYTES`(1MiB) 运行时够得着；
+超限 ⇒ `close()` + `forget()` + 返 `false`，**不调 `onReject`**。
+
+## 安全 P0 / N4
+
+★★ **P0**：入站 try/catch + `onInternalError`；`--host` + `WS_PATH='/ws'` + `isSameOriginRequest`；`isRoleName` 单源。
+★ **N4**：`MAX_CONNECTIONS_PER_IP` + `hub.admissionRefusal()`。★★ 反代压平 `remoteAddress` ⇒ per-IP 退化成"全体合计"。
+
+## 物品可交互（26 册 §53）
+
+★★ **`Item` 持 `def` + 派生 `interact`**（与 `Npc`/`Room` 同款）：钩子投影成 `InteractHooks`（字段原样搬运）。
+搬运是 `CommandActor` 四原语 `takeItem`/`dropItem`/`spendItem`/`spendMoney`。`on_accept` 是**纯谓词**。
+★ `get`/`drop` 只做**整叠**。
+
+## 战斗（26 册 §54）
+
+① 时钟 = `World.scheduler`；`beginFight` 缺它**抛错**。
+② 命中/躲闪/招架/暴击/伤害全在 `formula.ts`；★★ 躲闪/招架是**线性对抗** `rand*(ds/2)+ds/2 > mz`
+（无加成时 `ds===mz` ⇒ **永远躲不开**）。
+③ 掉落照抄 `create_by_odds`：`odds:0`=必掉、`min`+`max` **覆盖** `count`；有 `drops` 无 `ItemSpawner` ⇒ 抛 `NpcError`。
+④ ★★ **`die()` 幂等判据是 `#dead` 标志**。⑤ 不搞尸体；`relive` **原地满血**，★ 必带 `allow_die:true`。
+
+## 成长闭环（26 册 §56 / 27 册 §13 / 29 册 §29.14）
+
+★★ **`Character.addExp()` 是经验的唯一增加入口**；负数/NaN **抛错**；到顶**不清零**剩余经验。
+★★ **境界（realm）是派生量，不是字段**（26 册 §72 / 27 册 §16）：`min(内功,轻功,招架)` 落在
+`SKILL_FORMULA.realmThresholds` 第几档；`Character.level` 只是 `realm` 的 getter 别名（**别再写回字段**）。
+取 `min` 不取 `max`/平均：取 max ⇒「高境界 + 纸糊血条」。
+★ 循环（境界→因子→上限→三槽→境界）**单调收敛**：环上只有三槽能涨，涨的条件（潜能/老师/打怪）都在环外。
+★ `levelLimit(exp, realm)` 函数体没变，但 `realm` 会涨了 ⇒ 因子不再是常量 10。
+★ 名字表 `REALM_NAMES` / `realmName()` 在 `shared/constants.ts`（越界钳位不抛）；服务端算好放进
+`AttrView.realmName`，**前端不查表**。
+★★ **技能上限单点**：`skillLimit()=levelLimit(exp,realm)` → `SkillBook.#capOf=min(maxLevel,skillLimit)`；
+`Npc.skillLimit()` 覆写 `Infinity`。★ 1000 是**硬顶**（`limitMaxLevel = SKILL_CURVE.refLevel`），
+玩家实际能到几级**只由经验换算**（`levelLimit = min(round(cbrt(exp×境界因子)), 硬顶)`）。
+★★ **基本武学被动曲线 = 幂律凸** `trunc(maxGain*(lv/ref)^e)`，`e∈(1,3)`：`e>1` 才「后期加成更大」，
+`e<3` 才「单位成本递减」。**别写 sqrt**（凹，方向反了 —— §66 已推翻第一版）。属性 `60@1.1` / 派生 `120@1.3`。
+**曲线住 `server/world/skill-curves.ts`**（内容层要 import，G13 D2 只许 `@shared/**` 与 `server/world/**`）。
+★ `practice` 是**一次结算**（wushen `lianxi` 是持续状态，`Actor.state` 未落地）；`capped` 与 `reached` 分开，
+**`capped` 必须先判**；★★ `PracticeResult` 是判别联合（`kind:'done'|'refused'`，`PracticeRefusal` 由它派生）。
+★ 重生走 `world.ts#spawnNpc`（首次摆放与重生**同一条路**），`no_refresh` 不重生。
+★ 真值：**wushen `die()` 一处 `add_exp` 都没有**（"打怪给经验"原作根本没接）。
+
 ## 玩家与登录
 
 `server/player.ts` / `session.ts`：`Player extends Character`，`path` 恒 null。

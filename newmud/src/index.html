@@ -78,10 +78,10 @@
 
   <!-- 小地图：房名右侧「地图」唤起，点格子即走 -->
   <div class="map-panel" id="mapPanel" hidden>
-    <svg id="mapSvg" viewBox="0 0 216 96" aria-label="附近地图"></svg>
+    <svg id="mapSvg" viewBox="0 4 276 34" aria-label="附近地图"></svg>
     <!-- ★ `viewBox` 在这里只是**首帧之前的占位**（让 SVG 有内在比例，不至于塌成 0 高）：
          真值由 `ui/map.ts` 的 `renderMap()` 每次按"画了哪些格子"重算 —— 方向少的房间
-         框就矮（wushen 的 `height`/`t` 也是算出来的），宽度恒为 216 以保住比例。 -->
+         框就矮（wushen 的 `height`/`t` 也是算出来的），宽度恒为 276 以保住比例。 -->
   </div>
 
   <!-- ① 房间区：房名 / 描述 / 出口 / 此处有 -->
@@ -119,6 +119,17 @@
       <span class="lv" id="pFlags"></span>
     </div>
     <span class="tool-item" data-act="look"><span class="glyphicon glyphicon-search tool-icon"></span><span class="tool-text">环顾</span></span>
+    <!-- ★ 「属性」= 服务端 `score`（`world/command/info/score.ts`，别名 `attr`）。
+         wushen 的工具条上就有这一格（`command="score"` · `glyphicon-user` · 「属性」）。
+         此前本仓库**没有入口** —— 指令实现了、前端没键，玩家只能手敲。
+         ★ 它现在发的是 `dialog:score` 帧、开**数据面板**（26 册 §62）：
+           原先"走 notify 打一行文本、面板要等 35-E"的记录已经过期，别再照抄。 -->
+    <span class="tool-item" data-act="score"><span class="glyphicon glyphicon-user tool-icon"></span><span class="tool-text">属性</span></span>
+    <!-- ★ 「技能」= 服务端 `skills`（`world/command/info/skills.ts`，别名 `cha`）。
+         与「属性」同一条理由：指令早就实现了，玩家却只能手敲。
+         输出是 `dialog:skills` 帧 ⇒ 真面板（`src/ui/skills.ts`），不是一行文本。
+         `glyphicon-book` 照 wushen：它的技能面板图标就是 `book`（`skills.js` 的 `Dialog.icon("book")`）。 -->
+    <span class="tool-item" data-act="skills"><span class="glyphicon glyphicon-book tool-icon"></span><span class="tool-text">技能</span></span>
     <span class="tool-item" data-act="cmd"><span class="glyphicon glyphicon-edit tool-icon"></span><span class="tool-text">指令</span></span>
     <span class="tool-item" data-act="chat"><span class="glyphicon glyphicon-volume-down tool-icon"></span><span class="tool-text">聊天</span><span class="tag" id="chatTag" hidden>0</span></span>
   </div>
@@ -174,12 +185,21 @@
   <!-- 面板（属性 / 背包 / 武学 / 任务 / 设置 …）—— wushen 的 .dialog -->
   <div class="dialog" id="dialog" hidden>
     <div class="dialog-header">
-      <span class="dialog-icon glyphicon glyphicon-map-marker"></span>
+      <!-- ★ 图标不能是 `glyphicon-map-marker`：那是**小地图**的图标（`#mapBtn` 用的同一个）。
+           面板里装的是「店小二」「丹药」这类东西的详情，顶着个地图针既不对，
+           又让玩家以为这块跟地图有关。wushen 的每个面板有自己的图标
+           （`dialog/base.js:118` 的 `icon(css)`），本项目的面板是通用容器、
+           服务端不发类型，所以用一个中性的"面板"图标。 -->
+      <span class="dialog-icon glyphicon glyphicon-th-large" id="dlgIcon"></span>
       <span class="dialog-title" id="dlgTitle">面 板</span>
       <span class="dialog-close glyphicon glyphicon-remove-circle" id="dlgClose" role="button" tabindex="0"
             aria-label="关闭"></span>
     </div>
     <div class="dialog-content" id="dlgBody"></div>
+    <!-- 下带：wushen `.dialog > .dialog-footer`（命令按钮右浮在 `#222` 带上）。
+         它与 `.dialog-content` **并列**，不是塞在正文里 —— 正文滚动时按钮不跟着滚。
+         内容由 `ui/panel.ts` 的 `render()` 灌入（`#dlgFoot`）；空着时 CSS 会整条隐藏。 -->
+    <div class="dialog-footer" id="dlgFoot"></div>
   </div>
 
   <!-- 服务端弹出的确认 / 提示（wushen 的 .warn-dialog）-->

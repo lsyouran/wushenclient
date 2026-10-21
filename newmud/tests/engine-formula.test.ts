@@ -6,12 +6,11 @@
  * 而不是等到"同一个玩家在不同路径下躲闪值不同"才被发现（wushen #20）。
  *
  * 参数一律从 COMBAT_FORMULA 取，测试里也一样（不硬编码魔数）。
- * ★ prop 键一律走 `PROP` 别名表（`PROP.attack === 'gj'`）—— 与 `formula.ts` 同一套
+ * ★ prop 键一律走 `PROP` 别名表（`'attack' === 'attack'`）—— 与 `formula.ts` 同一套
  *   可读名；数据层仍是 wushen 原键（见 `docs/29` §29.10 的对照表）。
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { PROP } from '@shared/constants.js';
 import {
   ATTR_KEYS,
   COMBAT_FORMULA,
@@ -68,8 +67,8 @@ describe('engine/formula · computeDerived 基线（无任何 prop）', () => {
 describe('engine/formula · prop 真的进公式', () => {
   it('★ 内容层第一个 prop（暴虐丹 攻击/攻速%）确实生效', () => {
     const p = createPropHolder();
-    setProp(p, PROP.attack, 20); // 攻击 +20（wushen 'gj'）
-    setProp(p, PROP.attackSpeedPer, -20); // 出手变慢（wushen 'gjsd_per'）
+    setProp(p, 'attack', 20); // 攻击 +20（wushen 'attack'）
+    setProp(p, 'attack_speed_per', -20); // 出手变慢（wushen 'attack_speed_per'）
 
     const d = computeDerived(BASE, p);
     expect(d.attack).toBe(40); // 20 + 20
@@ -79,21 +78,21 @@ describe('engine/formula · prop 真的进公式', () => {
 
   it('属性换算加成走 propScaleDivisor（臂力加成 × str/10）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.strengthBonus, 10); // 10 * (str/10) = 10 * 2 = 20
+    setProp(p, 'str', 10); // 10 * (str/10) = 10 * 2 = 20
     expect(computeDerived(BASE, p).attack).toBe(40);
   });
 
   it('气血加成与气血百分比都生效（且不是同一件事）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.maxHpBonus, 100); // 内层 100 + 100 = 200
+    setProp(p, 'max_hp', 100); // 内层 100 + 100 = 200
     expect(computeDerived(BASE, p).maxHp).toBe(300); // 100 + 200
-    setProp(p, PROP.hpPer, 10); // 200 → 220
+    setProp(p, 'hp_per', 10); // 200 → 220
     expect(computeDerived(BASE, p).maxHp).toBe(320);
   });
 
   it('★ 气血上限的根骨加成项**不除** propScaleDivisor —— 照抄 wushen（29 册 §29.4 偏离① 已闭合）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.constitutionBonus, 10); // 根骨**加成** 10；先天 con 仍是 20（两者是两个量，别混）
+    setProp(p, 'con', 10); // 根骨**加成** 10；先天 con 仍是 20（两者是两个量，别混）
     // 照抄 wushen `world/extends/char/user.js:3`：`query_prop("con") * this.con`（**不除 10**）
     // ⇒ int(20*5 + (100*1 + 0 + 10*20)) = 100 + 300 = 400
     expect(computeDerived(BASE, p).maxHp).toBe(400);
@@ -103,7 +102,7 @@ describe('engine/formula · prop 真的进公式', () => {
 
   it('★★ 同一个 prop(con) 在 maxHp 与 defense 里算法**不同** —— 原作如此，别顺手统一（29 册 §29.4）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.constitutionBonus, 10);
+    setProp(p, 'con', 10);
     const d = computeDerived(BASE, p);
     // wushen `world/extends/char/user.js` 同一次 recount 里，同一个 prop("con") 被算了两种：
     //   :3  max_hp → prop("con") * this.con       = 10 * 20     = 200（**不除**）
@@ -125,8 +124,8 @@ describe('engine/formula · prop 真的进公式', () => {
 
   it('伤害减免 / 忽视防御 是透传量，原样带出', () => {
     const p = createPropHolder();
-    setProp(p, PROP.damageReductionPer, 15);
-    setProp(p, PROP.ignoreDefensePer, -5);
+    setProp(p, 'diff_damage_per', 15);
+    setProp(p, 'diff_defense_per', -5);
     const d = computeDerived(BASE, p);
     expect(d.damageReductionPer).toBe(15);
     expect(d.ignoreDefensePer).toBe(-5);
@@ -142,8 +141,8 @@ describe('engine/formula · 攻击 attack 的口径（照抄 wushen：先天臂�
 
   it('攻击百分比只放大"装备/技能那部分"，**不**放大先天臂力', () => {
     const p = createPropHolder();
-    setProp(p, PROP.attack, 10); // 装备攻击 +10
-    setProp(p, PROP.attackPer, 50); // +50%
+    setProp(p, 'attack', 10); // 装备攻击 +10
+    setProp(p, 'attack_per', 50); // +50%
     // 照 wushen：str + (10 + 0) * 1.5 = 20 + 15 = 35
     // 若误把 str 也乘进百分比：(20 + 10) * 1.5 = 45
     expect(computeDerived(BASE, p).attack).toBe(35);
@@ -152,22 +151,22 @@ describe('engine/formula · 攻击 attack 的口径（照抄 wushen：先天臂�
 
   it('纯先天（无任何 prop）时，攻击百分比对 attack **完全无效**（str 不在百分比内）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.attackPer, 100);
+    setProp(p, 'attack_per', 100);
     // 照 wushen：str + (0) * 2 = 20；若 str 在内则是 20 * 2 = 40
     expect(computeDerived(BASE, p).attack).toBe(20);
   });
 
   it('属性换算项（臂力加成 × str/10）**在**百分比内 —— 它是"装备那部分"，与攻击加成同类', () => {
     const p = createPropHolder();
-    setProp(p, PROP.strengthBonus, 10); // 10 * (20/10) = 20
-    setProp(p, PROP.attackPer, 50);
+    setProp(p, 'str', 10); // 10 * (20/10) = 20
+    setProp(p, 'attack_per', 50);
     // 照 wushen：20 + (0 + 20) * 1.5 = 20 + 30 = 50
     expect(computeDerived(BASE, p).attack).toBe(50);
   });
 
   it('★ 对照组：防御 defense 的先天项**在**百分比内（证明"只有 attack 在外"是有意为之，别顺手统一）', () => {
     const p = createPropHolder();
-    setProp(p, PROP.defensePer, 50);
+    setProp(p, 'defense_per', 50);
     // defense 的先天内层 = (str + con)/10 = 4；照 wushen 它**在**百分比内 ⇒ int(4 * 1.5) = 6
     // （若"统一"成 attack 那样把先天项提到外面，会得到 int(4) = 4）
     expect(computeDerived(BASE, p).defense).toBe(6);
@@ -178,13 +177,13 @@ describe('engine/formula · 攻击 attack 的口径（照抄 wushen：先天臂�
 describe('engine/formula · 攻击间隔有下限（防"攻速堆到 0 死循环"）', () => {
   it('攻速加成把间隔压到低于基准 → 取下限', () => {
     const p = createPropHolder();
-    setProp(p, PROP.attackSpeed, 999_999); // 4000 - 999999 < 0
+    setProp(p, 'attack_speed', 999_999); // 4000 - 999999 < 0
     expect(computeDerived(BASE, p).attackSpeed).toBe(COMBAT_FORMULA.attackIntervalFloorMs);
   });
 
   it('攻速百分比巨大正修正 → 仍不低于下限', () => {
     const p = createPropHolder();
-    setProp(p, PROP.attackSpeedPer, 1_000_000); // 把间隔压成负数
+    setProp(p, 'attack_speed_per', 1_000_000); // 把间隔压成负数
     expect(computeDerived(BASE, p).attackSpeed).toBe(COMBAT_FORMULA.attackIntervalFloorMs);
   });
 });
@@ -224,8 +223,8 @@ describe('engine/formula · damageAfterDefense（递减减伤）', () => {
 describe('engine/formula · computeAttrBreakdowns（属性三档：先天 / 后天 / 合计）', () => {
   it('★ 合计 === 先天 + 后天加成，且与 effectiveAttr 同值（只有一个口径）', () => {
     const props = createPropHolder();
-    setProp(props, PROP.strengthBonus, 5);
-    setProp(props, PROP.constitutionBonus, 3);
+    setProp(props, 'str', 5);
+    setProp(props, 'con', 3);
     for (const r of computeAttrBreakdowns(BASE, props)) {
       expect(r.total).toBe(r.innate + r.bonus);
       expect(r.total).toBe(effectiveAttr(BASE, props, r.key));
@@ -240,7 +239,7 @@ describe('engine/formula · computeAttrBreakdowns（属性三档：先天 / 后�
       [0, 20],
       [0, 20],
     ]);
-    setProp(props, PROP.intelligenceBonus, 7);
+    setProp(props, 'int', 7);
     expect(computeAttrBreakdowns(BASE, props)[3]).toEqual({
       key: 'int',
       innate: 20,

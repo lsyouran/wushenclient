@@ -35,6 +35,30 @@ export interface RoomView {
   commands: readonly CmdItem[];
 }
 
+/**
+ * 一个冷却条目（`dispfm` / `disobj` / `changepfm` / `clearDistime` 四包共用）。
+ *
+ * ★ `endsAt` 是**渲染进度用的到期时间戳**，不在协议里 —— 协议只给「还剩多久」
+ *   （`rtime`）与「总共有多久」（`time`）两个**时长**，而画一条会走的进度条需要
+ *   一个**时间点**：收到帧的那一刻记下 `Date.now() + 剩余`，之后每拍用「当前 − 到期」
+ *   算比例。
+ *   ★ 为什么用时间戳而不是照 wushen 那样每拍递减一个固定值
+ *     （`combat.js:223` 的 `ani_time -= PFM_INTERVAL`）：递减法把**定时器当钟表用**，
+ *     后台标签页被节流、或某一拍晚到了，进度就会走慢、比真实冷却晚退。
+ *     时间戳法只依赖墙钟，节流之后回来一拍就跳到正确位置。
+ */
+export interface CooldownEntry {
+  id: string;
+  /** 公共冷却（毫秒）——会把所有剩得比它少的招式一起拉到这个刻度 */
+  rtime?: number;
+  /** 冷却总时长（毫秒） */
+  time?: number;
+  /** 剩余次数 */
+  count?: number;
+  /** ★ 到期时间戳（`Date.now()` 基准）；只在 `time`/`rtime` > 0 时写入 */
+  endsAt?: number;
+}
+
 export interface AppState {
   connected: boolean;
   /** 登录面板里填的角色标识；登录成功后也是它 */
@@ -54,8 +78,17 @@ export interface AppState {
   statuses: Array<{ id: string; name?: string; duration?: number }>;
   /** 战斗标记（`combat` 帧） */
   fighting: boolean;
-  /** 冷却显示（dispfm / disobj） */
-  cooldowns: Array<{ id: string; rtime?: number; time?: number; count?: number }>;
+  /**
+   * 战斗招式（`perform` 帧给的命令）。
+   *
+   * ★ 与 `cooldowns` 分开存（2026-10-20）：`#pfms` 这一行现在有**两个来源**
+   *   —— 战斗中的固定动作（`逃跑`）与服务端给的招式。原先 `renderPfms(cmds)`
+   *   直接拿这一次帧的参数整行重画，于是"战斗开始"时没有帧可用，
+   *   逃跑按钮就永远出不来。把招式列表存进状态，重画才不依赖某一次帧。
+   */
+  pfms: readonly CmdItem[];
+  /** 冷却显示（dispfm / disobj / changepfm / clearDistime） */
+  cooldowns: CooldownEntry[];
 }
 
 const ROLE_KEY = 'mud.roleId';
@@ -72,6 +105,7 @@ export const state: AppState = {
   cmds: [],
   statuses: [],
   fighting: false,
+  pfms: [],
   cooldowns: [],
 };
 
@@ -89,6 +123,7 @@ export function resetWorldFacts(): void {
   state.cmds = [];
   state.statuses = [];
   state.fighting = false;
+  state.pfms = [];
   state.cooldowns = [];
   state.loggedIn = false;
 }

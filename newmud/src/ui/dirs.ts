@@ -26,23 +26,26 @@ import { DIRECTION_LABELS, normalizeDirection } from '../../shared/constants.js'
 export { DIRECTION_LABELS };
 
 /**
- * 九宫格的 8 个外围格位（**坐标系** 216×96：中心 108,48 · 格子 36×18 刚好不碰）。
+ * 九宫格的 8 个外围格位（中心坐标）。
  *
- * ★ 216×96 只是坐标系的取值，**不是画出来的框**：`map.ts` 每次按"实际画了哪些格子"
- *   算 `viewBox`（方向少的房间框就矮，照 wushen 的 `height`/`t`）。所以这里改坐标
- *   只影响格子间距，不会把地图撑大或缩小。
+ * ★ 间距 = wushen `map.js#CreateExitsMap` 的 `unitX=70` / `unitY=30` **×1.3**
+ *   （见 `map.ts#CANVAS_W` 的放大说明）：列距 **91**、行距 **39**，格子 78×26 ——
+ *   斜角格的内角到中心格的角正好空 13 单位，连接线画的就是这段空隙。
+ *
+ * ★ 坐标系宽 276：中心 138，东西格中心 ±91，格宽 78 ⇒ 两侧各剩 8 —— 刚好。
+ *   高度只是取值（`map.ts` 按"实际画了哪些格子"收放框的高度）。
  */
 export type Slot = 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW';
 
 export const SLOT_POS: Readonly<Record<Slot, readonly [number, number]>> = {
-  N: [108, 18],
-  S: [108, 78],
-  E: [172, 48],
-  W: [44, 48],
-  NE: [156, 25.5],
-  NW: [60, 25.5],
-  SE: [156, 70.5],
-  SW: [60, 70.5],
+  N: [138, 25],
+  S: [138, 103],
+  E: [229, 64],
+  W: [47, 64],
+  NE: [229, 25],
+  NW: [47, 25],
+  SE: [229, 103],
+  SW: [47, 103],
 };
 
 /**

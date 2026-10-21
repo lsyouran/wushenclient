@@ -19,7 +19,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { asWorldId } from '../shared/ids.js';
-import { MAX_LEVEL, PROP, SKILL_TYPES } from '../shared/constants.js';
+import { MAX_LEVEL, SKILL_TYPES } from '../shared/constants.js';
 import type { EnableSlot } from '../shared/constants.js';
 import { RecordingOutput } from '../server/engine/character.js';
 import { Npc } from '../server/engine/npc.js';
@@ -62,7 +62,7 @@ const SKILL_DEFS: ReadonlyArray<{ id: string; def: SkillDef }> = [
       slot: 'sword',
       grade: 0,
       max_level: 100,
-      passiveProp: (lv) => ({ prop: { mz: lv } }),
+      passiveProp: (lv) => ({ prop: { hit: lv } }),
       // ★ enable 写在基本技能的绝招上：它的 `enabled` 恒为 null，靠 `slot` 占槽。
       //   如果槽判定写成 `st.enabled === pfm.enable`，这条就永远放不出来。
       pfm: { lian: { name: '连击', enable: 'sword', mp: 5, cdMs: 3_000 } },
@@ -75,7 +75,7 @@ const SKILL_DEFS: ReadonlyArray<{ id: string; def: SkillDef }> = [
       type: SKILL_TYPES.SKILL,
       grade: 1,
       can_enables: ['sword'],
-      enableProp: (lv) => ({ sword: { prop: { gj: lv } } }),
+      enableProp: (lv) => ({ sword: { prop: { attack: lv } } }),
       pfm: {
         slash: { name: '横斩', enable: 'sword', mp: 10, releaseMs: 1_500, cdMs: 5_000 },
         free: { name: '随手一击', mp: (lv) => lv },
@@ -89,7 +89,7 @@ const SKILL_DEFS: ReadonlyArray<{ id: string; def: SkillDef }> = [
       type: SKILL_TYPES.SKILL,
       grade: 1,
       can_enables: ['sword', 'blade'],
-      enableProp: (lv) => ({ sword: { prop: { gj: lv * 2 } }, blade: { prop: { gj: lv * 3 } } }),
+      enableProp: (lv) => ({ sword: { prop: { attack: lv * 2 } }, blade: { prop: { attack: lv * 3 } } }),
     },
   },
   {
@@ -99,8 +99,8 @@ const SKILL_DEFS: ReadonlyArray<{ id: string; def: SkillDef }> = [
       type: SKILL_TYPES.SKILL,
       grade: 1,
       can_enables: ['sword'],
-      passiveProp: (lv) => ({ prop: { mz: lv } }),
-      enableProp: (lv) => ({ sword: { prop: { gj: lv } } }),
+      passiveProp: (lv) => ({ prop: { hit: lv } }),
+      enableProp: (lv) => ({ sword: { prop: { attack: lv } } }),
     },
   },
   {
@@ -241,7 +241,7 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
     npc.skills.enable('sword', 'wd/a');
 
     // 关键断言 ①：账目与实际**一致**（不多算也不少算）
-    expect(coreOf(npc)).toEqual({ con: 3, gj: 10 });
+    expect(coreOf(npc)).toEqual({ con: 3, attack: 10 });
 
     // 关键断言 ②：重算幂等 —— wushen 的三角每重算一次就会多加一份，这里必须纹丝不动
     const before = snapshotProps(npc);
@@ -254,9 +254,9 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
   it('② 档（启用后生效）：只有被装配的那个槽才计入', () => {
     const npc = makeNpc();
     npc.skills.learn('wd/both', 10);
-    expect(coreOf(npc)).toEqual({ mz: 10 }); // ① 档已生效，② 档还没有
+    expect(coreOf(npc)).toEqual({ hit: 10 }); // ① 档已生效，② 档还没有
     npc.skills.enable('sword', 'wd/both');
-    expect(coreOf(npc)).toEqual({ mz: 10, gj: 10 }); // ② 档上来
+    expect(coreOf(npc)).toEqual({ hit: 10, attack: 10 }); // ② 档上来
   });
 
   it('disable 之后 ② 档归零、① 档仍在（三档的边界）', () => {
@@ -264,7 +264,7 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
     npc.skills.learn('wd/both', 10);
     npc.skills.enable('sword', 'wd/both');
     expect(npc.skills.disable('sword')).toBe(true);
-    expect(coreOf(npc)).toEqual({ mz: 10 });
+    expect(coreOf(npc)).toEqual({ hit: 10 });
     expect(npc.skills.disable('sword')).toBe(false); // 已经没装了
   });
 
@@ -273,10 +273,10 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
     npc.skills.learn('wd/a', 10);
     npc.skills.learn('wd/b', 10);
     npc.skills.enable('sword', 'wd/a');
-    expect(getProp(npc, 'gj')).toBe(10);
+    expect(getProp(npc, 'attack')).toBe(10);
 
     npc.skills.enable('sword', 'wd/b');
-    expect(getProp(npc, 'gj')).toBe(20); // = 10*2，而不是 10 + 20
+    expect(getProp(npc, 'attack')).toBe(20); // = 10*2，而不是 10 + 20
     expect(npc.skills.enabledOf('sword')).toBe('wd/b');
     expect(npc.skills.entryOf('wd/a')?.enabled).toBeNull(); // 甲被卸下
   });
@@ -285,9 +285,9 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
     const npc = makeNpc();
     npc.skills.learn('wd/b', 10);
     npc.skills.enable('sword', 'wd/b');
-    expect(getProp(npc, 'gj')).toBe(20);
+    expect(getProp(npc, 'attack')).toBe(20);
     npc.skills.enable('blade', 'wd/b');
-    expect(getProp(npc, 'gj')).toBe(30); // 10*3
+    expect(getProp(npc, 'attack')).toBe(30); // 10*3
     expect(npc.skills.enabledOf('sword')).toBeUndefined();
     expect(npc.skills.entryOf('wd/b')?.enabled).toBe('blade');
   });
@@ -296,9 +296,9 @@ describe('engine/skill · 三档属性与记账式重算（★ docs/27 D2）', (
     const npc = makeNpc();
     npc.skills.learn('wd/both', 10);
     npc.skills.enable('sword', 'wd/both');
-    expect(coreOf(npc)).toEqual({ mz: 10, gj: 10 });
+    expect(coreOf(npc)).toEqual({ hit: 10, attack: 10 });
     npc.skills.setLevel('wd/both', 20);
-    expect(coreOf(npc)).toEqual({ mz: 20, gj: 20 });
+    expect(coreOf(npc)).toEqual({ hit: 20, attack: 20 });
   });
 
   it('遗忘 → 属性全清（含 ② 档，且槽被腾空）', () => {
@@ -347,7 +347,7 @@ describe('engine/skill · 装配（★ docs/27 D1 闭集 + 「被拒不损害既
     npc.skills.enable('sword', 'wd/a');
     expect(npc.skills.enable('sword', 'wd/deny')).toBe(false);
     expect(npc.skills.enabledOf('sword')).toBe('wd/a');
-    expect(getProp(npc, 'gj')).toBe(10);
+    expect(getProp(npc, 'attack')).toBe(10);
   });
 
   it('★ 抛错型否决同样不损害既有装配（校验在卸旧之前）', () => {
@@ -357,7 +357,7 @@ describe('engine/skill · 装配（★ docs/27 D1 闭集 + 「被拒不损害既
     npc.skills.enable('sword', 'wd/a');
     expect(() => npc.skills.enable('sword', 'wd/know')).toThrow();
     expect(npc.skills.enabledOf('sword')).toBe('wd/a');
-    expect(getProp(npc, 'gj')).toBe(10);
+    expect(getProp(npc, 'attack')).toBe(10);
   });
 
   it('重复装同一个 → 幂等返回 true，不重复记账', () => {
@@ -365,7 +365,7 @@ describe('engine/skill · 装配（★ docs/27 D1 闭集 + 「被拒不损害既
     npc.skills.learn('wd/a', 10);
     npc.skills.enable('sword', 'wd/a');
     expect(npc.skills.enable('sword', 'wd/a')).toBe(true);
-    expect(getProp(npc, 'gj')).toBe(10);
+    expect(getProp(npc, 'attack')).toBe(10);
   });
 
   it('非法槽名（绕过类型）→ 抛错', () => {
@@ -491,28 +491,33 @@ describe('engine/skill · 经验 / 升级 / 进阶（数值全部走 SKILL_FORMU
 });
 
 describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switch）', () => {
-  it('★ 条件不满足 → 拒绝 + 提示，且**不写入**技能表（wushen 的 notify_fail）', () => {
-    const out = new RecordingOutput();
-    const npc = makeNpc(out);
-    expect(npc.skills.learn('wd/gated')).toBe(false);
+  // ★★ §64：`learn()` 不再自己 `notify`，改为返回**判别联合**（结构在引擎、文案在指令层）。
+  //   于是断言从"输出里有某句话"变成"原因与门槛数字都对" —— 后者更强：
+  //   文案可以改口吻，门槛值不能漂。
+
+  it('★ 条件不满足 → 拒绝，且**不写入**技能表（wushen 的 notify_fail）', () => {
+    const npc = makeNpc();
+    const r = npc.skills.learn('wd/gated');
+    expect(r).toMatchObject({ kind: 'refused', reason: 'slot', slot: 'sword', need: 30 });
     expect(npc.skills.has('wd/gated')).toBe(false);
-    expect(out.messages.join('\n')).toContain('无法学习');
     expect(coreOf(npc)).toEqual({}); // 拒绝的学习不该留下任何副作用
   });
 
   it('条件满足 → 学会', () => {
     const npc = makeNpc();
     npc.skills.learn('base/sword', 30); // 占 sword 槽，等级 30
-    expect(npc.skills.learn('wd/gated')).toBe(true);
+    expect(npc.skills.learn('wd/gated')).toMatchObject({ kind: 'learned', id: 'wd/gated' });
     expect(npc.skills.has('wd/gated')).toBe(true);
   });
 
-  it('重复学同一个 → 拒绝并提示"已经学会"', () => {
-    const out = new RecordingOutput();
-    const npc = makeNpc(out);
+  it('重复学同一个 → 拒绝（`already`，不重复建档）', () => {
+    const npc = makeNpc();
+    expect(npc.skills.learn('wd/a')).toMatchObject({ kind: 'learned' });
+    expect(npc.skills.learn('wd/a')).toMatchObject({ kind: 'refused', reason: 'already', name: '甲剑法' });
+    // ★ 副作用对照：等级没被重置回 1（"拒绝"不能变成"重置"）
+    npc.skills.setLevel('wd/a', 7);
     npc.skills.learn('wd/a');
-    expect(npc.skills.learn('wd/a')).toBe(false);
-    expect(out.messages.join('\n')).toContain('已经学会');
+    expect(npc.skills.levelOf('wd/a')).toBe(7);
   });
 
   it('`on_learn` 返回 false → 拒绝（钩子也是否决点）', () => {
@@ -526,13 +531,14 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
       def: { name: 'T3', desc: 'd' },
       skillRegistry: reg,
     });
-    expect(npc.skills.learn('x/y')).toBe(false);
+    expect(npc.skills.learn('x/y')).toMatchObject({ kind: 'refused', reason: 'hook' });
     expect(npc.skills.has('x/y')).toBe(false);
   });
 
-  it('技能不存在 → 抛错（不是静默 false）', () => {
+  it('技能不存在 → 拒绝 `unknown`（不抛：玩家敲错名字是很正常的事）', () => {
     const npc = makeNpc();
-    expect(() => npc.skills.learn('no/such')).toThrow(SkillError);
+    expect(npc.skills.learn('no/such')).toMatchObject({ kind: 'refused', reason: 'unknown' });
+    // ★ 对照：`setLevel` 是**调用方写错**（GM / 存档 / NPC 初始化），仍然抛
     expect(() => npc.skills.setLevel('no/such', 1)).toThrow(SkillError);
   });
 
@@ -541,7 +547,7 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
       { id: 'c/innate', def: { name: '属性', learnCondition: { minAttr: { int: 999 } } } },
       { id: 'c/mp', def: { name: '内力', learnCondition: { minMaxMp: 99_999 } } },
       { id: 'c/gender', def: { name: '性别', learnCondition: { gender: 1 } } },
-      { id: 'c/prop', def: { name: '加成', learnCondition: { minAttr: { gj: 999 } } } },
+      { id: 'c/prop', def: { name: '加成', learnCondition: { minAttr: { attack: 999 } } } },
     ];
     for (const c of cases) {
       const owner = new Npc({
@@ -551,7 +557,7 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
         def: { name: 'T4', desc: 'd' },
         skillRegistry: new SkillRegistry([{ id: c.id, def: c.def }]),
       });
-      expect(owner.skills.learn(c.id), `${c.id} 的条件应当拦住`).toBe(false);
+      expect(owner.skills.learn(c.id).kind, `${c.id} 的条件应当拦住`).toBe('refused');
       expect(owner.skills.has(c.id)).toBe(false);
     }
 
@@ -562,11 +568,11 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
       name: 'T4',
       def: { name: 'T4', desc: 'd' },
       skillRegistry: new SkillRegistry([
-        { id: 'c/prop', def: { name: '加成', learnCondition: { minAttr: { gj: 10 } } } },
+        { id: 'c/prop', def: { name: '加成', learnCondition: { minAttr: { attack: 10 } } } },
       ]),
     });
-    setProp(ok, 'gj', 10);
-    expect(ok.skills.learn('c/prop')).toBe(true);
+    setProp(ok, 'attack', 10);
+    expect(ok.skills.learn('c/prop').kind).toBe('learned');
   });
 
   /**
@@ -582,7 +588,7 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
    *   ⇒「先天算不算」与「加成算不算」各有一条独立断言，不靠模糊措辞。
    */
   it('★★ 属性门槛读有效属性（先天 + 加成），与 wushen 同义（26 册 §37）', () => {
-    const STR = PROP.strengthBonus; // 'str'（臂力**加成**键）
+    const STR = 'str'; // 'str'（臂力**加成**键）
     const mk = (need: number): { npc: Npc; out: RecordingOutput } => {
       const out = new RecordingOutput();
       const npc = new Npc({
@@ -603,17 +609,21 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
     const a = mk(20);
     expect(getProp(a.npc, STR)).toBe(0); // 加成确实是 0
     expect(a.npc.str).toBe(20); // 有效臂力 = 先天 20（`SkillActor.str` 就是有效值）
-    expect(a.npc.skills.learn('e/str')).toBe(true);
+    expect(a.npc.skills.learn('e/str').kind).toBe('learned');
 
-    // ② 阈值 25：先天 20 不够 ⇒ 拦；且文案用**中文名**（不是拼音键 `str`，照 wushen :235）
+    // ② 阈值 25：先天 20 不够 ⇒ 拦，且原因里带着**门槛键与数字**（文案在指令层）
     const b = mk(25);
-    expect(b.npc.skills.learn('e/str')).toBe(false);
-    expect(b.out.messages.at(-1)).toBe('你的臂力不够 25，无法学习臂力功。');
+    expect(b.npc.skills.learn('e/str')).toMatchObject({
+      kind: 'refused',
+      reason: 'attr',
+      key: STR,
+      need: 25,
+    });
 
     // ③ 补 5 点**加成** ⇒ 有效 25 ⇒ 放行（"加成也计入"独立成立）
     setProp(b.npc, STR, 5);
     expect(b.npc.str).toBe(25);
-    expect(b.npc.skills.learn('e/str')).toBe(true);
+    expect(b.npc.skills.learn('e/str').kind).toBe('learned');
   });
 
   /**
@@ -652,28 +662,21 @@ describe('engine/skill · 学习条件（声明式，取代 wushen 的 key switc
     const none = mk(0);
     expect([male.npc.gender, female.npc.gender, none.npc.gender]).toEqual([1, 2, 0]);
 
-    expect(male.npc.skills.learn('t/m')).toBe(true);
-    expect(male.npc.skills.learn('t/f')).toBe(false);
-    expect(male.npc.skills.learn('t/n')).toBe(false);
+    expect(male.npc.skills.learn('t/m').kind).toBe('learned');
+    expect(male.npc.skills.learn('t/f')).toMatchObject({ kind: 'refused', reason: 'gender', gender: 2 });
+    expect(male.npc.skills.learn('t/n')).toMatchObject({ kind: 'refused', reason: 'gender', gender: 0 });
 
-    expect(female.npc.skills.learn('t/f')).toBe(true);
-    expect(female.npc.skills.learn('t/m')).toBe(false);
+    expect(female.npc.skills.learn('t/f').kind).toBe('learned');
+    expect(female.npc.skills.learn('t/m')).toMatchObject({ kind: 'refused', reason: 'gender', gender: 1 });
 
-    expect(none.npc.skills.learn('t/n')).toBe(true);
-    expect(none.npc.skills.learn('t/m')).toBe(false);
+    expect(none.npc.skills.learn('t/n').kind).toBe('learned');
+    expect(none.npc.skills.learn('t/m')).toMatchObject({ kind: 'refused', reason: 'gender', gender: 1 });
 
-    // 拒绝语说的是**要求的那一档**（wushen `skill.js:239` 的"男性/女性/无性"口径），
-    // 不是一句笼统的"不能学" —— 否则上面那些 false 分不出三档。
-    //
-    // ★ 判据必须**锚定句首**，不能用 `toContain('无性')`：技能名就叫「无性功」，
-    //   于是"女性才能学习无性功。"里也含「无性」—— 那是一条自我满足的断言
-    //   （实测：把 `GENDER_LABELS[0]` 篡改成「女性」它照样绿，FG-11 同族）。
-    const lastLine = (out: RecordingOutput): string => out.messages.at(-1) ?? '';
-    expect(lastLine(female.out)).toMatch(/^男性才能学习/); // 女身学男功 → 说的是"男性"
-    expect(lastLine(none.out)).toMatch(/^男性才能学习/); // 无性学男功
-    const maleAgain = mk(1);
-    maleAgain.npc.skills.learn('t/n'); // 男身学无性功 → 说的是"无性"
-    expect(lastLine(maleAgain.out)).toMatch(/^无性才能学习/);
+    // ★★ 判据落在**要求的那一档**上（`gender` 字段），不是"输出里有某句话"：
+    //   拒绝语由指令层生成，措辞可以改；"女性才能学男功时要求的是 1（男）"不能改。
+    //   这把 T18 原本要守的三档语义钉得更死 —— 原先靠 `^男性才能学习` 锚句首来避免
+    //   自我满足（技能名就叫「无性功」），现在连锚点都不需要了。
+    expect(none.npc.skills.learn('t/f')).toMatchObject({ reason: 'gender', gender: 2 });
   });
 });
 
@@ -802,7 +805,7 @@ describe('engine/skill · 存档边界（snapshot / load）', () => {
     npc.skills.learn('wd/both', 10);
     npc.skills.enable('sword', 'wd/both');
     npc.skills.load([{ id: 'wd/both', level: 20, exp: 0, enabled: 'sword' }]);
-    expect(coreOf(npc)).toEqual({ mz: 20, gj: 20 }); // 不是 30/30
+    expect(coreOf(npc)).toEqual({ hit: 20, attack: 20 }); // 不是 30/30
   });
 
   it('未知技能 id 被丢弃并记账，不让一个坏 id 污染整本簿', () => {
@@ -833,7 +836,7 @@ describe('engine/skill · 存档边界（snapshot / load）', () => {
     // ★ 判据落在**两表一致**上，而不是"某个数是多少"
     expect(npc.skills.enabledOf('sword')).toBe('wd/a');
     expect(npc.skills.entryOf('wd/a')?.enabled).toBe('sword');
-    expect(coreOf(npc)).toEqual({ gj: 10 }); // ② 档按保留下来的那条算
+    expect(coreOf(npc)).toEqual({ attack: 10 }); // ② 档按保留下来的那条算
   });
 
   it('load 时非法槽名被降级成"未装配"（脏存档不炸整本簿）', () => {
@@ -971,7 +974,7 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     expect(npc.skills.levelOf('wd/a')).toBe(50);
     expect(npc.skills.enabledOf('sword')).toBe('wd/a');
     expect(npc.skills.levelOf('wd/gated')).toBe(7);
-    expect(coreOf(npc)).toEqual({ con: 3, gj: 50 });
+    expect(coreOf(npc)).toEqual({ con: 3, attack: 50 });
   });
 
   it('★ forceRad 从**占 force 槽的模板**派生（与玩家同一把尺子，D9）', () => {
@@ -1007,7 +1010,7 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     expect(npc.skills.enabledOf('sword')).toBeUndefined();
     expect(npc.skills.enabledOf('blade')).toBe('wd/b');
     expect(npc.skills.entryOf('wd/b')?.enabled).toBe('blade');
-    expect(getProp(npc, 'gj')).toBe(30); // 只按 blade 算一次（10*3），不是 20+30
+    expect(getProp(npc, 'attack')).toBe(30); // 只按 blade 算一次（10*3），不是 20+30
   });
 
   it('★ S7：同一技能写两次且**后一条不装配** → 旧槽必须腾空（不留挂着的幽灵）', () => {
@@ -1020,7 +1023,7 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     ]);
     expect(npc.skills.enabledOf('sword')).toBeUndefined();
     expect(npc.skills.entryOf('wd/a')?.enabled).toBeNull();
-    expect(getProp(npc, 'gj')).toBe(0);
+    expect(getProp(npc, 'attack')).toBe(0);
   });
 
   it('★★ def 里**两条不同技能**抢同一槽 → 先者被挤下（与 enable()/load() 同一口径）', () => {
@@ -1038,7 +1041,7 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     expect(npc.skills.enabledOf('sword')).toBe('wd/b');
     expect(npc.skills.activeTemplate('sword')?.id).toBe('wd/b');
     // ★ 判据落在**数值账**上：只按胜出者算一次（不是 10+20=30）
-    expect(getProp(npc, 'gj')).toBe(20);
+    expect(getProp(npc, 'attack')).toBe(20);
   });
 
   it('loadFromDef 里技能不存在 → 抛错', () => {
@@ -1052,8 +1055,8 @@ describe('engine/skill · NPC 集成（★ docs/27 D9：技能 id 被保留）',
     expect(a.skills).not.toBe(b.skills);
     a.skills.setLevel('wd/a', 40);
     expect(b.skills.levelOf('wd/a')).toBe(10);
-    expect(getProp(a, 'gj')).toBe(40);
-    expect(getProp(b, 'gj')).toBe(10);
+    expect(getProp(a, 'attack')).toBe(40);
+    expect(getProp(b, 'attack')).toBe(10);
   });
 
   it('`skillLevel(idOrSlot)` 同时接受技能 id 与槽名', () => {
@@ -1118,7 +1121,7 @@ describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
         name: '好技能',
         type: SKILL_TYPES.SKILL,
         can_enables: ['sword'],
-        enableProp: () => ({ sword: { prop: { gj: 10 } } }),
+        enableProp: () => ({ sword: { prop: { attack: 10 } } }),
       },
     },
     {
@@ -1130,7 +1133,7 @@ describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
         //   这样"半吸收"会真的把新值写进 props（只放非法键的话，
         //   release 减掉旧账、absorb 又加回同一个数 ⇒ 净零 ⇒ 判据假绿）。
         passiveProp: (() =>
-          ({ prop: { mz: 7, not_a_prop: 5 } })) as unknown as NonNullable<SkillDef['passiveProp']>,
+          ({ prop: { hit: 7, not_a_prop: 5 } })) as unknown as NonNullable<SkillDef['passiveProp']>,
       },
     },
     {
@@ -1139,7 +1142,7 @@ describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
         name: '坏扩展键',
         type: SKILL_TYPES.SKILL,
         passiveProp: (() =>
-          ({ prop: { mz: 7 }, extProp: [['not_an_ext', 3]] })) as unknown as NonNullable<SkillDef['passiveProp']>,
+          ({ prop: { hit: 7 }, extProp: [['not_an_ext', 3]] })) as unknown as NonNullable<SkillDef['passiveProp']>,
       },
     },
   ]);
@@ -1165,14 +1168,14 @@ describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
   it('★ 非法**核心**键 ⇒ 抛 SkillError，且既有属性账原样保留（不是先清空再抛）', () => {
     const npc = seeded();
     const before = { ...snapshotProps(npc).prop };
-    expect(before).toEqual({ gj: 10 });
+    expect(before).toEqual({ attack: 10 });
 
     expect(() => npc.skills.learn('bad/key', 1)).toThrow(SkillError);
 
     // ★ 判据钉在"**部分吸收的痕迹**"上：只断言 `props == before` 会**假绿** ——
     //   旧实现 release 减掉旧账、`#absorb` 在抛错前又把同一个数加回去，净零。
     //   坏技能带一个合法键 `mz`，半账会把它留在 props 里 ⇒ 咬得住。
-    expect(snapshotProps(npc).prop).not.toHaveProperty('mz');
+    expect(snapshotProps(npc).prop).not.toHaveProperty('hit');
     expect({ ...snapshotProps(npc).prop }).toEqual(before);
   });
 
@@ -1180,13 +1183,13 @@ describe('S8 · 非法属性键不许留下不可自愈的半账', () => {
     const npc = seeded();
     const before = { ...snapshotProps(npc).prop };
     expect(() => npc.skills.learn('bad/ext', 1)).toThrow(SkillError);
-    expect(snapshotProps(npc).prop).not.toHaveProperty('mz');
+    expect(snapshotProps(npc).prop).not.toHaveProperty('hit');
     expect({ ...snapshotProps(npc).prop }).toEqual(before);
   });
 
   it('【反向锚点】合法属性键照常记账（新校验不误伤正常路径）', () => {
     const npc = seeded();
-    expect({ ...snapshotProps(npc).prop }).toEqual({ gj: 10 });
+    expect({ ...snapshotProps(npc).prop }).toEqual({ attack: 10 });
     expect(npc.skills.entryOf('ok/skill')?.enabled).toBe('sword');
   });
 });

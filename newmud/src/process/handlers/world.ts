@@ -7,7 +7,7 @@ import type { CmdItem, ItemBrief } from '../../../shared/protocol.js';
 import { pushCommands, pushLine } from '../../ui/stream.js';
 import { renderScene, renderActionBar } from '../../ui/room.js';
 import { renderMap } from '../../ui/map.js';
-import { closePanel } from '../../ui/panel.js';
+import { closePanel, isPanelOpen, openPanel, setPanelCmds } from '../../ui/panel.js';
 import { addItemBrief, removeItemBrief, state } from '../../state.js';
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -51,20 +51,44 @@ const asItems = (v: unknown): ItemBrief[] =>
 /**
  * 进/看房间。
  *
- * ★ 房间名与描述**不进消息流**（wushen 也是把它们放在持续可见的那一块里）——
- *   消息流留给"发生的事"。换房间时只加一条分隔线，外加把小地图重画一遍
- *   （出口换了，格子必须跟着换，否则点上去走的是上一个房间的路）。
+ * ★ 房间**描述**不进消息流（wushen 也是把它们放在持续可见的那一块里）——
+ *   消息流留给"发生的事"。但**换房间这件事本身是事件**，得在流里留个交代：
+ *   否则玩家从「中央广场」走到「北大街」时，屏幕上只有房间区悄悄换了内容，
+ *   消息流一行不动（2026-10-18 真机走查：`linesBefore === linesAfter`）。
+ *   wushen 在 `Process.room`（`src/process.js:297-306`）里保证这一点：默认档
+ *   （`Setting.keep_msg == 0`）**清屏**，`keep_msg` 档则
+ *   `ReceiveMessage("你来到了" + room.name + "。")`。
+ *   本项目保留历史（不清屏）⇒ 照 `keep_msg` 档：一条分隔线 + 一句「你来到了 X。」。
+ *
+ * ★ 首次进房间（`state.room === null`）**不播报**：那条路上已经有登录欢迎语，
+ *   房间自己也可能有 `on_enter`（`world/room/yz/guangchang.ts` 就写着
+ *   「你来到了中央广场。」）—— 再来一句就是同一件事说两遍。
+ *
+ * ★ 换房间时还要把小地图重画一遍（出口换了，格子必须跟着换，
+ *   否则点上去走的是上一个房间的路）。
  */
 registerHandler('room', (p) => {
-  const changed = state.room?.path !== asString(p['path']);
+  const before = state.room;
+  const path = asString(p['path']);
+  const changed = before !== null && before.path !== path;
   state.room = {
-    path: asString(p['path']),
+    path,
     name: asString(p['name']),
     desc: asString(p['desc']),
     commands: asCmds(p['commands']),
   };
-  if (changed) {
+  if (before === null || changed) {
     closePanel(); // 换房间时面板里的旧详情不该留着
+  }
+  if (changed) {
+    // ★★ 只留**一句**播报，不再画分隔线（2026-10-20 §74 真机反馈）。
+    //   原来这里是 `pushRule()` + 这一句，而 `pushRule` 往消息流插的是一条
+    //   1px 发丝线 —— 玩家每换一个房间，日志里就多一道横线 + 一行"你来到了X。"，
+    //   观感像"又叠了一个新的日志区"。他的原话："这绝对是有问题的地方"。
+    //   ★ 判据不在"好不好看"，而在**wushen 有没有**：`Process.room`
+    //     （`src/process.js:297-306`）的 `keep_msg` 档只 `ReceiveMessage("你来到了"+name+"。")`,
+    //     默认档直接清屏 —— 两档都**没有**分隔线。这条是当初自己加的戏。
+    pushLine(`你来到了${state.room.name}。`);
   }
   renderScene();
   renderActionBar();
@@ -102,18 +126,27 @@ registerHandler('itemremove', (p) => {
 });
 
 /**
- * 单个物件的详情 → **消息流**（wushen `Process.item`，`src/process.js:380-403`）。
+ * 单个物件的详情 → **物件面板**（26 册 §57 订正）。
  *
- * ★ 这里以前 `openPanel(...)` + `renderVerbs(cmds)` —— **两半都不对**：
- *   ① wushen 的物件详情是 `ReceiveMessage(item.desc)` + `ReceiveMessage('.item-commands')`，
- *      落在**消息流**里，`.dialog` 是地图 / 属性 / 背包那些面板的地盘；
- *   ② `renderVerbs(cmds)` 把房间动作栏整块顶掉（`#verbs` 的第 6 条写入路径）。
- *   描述跟着"发生的事"往下走，玩家才看得到"我刚点了谁"。
+ * ★★ 这里原先照 wushen 的 `Process.item`（`src/process.js:380-403`）把描述与命令条
+ *   **推进消息流**。真机反馈表明那条移植是错的：
+ *   点店小二之后，描述在日志区、「打听」按钮也在日志区，接着点「打听」，
+ *   下一层的「人字号客房」又落进日志区 —— 玩家的操作**层层叠进历史记录**，
+ *   而日志区本该只记"发生了什么"。
+ *
+ * ★ 现在开**面板**：标题是物件名，正文是描述，底部是它的动作按钮。
+ *   面板本来就是 `.dialog` 的地盘（`ui/panel.ts`），且 `notePanel` 早就为
+ *   "开面板 → 服务端回显 → 填充"准备好了 —— 只是 `item` 帧没用它。
+ *   `name` 字段协议里一直有（`ItemDetailPacket.name`），此处才第一次用上。
  */
 registerHandler('item', (p) => {
+  const name = asString(p['name']);
   const desc = asString(p['desc']);
-  if (desc !== '') pushLine(desc);
-  pushCommands(asCmds(p['commands']));
+  // ★★ 第四参数 = 面板身份（`item.id`）。之后服务端若把某句话声明成
+  //   `context: <同一个 id>`（`warn` 帧），它会落进这块面板；其余一切照旧进消息流。
+  //   在这之前这里传的是 `{ absorb: true }` —— **一开面板就吸附所有播报**，
+  //   于是战报、拒绝文案、房间播报全被吸进来，前端只能靠词表去补救（§78）。
+  openPanel(name === '' ? '物件' : name, desc === '' ? [] : [desc], asCmds(p['commands']), asString(p['id']));
 });
 
 registerHandler('actions', (p) => {
@@ -137,15 +170,24 @@ registerHandler('removeAction', (p) => {
 });
 
 /**
- * 服务端下发的命令列表 → **消息流里的一条命令条**（wushen `Process.cmds`）。
+ * 服务端下发的命令列表。
+ *
+ * ★ **物件面板开着 ⇒ 换面板底部那排按钮**（26 册 §57）：点「打听」之后得到的
+ *   「人字号客房」是**同一个物件**对话的下一层，它不属于"发生了什么"。
+ *   真机反馈里它落在日志区，玩家要往回翻才能点。
+ * ★ 面板没开（例如登录时房间动作、或 `cmds` 是房间级的）⇒ 仍进消息流，
+ *   这是原来那条落点，没有理由改动。
  *
  * ★ 它**不写动作栏**：这以前是 `renderAll()`，而 `renderAll` 只重画
  *   `state.room.commands` —— 于是 `cmds` 一到，`state.actions` 里那些动作
  *   就被静默丢掉了（26 册 §20.4 的"两个真相落在同一格"）。
- *   wushen 那边 `Process.cmds` 与动作栏毫无关系，就是往消息流推一条。
  */
 registerHandler('cmds', (p) => {
   state.cmds = asCmds(p['items']);
+  if (isPanelOpen()) {
+    setPanelCmds(state.cmds);
+    return;
+  }
   pushCommands(state.cmds);
 });
 

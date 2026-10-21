@@ -29,6 +29,8 @@ export const FIGHT_MESSAGES = {
   what: '你要攻击谁？',
   /** wushen `fight.js:14` —— 房间禁武 */
   noFight: '这里不允许战斗。',
+  /** wushen `fight.js:41-42` —— 这个人自己不想动手 */
+  noWant: (name: string): string => `看起来${name}并不想跟你较量。`,
   /** 挑战宣言（wushen `fight.js:36-39`；`callme()` / `call()` 的敬语已简化） */
   challenge: '\n$N对着$n说道：「$n，领教了！」\n',
   /**
@@ -75,6 +77,13 @@ defineCommand('combat/fight', {
     const hit = findTarget(me, env, key);
     if (hit === undefined) {
       me.notify(FIGHT_MESSAGES.what);
+      return;
+    }
+    // ★ wushen `fight.js:41`：目标自己声明了 `no_fight` ⇒ 不打。
+    //   面板里已经不出这颗按钮；这里再挡一次是为了"手敲命令"这条入口
+    //   —— 两条入口必须给出同一个答案，否则按钮就成了装饰。
+    if (hit.noFight === true) {
+      me.notify(FIGHT_MESSAGES.noWant(neutralizePlayerText(hit.name)));
       return;
     }
     const result = me.beginFight(hit, FIGHT_TYPE.FIGHT);

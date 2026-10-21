@@ -168,7 +168,39 @@ describe('会话', () => {
     expect(err[0]?.['code']).toBe('NOT_LOGGED_IN');
   });
 
-  it('登录后敲 look：走的是真实内容里的指令，能看到房间名', () => {
+  /**
+   * ★★ §80 的全部契约就在这条里：`notify` 与 `notifyInPanel` 发出去的报文
+   *   **只差一个 `context` 键**。前端据此分派，不再靠"命令从哪来 / 是否战斗"猜。
+   *   缺了这条，服务端那一半就是"类型对上了、行为没人验"。
+   */
+  it('★★ `notify` **不带** context、`notifyInPanel` 带 context（§80 的唯一区别）', () => {
+    const hub = hubWith();
+    const sessions = new GameSessions({ world, hub });
+    const conn = new FakeConn('c-ctx');
+    hub.accept(conn);
+    const r = sessions.login(conn, 't'.repeat(20), '张三');
+    assertOk(r);
+    const before = conn.sent.length;
+
+    r.player.notify('这是消息流的话。');
+    r.player.notifyInPanel('npc-xiaoer', '这是面板里的话。');
+
+    const warns = conn.sent
+      .slice(before)
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .filter((p) => p['type'] === 'warn');
+
+    expect(warns).toHaveLength(2);
+    // ★ 默认**连键都没有**（而不是 `context: undefined`）——
+    //   报文上要能看出"这条从没声明过归属"，否则调试时分不清
+    //   是"服务端没声明"还是"序列化吃掉了"。
+    expect('context' in (warns[0] ?? {})).toBe(false);
+    expect(warns[0]?.['content']).toBe('这是消息流的话。');
+    expect(warns[1]?.['context']).toBe('npc-xiaoer');
+    expect(warns[1]?.['content']).toBe('这是面板里的话。');
+  });
+
+  it('★ 登录后敲 look：走的是真实内容里的指令，能看到房间名', () => {
     const hub = hubWith();
     const sessions = new GameSessions({ world, hub });
     const conn = new FakeConn('c-look');

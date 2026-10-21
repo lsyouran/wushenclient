@@ -48,6 +48,11 @@ const CHIPS: readonly CmdItem[] = [
   { cmd: 'say', name: '说' },
   { cmd: 'chat', name: '喊' },
   { cmd: 'tell', name: '私' },
+  // ★ 「属性」= 服务端 `score`（`world/command/info/score.ts`）。
+  //   底部工具条上有一格，但**窄屏（≤480px）会把它收起**（4 格会把气血/内力的
+  //   数值挤出可视区，量出来的 `scrollWidth 211 > clientWidth 140`），
+  //   于是小屏玩家只有这一个入口 —— 它不能只活在工具条上。
+  { cmd: 'score', name: '属性' },
 ];
 
 /** 需要参数的指令（点 chip / 快捷格只预填）。别名一并登记，换用哪个词都只预填 */
@@ -307,6 +312,10 @@ function renderChips(): void {
         prefillCmd(`${c.cmd} `);
         return;
       }
+      // ★ 无参 chip 执行后**收起浮层**：`look` / `score` 的结果落在消息流里，
+      //   而浮层是从底部弹起的卡片，它盖住的正是要读的那一片。
+      //   （缺参数的那一支不关：它刚把浮层变成"正在输入"的状态。）
+      closeInputs();
       hooks.run(c.cmd);
     });
     box.appendChild(chip);

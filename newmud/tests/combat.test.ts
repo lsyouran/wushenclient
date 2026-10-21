@@ -42,6 +42,7 @@ import type { World } from '../server/engine/world.js';
 import type { RawPropMap } from '../server/engine/props.js';
 import { FIGHT_TYPE } from '../shared/constants.js';
 import { asWorldId } from '../shared/ids.js';
+import { FLEE_MESSAGES } from '../world/command/combat/flee.js';
 import { FIGHT_MESSAGES } from '../world/command/combat/fight.js';
 import { KILL_MESSAGES } from '../world/command/combat/kill.js';
 import { RELIVE_MESSAGES } from '../world/command/combat/relive.js';
@@ -311,7 +312,7 @@ describe('出招（真调度器 · 假时钟 · 确定性随机）', () => {
   });
 
   it('躲闪：双方躲闪加成极高（prop.ds）⇒ 谁也打不中，血不动', () => {
-    const { clock, scheduler, a, b } = arena(HALF, { prop: { ds: 1000 } });
+    const { clock, scheduler, a, b } = arena(HALF, { prop: { evasion: 1000 } });
     expect(a.player.beginFight(b.player, FIGHT_TYPE.KILL)).toEqual({ ok: true });
     stepOne(clock, scheduler);
     expect(a.player.hp).toBe(110);
@@ -321,7 +322,7 @@ describe('出招（真调度器 · 假时钟 · 确定性随机）', () => {
   });
 
   it('招架：双方招架加成极高（prop.zj）、躲闪不变 ⇒ 只招不躲，血不动', () => {
-    const { clock, scheduler, a, b } = arena(HALF, { prop: { zj: 1000 } });
+    const { clock, scheduler, a, b } = arena(HALF, { prop: { deflect: 1000 } });
     expect(a.player.beginFight(b.player, FIGHT_TYPE.KILL)).toEqual({ ok: true });
     stepOne(clock, scheduler);
     expect(a.player.hp).toBe(110);
@@ -506,7 +507,7 @@ describe('combat/fight · combat/kill —— 指令层', () => {
   });
 
   /** 一间实验室：真玩家 + 一个"随便打"的真 NPC（走真指令时用真对象） */
-  function labWithFoe(name = '阿飞', opts: { hp?: number } = {}) {
+  function labWithFoe(name = '阿飞', opts: { hp?: number; props?: RawPropMap } = {}) {
     const room = labRoom();
     const out = new RecordingOutput();
     const player = new Player({
@@ -515,6 +516,7 @@ describe('combat/fight · combat/kill —— 指令层', () => {
       name,
       roleId: `r-${String((seq += 1))}`,
       hp: opts.hp,
+      props: opts.props,
       scheduler: world.scheduler,
       output: out,
     });
@@ -528,7 +530,7 @@ describe('combat/fight · combat/kill —— 指令层', () => {
       scheduler: world.scheduler,
     });
     room.addItem(npc);
-    return { room, player, out };
+    return { room, player, npc, out };
   }
 
   it('`fight 好心人`：走真指令 → 开战 + 房间播报挑战宣言', () => {
@@ -804,7 +806,7 @@ describe('Npc 死亡掉落 —— 落点与不静默', () => {
     const { player } = makePlayer(scheduler, {
       name: '阿飞',
       rand: HALF,
-      props: { prop: { gj: 9999 } }, // 攻击拉满 ⇒ 一击必中必杀
+      props: { prop: { attack: 9999 } }, // 攻击拉满 ⇒ 一击必中必杀
     });
     room.addItem(player);
 
@@ -890,5 +892,185 @@ describe('★ M3 · `afterDeath` 抛错也不许让节拍永久停摆', () => {
     expect(npc.isAlive).toBe(true);
     expect(player.isFighting).toBe(true);
     expect(npc.hp).toBeLessThan(10_000); // 反向锚点：确实打掉了血，不是"根本没出招"
+  });
+});
+
+// ===========================================================================
+// 七、气血状态播报的**主语**必须是被打者（2026-10-20 真机反馈）
+// ===========================================================================
+//
+// ★★ 病型：`#doAttack` 里的播报一律写成 `this.sendRoom(msg, target)`，`this` 是
+//    **攻击者**。攻击句（"你对准慕容用力挥出一拳"）与伤害句的主语确实是攻击者，
+//    但**气血状态句**（"($N看起来可能有些累了。)"）说的是**被打的那个人** ——
+//    主语与发送者错位 ⇒ `sendRoom` 把攻击者判成本人视角 ⇒ `$N` 渲染成"你"，
+//    玩家屏幕上出现「**你**气喘嘘嘘」。真机 `fight 木人桩` 复现。
+//
+// ★ wushen 的写法（`world/extends/char/combat.js:146,155`）：
+//   `target.send_combat(query_status_msg(target.hp, target.max_hp))` ——
+//   状态句由**被打者**自己发出，谁的状态谁发。
+//
+// ★ 反向锚点（防"我什么都不做这条也绿"）：断言里**同时**要求
+//   ① 攻击句主语是"你"（攻击者的自述没被改坏）② 状态句主语是"慕容"。
+//   只写 ② 的话，一个把所有播报都改成第三人称的实现也能过。
+
+describe('气血状态播报的主语 = 被打者（不是攻击者）', () => {
+  it('阿飞打慕容：状态句说「慕容…」，攻击句仍说「你…」', () => {
+    const clock = makeClock();
+    const scheduler = new Scheduler({ now: clock.now });
+    const room = labRoom();
+    // ★ 两个都是真 `Player`：`sendRoom` 只给 `kind === 'player'` 的成员播报，
+    //   用替身会绕过整条视角分支（那正是要测的东西）。
+    const { player: attacker, out } = makePlayer(scheduler, { name: '阿飞', rand: ZERO });
+    const { player: victim } = makePlayer(scheduler, { name: '慕容', rand: ZERO });
+    room.addItem(attacker);
+    room.addItem(victim);
+
+    // 切磋要求双方满血 —— 未开打时天然满足
+    expect(attacker.beginFight(victim, FIGHT_TYPE.FIGHT)).toEqual({ ok: true });
+    out.messages.length = 0; // 只看出招这一拍的播报
+
+    stepOne(clock, scheduler);
+
+    const statusLine = out.messages.find((m) => m.startsWith('('));
+    // 反向锚点 ②：状态句必须落在被打者身上
+    expect(statusLine).toBeDefined();
+    expect(statusLine?.startsWith('(慕容')).toBe(true);
+    // 反向锚点 ①：攻击句仍是攻击者的自述 —— 证明这不是"全改第三人称"换来的绿
+    expect(out.messages.some((m) => m.includes('你') && !m.startsWith('('))).toBe(true);
+    // ⚠️ 不要顺手写"状态句里不许出现『(你』"：战斗是**双向**的，慕容同一拍也会
+    //   还手，于是阿飞自己也有一句「(你气喘嘘嘘」—— 那是**对的**（他真在挨打）。
+    //   那样一条断言会在正确的实现上红，逼着人把它删掉，反而是噪音。
+  });
+
+  it('反向：慕容打阿飞时，阿飞收到的状态句说「你…」（本人视角没坏）', () => {
+    const clock = makeClock();
+    const scheduler = new Scheduler({ now: clock.now });
+    const room = labRoom();
+    const { player: victim, out } = makePlayer(scheduler, { name: '阿飞', rand: ZERO });
+    const { player: attacker } = makePlayer(scheduler, { name: '慕容', rand: ZERO });
+    room.addItem(attacker);
+    room.addItem(victim);
+
+    expect(attacker.beginFight(victim, FIGHT_TYPE.FIGHT)).toEqual({ ok: true });
+    out.messages.length = 0;
+
+    stepOne(clock, scheduler);
+
+    const statusLine = out.messages.find((m) => m.startsWith('('));
+    expect(statusLine?.startsWith('(你')).toBe(true);
+  });
+});
+
+// ===========================================================================
+// 六、脱战：Character.escape + combat/flee（wushen `do_escape`）
+// ===========================================================================
+
+describe('Character.escape —— 脱战判定（wushen `chara_move.js:105`）', () => {
+  function scene(rand: () => number, props?: RawPropMap) {
+    const clock = makeClock();
+    const scheduler = new Scheduler({ now: clock.now });
+    const room = labRoom();
+    const a = makePlayer(scheduler, { name: '阿飞', rand, props });
+    const b = makePlayer(scheduler, { name: '对手', rand });
+    room.addItem(a.player);
+    room.addItem(b.player);
+    return { clock, room, a: a.player, b: b.player };
+  }
+
+  it('本来就没在战斗 ⇒ not-fighting（wushen `escape.js:6`）', () => {
+    const s = scene(ZERO);
+    expect(s.a.escape()).toEqual({ ok: false, reason: 'not-fighting' });
+  });
+
+  it('躲闪不占优 + 最小随机 ⇒ 被缠住，并进入忙乱', () => {
+    const s = scene(ZERO);
+    expect(s.a.beginFight(s.b, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+    expect(s.a.escape()).toEqual({ ok: false, reason: 'blocked' });
+    // ★ 忙乱是"连点逃跑"不会变成"多点几次必成"的唯一原因
+    expect(s.a.isBusy(s.clock.now())).toBe(true);
+    expect(s.a.isFighting).toBe(true);
+  });
+
+  it('躲闪够高 ⇒ 停战 + 给出撤退方向', () => {
+    const s = scene(ZERO, { prop: { evasion: 999 } });
+    const other = labRoom();
+    s.room.linkExit('north', other);
+    expect(s.a.beginFight(s.b, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+    expect(s.a.escape()).toEqual({ ok: true, dir: 'north' });
+    expect(s.a.isFighting).toBe(false);
+  });
+
+  it('停战成功但本房间无出口 ⇒ dir=null（能脱战，没地方跑）', () => {
+    const s = scene(ZERO, { prop: { evasion: 999 } });
+    expect(s.a.beginFight(s.b, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+    expect(s.a.escape()).toEqual({ ok: true, dir: null });
+    expect(s.a.isFighting).toBe(false);
+  });
+});
+
+describe('combat/flee —— 指令层（撤退一步到位）', () => {
+  let world: World;
+
+  beforeEach(() => {
+    world = instantiateWorld({ scheduler: new Scheduler({ now: makeClock().now }) });
+  });
+
+  function stage(props?: RawPropMap) {
+    const room = labRoom();
+    const out = new RecordingOutput();
+    const player = new Player({
+      oid: world.oidSpace.next(),
+      path: null,
+      name: '阿飞',
+      roleId: `r-${String((seq += 1))}`,
+      props,
+      scheduler: world.scheduler,
+      rand: ZERO, // ★ 脱战是概率判定：不给确定随机源，"逃失败"那条会偶发变绿
+      output: out,
+    });
+    room.addItem(player);
+    const npc = new Npc({
+      oid: world.oidSpace.next(),
+      path: WID('pub/xiaoer'),
+      name: '好心人',
+      def: { name: '好心人', desc: '一个和善的人。' },
+      skillRegistry: emptySkillRegistry(),
+      scheduler: world.scheduler,
+    });
+    room.addItem(npc);
+    return { room, player, npc, out };
+  }
+
+  it('没在战斗 ⇒ 同一句「你现在没有在战斗」', () => {
+    const s = stage();
+    expect(dispatch(world.commands, s.player, 'flee')).toEqual({
+      kind: 'executed',
+      via: 'command',
+      id: 'combat/flee',
+    });
+    expect(s.out.messages).toEqual([FLEE_MESSAGES.notFighting]);
+  });
+
+  it('战斗中逃成功 ⇒ 停战 + 自动退到相邻房间', () => {
+    const s = stage({ prop: { evasion: 999 } });
+    const other = labRoom();
+    s.room.linkExit('north', other);
+    expect(s.player.beginFight(s.npc, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+
+    dispatch(world.commands, s.player, 'flee');
+
+    expect(s.player.isFighting).toBe(false);
+    // ★ 不写 `environment === other`：移动的**结果**是"东西到了那间房"，
+    //   用房间的物品表断言，才不会把"字段名改了"当成 bug。
+    expect(other.items).toContain(s.player);
+    expect(s.out.messages).toContain(FLEE_MESSAGES.free);
+  });
+
+  it('战斗中逃失败 ⇒ 被缠住，仍在战斗', () => {
+    const s = stage();
+    expect(s.player.beginFight(s.npc, FIGHT_TYPE.KILL)).toEqual({ ok: true });
+    dispatch(world.commands, s.player, 'flee');
+    expect(s.player.isFighting).toBe(true);
+    expect(s.out.messages).toContain(FLEE_MESSAGES.blocked);
   });
 });

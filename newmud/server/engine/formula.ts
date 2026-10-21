@@ -36,9 +36,10 @@
  *         crit 暴击 · attackSpeed 攻击速度（**毫秒/次，越小越快**）· maxHp 气血上限
  *         damageReductionPer 伤害减免% · ignoreDefensePer 忽视防御%
  *         ★ 后两个是**透传量** —— 不参与派生算术，只是从 prop 原样带出供战斗层消费。
- *     ★ 括号里的英文名是**本项目代码用名**；wushen 的键名仍是
- *       `gj/fy/mz/ds/zj/bj/gjsd/max_hp` —— 数据层照抄 wushen，
- *       人读对照表见 `docs/29` §29.10（代码名 ↔ wushen 键 ↔ 中文）。
+ *     ★ 括号里的英文名是**本项目代码用名**，它们**就是**数据键本身
+ *       （`PROPERTIES` 的键，§66 起全英文）。wushen 的旧名是
+ *       `gj/fy/mz/ds/zj/bj/gjsd/max_hp` —— 从 wushen 抄公式时按
+ *       `docs/29` §29.11.2 词干表替换；全量标识见 `docs/32` 标识字典。
  *
  * ★★ 上表是**派生公式**，与「**有效属性**」（`effectiveAttr`，先天值 + 后天加成）
  *   是**两件事**，别合并：前者照抄 wushen 的逐式算术（先天/后天位置不同），
@@ -46,12 +47,12 @@
  *
  * ★ 参数一律进 `COMBAT_FORMULA` 表，不写死在表达式里 —— 调参不必读公式。
  *
- * ★ prop 键**不写裸字符串**：一律走 `shared/constants.ts` 的 `PROP` 别名表
- *   （`PROP.attack` 的值就是 `'gj'`）。代码可读，而落库 / 上网 / 存档
- *   用的仍是 wushen 原键 —— 别在这里写 `'gj'`，也别改 `PROP` 的值。
+ * ★ prop 键**写裸字面量**（`getProp(props, 'attack')`）：键名本身已是英文可读名，
+ *   §66 起**没有别名层**了（旧 `PROP.attack` 的值就是 `'attack'`，纯冗余）。
+ *   裸字面量还让静态闸门 **G3.C** 看得见 —— 经常量间接传参它就瞎了
+ *   （FG-7 死规则形态，见 29 册 §29.11.3 第 4 点）。
  */
 
-import { PROP, type PropKey } from '@shared/constants.js';
 import { getProp } from './props.js';
 import type { PropHolder } from './props.js';
 
@@ -141,17 +142,18 @@ export interface InnateStats {
 export const ATTR_KEYS = ['str', 'con', 'dex', 'int'] as const;
 export type AttrKey = (typeof ATTR_KEYS)[number];
 
-/** 四维 → 它们在 `prop` 里的**加成**键（`PROP.strengthBonus === 'str'` …） */
-const ATTR_BONUS = {
-  str: PROP.strengthBonus,
-  con: PROP.constitutionBonus,
-  dex: PROP.dexterityBonus,
-  int: PROP.intelligenceBonus,
-} as const satisfies Record<AttrKey, PropKey>;
-
-/** `AttrKey` 的运行时判据 —— 与 `ATTR_BONUS` 同生共死（只有一个键表） */
+/**
+ * `AttrKey` 的运行时判据 —— 直接查 `ATTR_KEYS`（**唯一**的四维词表）。
+ *
+ * ★ 曾有一张 `ATTR_BONUS` 表把四维映射到"它们在 `prop` 里的加成键"
+ *   （`str → 'str'`，wushen 时代是 `PROP.strengthBonus`）。§66 数据键英文化之后
+ *   这张表变成了**恒等映射** ⇒ 删掉，`getProp(props, key)` 直接吃 `AttrKey`
+ *   （`AttrKey ⊂ PropKey`，类型上本来就成立）。
+ *   删它的实际收益：`getProp(props, ATTR_BONUS[key])` 这种间接调用会让
+ *   静态闸门 **G3.C** 看不到键字面量（FG-7 死规则形态），还原成直接形态后闸门才咬得住。
+ */
 export function isAttrKey(key: string): key is AttrKey {
-  return Object.prototype.hasOwnProperty.call(ATTR_BONUS, key);
+  return (ATTR_KEYS as readonly string[]).includes(key);
 }
 
 /**
@@ -171,8 +173,9 @@ export function isAttrKey(key: string): key is AttrKey {
  *   wushen 把 `str1`（先天）/ `str`（先天+加成）/ 其它键（纯加成）三种语义混在
  *   一个 `switch` 里（`os/skill/skill.js:222-237`）—— 同一个"臂力"三个来源。
  *   本项目把"门槛读哪个数"收敛成**一个函数、一个名字**，于是内容层与引擎层
- *   不可能各算各的；`str` 与 `str1` 的二义性在 API 上**不存在**（数据键仍照抄
- *   wushen，那是另一回事，见 `shared/constants.ts` 的 PROPERTIES 注释）。
+ *   不可能各算各的；`str` 与 `innate_str` 的二义性在 API 上**不存在**。
+ *   ★ 旧注释说的是"`str` 与 `str1`" —— §66 把 `str1` 改名 `innate_str` 之后，
+ *     这道二义性连**名字上**也不存在了（先天值不再借用 `str` 前缀）。
  *
  * ★ 完整裁定与实证见 **29 册 §29.13** 与 **26 册 §37**。
  */
@@ -181,7 +184,7 @@ export function effectiveAttr(
   props: PropHolder,
   key: AttrKey,
 ): number {
-  return innate[key] + getProp(props, ATTR_BONUS[key]);
+  return innate[key] + getProp(props, key);
 }
 
 /**
@@ -216,7 +219,7 @@ export function computeAttrBreakdowns(
   return ATTR_KEYS.map((key) => ({
     key,
     innate: innate[key],
-    bonus: getProp(props, ATTR_BONUS[key]),
+    bonus: getProp(props, key),
     total: effectiveAttr(innate, props, key),
   }));
 }
@@ -224,13 +227,16 @@ export function computeAttrBreakdowns(
 /**
  * 派生战斗属性（**算出来的、只读**）。
  *
- * ★ 字段用**英文常见名**；括号里是 wushen 的原键名 —— 数据层仍照 wushen。
- *   完整的"代码名 ↔ wushen 键 ↔ 中文"对照见 `docs/29` §29.10。
+ * ★ 字段用**英文常见名**；括号里标的是 wushen 的**旧键名**（仅作对照，
+ *   数据层 §66 起已全英文，与 wushen 不再逐字一致）。
+ *   完整的"本项目键 ↔ wushen 旧键 ↔ 中文"对照见 `docs/29` §29.11.2 与 `docs/32`。
  *
  * ⚠️ 命名冲突警告（wushen 的坑，必须显式对待）：
  *   这里 `maxHp` 是**算出来的上限**；而 `prop` 里也有一个 `'max_hp'`，
- *   它是**加成**（代码里写作 `PROP.maxHpBonus`）。同名不同物 —— 两者在
- *   公式里同时出现，别混。
+ *   它是**加成**。同名不同物 —— 两者在公式里同时出现，别混。
+ *   ★ §66 删掉 `PROP` 别名层之后，这条**只能靠 receiver 区分**
+ *     （`props.max_hp` 是加成 / `derived.maxHp` 是上限），不再有 `PROP.maxHpBonus`
+ *     这种在名字上岔开的写法。见 `docs/29` §29.11.1 条③。
  *
  * ⚠️ **不许叫 `dodge` / `parry`**（2026-10-14 改名，闸门 **G3.G** 守）：
  *   这两个词在 wushen 里是**技能 id**（`os/const.js` 的 `BASE_SKILLS`：
@@ -298,26 +304,29 @@ export function computeDerived(innate: InnateStats, props: PropHolder): DerivedC
   const dex = innate.dex;
 
   // ── 先把用到的 prop 取成**可读名字** ────────────────────────────────────────
-  // 公式体里从此只出现名字，不再出现 `'gj'` 这类拼音键。★ 值仍照 wushen
-  // （`PROP.attack === 'gj'`），所以落库 / 上网 / 存档一个字节都没变。
-  const attackBonus = getProp(props, PROP.attack); // 攻击加成（wushen 'gj'）
-  const defenseBonus = getProp(props, PROP.defense); // 防御加成（'fy'）
-  const hitBonus = getProp(props, PROP.hit); // 命中加成（'mz'）
-  const evasionBonus = getProp(props, PROP.evasion); // 躲闪加成（'ds'）
-  const deflectBonus = getProp(props, PROP.deflect); // 招架加成（'zj'）
-  const critBonus = getProp(props, PROP.crit); // 暴击加成（'bj_per'，平加）
-  const strengthBonus = getProp(props, PROP.strengthBonus); // 臂力加成（'str'）
-  const constitutionBonus = getProp(props, PROP.constitutionBonus); // 根骨加成（'con'）
-  const dexterityBonus = getProp(props, PROP.dexterityBonus); // 身法加成（'dex'）
-  const maxHpBonus = getProp(props, PROP.maxHpBonus); // 气血加成（'max_hp'）
-  const attackSpeedBonus = getProp(props, PROP.attackSpeed); // 攻速加成（'gjsd'）
-  const attackPer = getProp(props, PROP.attackPer); // 攻击 +%（'gj_per'）
-  const defensePer = getProp(props, PROP.defensePer); // 防御 +%（'fy_per'）
-  const hitPer = getProp(props, PROP.hitPer); // 命中 +%（'mz_per'）
-  const evasionPer = getProp(props, PROP.evasionPer); // 躲闪 +%（'ds_per'）
-  const deflectPer = getProp(props, PROP.deflectPer); // 招架 +%（'zj_per'）
-  const attackSpeedPer = getProp(props, PROP.attackSpeedPer); // 攻速 +%（'gjsd_per'）
-  const hpPer = getProp(props, PROP.hpPer); // 气血 +%（'hp_per'）
+  // 键名本身就是英文可读名（§66 起），这里取成局部变量是为了公式体里只出现
+  // 语义名（`attackBonus`），不会和派生结果（`attack`）看混。
+  // ★ 全部写**裸字面量**：闸门 G3.C 只认这种形态，写成常量间接传参它扫不到。
+  const attackBonus = getProp(props, 'attack'); // 攻击加成
+  const defenseBonus = getProp(props, 'defense'); // 防御加成
+  const hitBonus = getProp(props, 'hit'); // 命中加成
+  const evasionBonus = getProp(props, 'evasion'); // 躲闪加成
+  const deflectBonus = getProp(props, 'deflect'); // 招架加成
+  const critBonus = getProp(props, 'crit'); // 暴击加成（平加，不是百分比）
+  // ★★ 下面三个读的是 `props.str/con/dex` —— **加成池**里的键；
+  //    「先天臂力」是 `innate.str`（数据键 `innate_str`），两者同名不同物。
+  const strengthBonus = getProp(props, 'str'); // 臂力**加成**
+  const constitutionBonus = getProp(props, 'con'); // 根骨**加成**
+  const dexterityBonus = getProp(props, 'dex'); // 身法**加成**
+  const maxHpBonus = getProp(props, 'max_hp'); // 气血**加成**（不是上限，上限是 derived.maxHp）
+  const attackSpeedBonus = getProp(props, 'attack_speed'); // 攻速加成（毫秒，从间隔基准里减）
+  const attackPer = getProp(props, 'attack_per'); // 攻击 +%
+  const defensePer = getProp(props, 'defense_per'); // 防御 +%
+  const hitPer = getProp(props, 'hit_per'); // 命中 +%
+  const evasionPer = getProp(props, 'evasion_per'); // 躲闪 +%
+  const deflectPer = getProp(props, 'deflect_per'); // 招架 +%
+  const attackSpeedPer = getProp(props, 'attack_speed_per'); // 攻速 +%
+  const hpPer = getProp(props, 'hp_per'); // 气血 +%
 
   // 气血上限 = 先天根骨 × 系数，加上「内力上限 × 内功系数 + 气血加成 + 根骨换算加成」，再乘气血百分比
   //
@@ -390,8 +399,8 @@ export function computeDerived(innate: InnateStats, props: PropHolder): DerivedC
     crit,
     attackSpeed,
     maxHp,
-    damageReductionPer: getProp(props, PROP.damageReductionPer),
-    ignoreDefensePer: getProp(props, PROP.ignoreDefensePer),
+    damageReductionPer: getProp(props, 'diff_damage_per'),
+    ignoreDefensePer: getProp(props, 'diff_defense_per'),
   };
 }
 

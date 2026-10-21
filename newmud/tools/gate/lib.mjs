@@ -17,7 +17,11 @@ export const ROOT = resolve(GATE_DIR, '..', '..');
 /** ★ 运行时读取目录名 —— 改名后自动跟随 */
 export const PROJECT_NAME = basename(ROOT);
 
-export const SKIP_DIRS = new Set([
+/**
+ * 遍历时要跳过的目录名。
+ * ★ 不带 `export`：只有本文件的 `walk()` 用它（G17 判据，2026-10-19）。
+ */
+const SKIP_DIRS = new Set([
   'node_modules',
   'dist',
   'data',
@@ -87,7 +91,13 @@ let crashGuardInstalled = false;
  *
  * ★ **局限（如实记档，别当成全覆盖）**：只接得住守卫安装**之后**发生的异常。
  *   安装之前抛出的（本模块自身的求值期、或更早的 import）仍是 node 默认的 1。
- *   要做到"连模块加载期都算"，得由调用方用 `--import` 预载 —— 属独立的加固批次。
+ *   ★★ **2026-10-19 已补**：这个窗口**不是理论上的** —— 给共享模块加注释时写了一个含
+ *   「星号 + 斜杠」的 glob，注释提前闭合 ⇒ `docs-index.mjs` 语法错误 ⇒
+ *   **G15 与 G16 各以 exit 1 结束、一行输出都没有**，套件里显示为 `❌ FAIL`，
+ *   与"真的发现了违规"完全一样（FG-23 的第二条通道）。
+ *   补法是**由调用方预载**：`node --import tools/gate/preload.mjs <gate>` ——
+ *   `run-all.mjs` 与 `mutation-test.mjs` 两处 spawn 都带上了（见 `preload.mjs` 头部）。
+ *   ⇒ 现在这句局限**只对"直接 `node tools/gate/xxx.mjs` 调试"成立**，对套件路径不成立。
  *
  * @param {string} toolName 打印用标识；缺省取 `process.argv[1]` 的文件名
  */
@@ -194,8 +204,11 @@ export function readText(p) {
  * 必须保留字符串：路径字面量、import 说明符都在字符串里。
  * 必须去掉注释：注释里会合法地出现 `process.cwd()`、`new Function(` 等词，
  * 否则闸门持续误报 → 最终被开发者关掉，比没有闸门更糟。
+ *
+ * ★ 不带 `export`：只有本文件的 `readCode()` 用它（G17 判据，2026-10-19）。
+ *   它是 `readCode` 的实现细节，不是对外契约。
  */
-export function stripComments(line, state) {
+function stripComments(line, state) {
   let out = '';
   let quote = null;
   let i = 0;
@@ -266,7 +279,9 @@ export function report(violations, { passText = '通过', failText = '发现违�
   return EXIT_FAIL;
 }
 
-export function skip(reason) {
-  console.log(`  ⏭️  SKIP：${reason}`);
-  return EXIT_SKIP;
-}
+// ★ 这里原本有一个 `skip(reason)` 辅助函数（打印一行 + 返回 EXIT_SKIP）。
+//   2026-10-19 删掉：**全仓零调用** —— 各闸门的 SKIP 路径都要打印 2–3 行（"为什么跳、
+//   为什么这不算通过、该去补什么"），一行版的签名根本装不下，于是大家都直接
+//   `console.log(...)` + `process.exit(EXIT_SKIP)`。
+//   留着一个没人用的导出，最容易的结局是**有人以为它就是官方写法**、照着用，
+//   然后把那两行解释丢掉 —— 那正是本文件反复说的"看起来能用的错东西比不存在更危险"。

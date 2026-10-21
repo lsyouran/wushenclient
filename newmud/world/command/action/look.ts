@@ -81,7 +81,7 @@ defineCommand('action/look', {
         me.notify(INSPECT_MESSAGES.notFound);
         return;
       }
-      me.showItem(detailOf(obj));
+      me.showItem(detailOf(obj, env.noFight === true));
       // ★ 旁观播报（wushen `world/cmd/action/look.js:36-39`）：
       //     `if (obj.query_desc) { player.notify(obj.query_desc(player));
       //                           if (obj != player) player.send_room(look_str.random(), obj, true); }`

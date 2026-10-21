@@ -202,6 +202,25 @@ export class Npc extends Character {
   }
 
   /**
+   * 这个人**不肯切磋**（wushen `fight.js:41` 的 `target.no_fight`）。
+   *
+   * ★ 只从模板读，不在实例上另存一份：同一模板的多个实例必须给出同一个答案。
+   */
+  public get noFight(): boolean {
+    return this.def.no_fight === true;
+  }
+
+  /**
+   * 这个人**杀不得**（wushen `kill.js:11` 的 `!target.do_kill`）。
+   *
+   * ★ 老师 / 店主这类 NPC 一旦被杀，教与卖这两条内容链就断了；
+   *   房间 `noFight` 只挡"能不能在这里动手"，挡不住"以后换个房间杀"。
+   */
+  public get noKill(): boolean {
+    return this.def.no_kill === true;
+  }
+
+  /**
    * 一句话描述（`ActorObject.desc`）。
    *
    * ★ 从 `def` 取而不是在实例上另存一份：wushen 的 `NPC.prototype.query_commands_json`
@@ -292,7 +311,12 @@ export class Npc extends Character {
     const exp = this.def.exp ?? 0;
     const pot = this.def.pot ?? 0;
     if (exp === 0 && pot === 0) return;
-    killer.addExp(exp, pot);
+    // ★★ 走 `queueReward` 而不是直接 `addExp`（26 册 §57，真机反馈）：
+    //   这里还在杀人者那一拍的 `#endAttack` 里面，`combat:end` 尚未发出。
+    //   直接播报就会变成「你获得了…」在前、「【战斗结束】」在后。
+    //   `queueReward` 把播报推到 `endFight()` 发完 `combat:end` 之后；
+    //   经验的**唯一增加入口**仍是 `addExp`，没有被绕开。
+    killer.queueReward(exp, pot);
   }
 
   /**
