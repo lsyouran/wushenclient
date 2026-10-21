@@ -391,6 +391,9 @@ object MudSizes {
     val AuthPadH = 20.dp
     val AuthPadV = 24.dp
 
+    /** 登录屏里「标识行 / 卡片 / 提示」三块之间的间距（与 [ContentPad] 同值） */
+    val AuthGap = ContentPad
+
     /** 登录屏徽记边长 */
     val AuthMarkSide = 48.dp
 }
