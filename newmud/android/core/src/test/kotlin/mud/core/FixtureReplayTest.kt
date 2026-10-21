@@ -9,7 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 用**真机抓的帧**回放一遍完整流程（`fixtures/*.json`，由 `tools/gen-protocol-fixtures.mjs` 生成）。
+ * 用**真机抓的帧**回放一遍完整流程（`fixtures/` 下的 json，由 `tools/gen-protocol-fixtures.mjs` 生成）。
+ * ⚠️ 上面那句**不能**把目录与星号写在一起：Kotlin 块注释可嵌套，注释里出现"斜杠星号"
+ *   会多开一层 ⇒ 整个文件余下被当注释，报 `Unclosed comment`（26 册 §87）。
  *
  * ★ 为什么用真帧而不是手写 JSON：
  *   手写帧 + 手写归约可以一起错，而错的时候测试是绿的。
