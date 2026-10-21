@@ -228,7 +228,13 @@ lines.push(' */');
 lines.push('val PacketJson = Json { ignoreUnknownKeys = true }');
 lines.push('');
 lines.push('fun decodePacket(text: String): Packet? {');
-lines.push('    val obj = PacketJson.parseToJsonElement(text) as? JsonObject ?: return null');
+// ★★ `parseToJsonElement` 对**非 JSON 文本**是**抛** `SerializationException` 的，不是返回 null。
+//   于是"一条垃圾帧"会把整条连接打断 —— 而这一层要的是"认不出就返回 null"。
+//   ⚠️ 抛的语义只留给"**是**协议帧但缺必需字段"（`decodeFromJsonElement` 抛
+//      `MissingFieldException`）：那是"Kotlin 模型落后于服务端"的信号，必须可见。
+//   实测：CI 首跑 `:protocol:test` 就红在 `decodePacket("not json at all")` 抛异常（26 册 §87）。
+lines.push('    // 非 JSON ⇒ null（"这不是协议帧"）；缺必需字段仍然抛 —— 两种失败要能分开');
+lines.push('    val obj = runCatching { PacketJson.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null');
 lines.push('    val v = (obj["v"] as? JsonPrimitive)?.content?.toIntOrNull()');
 lines.push('    if (v != PROTOCOL_VERSION) return null');
 lines.push('    return when ((obj["type"] as? JsonPrimitive)?.content) {');

@@ -355,7 +355,8 @@ data class PerformPacketItemsItem(
 val PacketJson = Json { ignoreUnknownKeys = true }
 
 fun decodePacket(text: String): Packet? {
-    val obj = PacketJson.parseToJsonElement(text) as? JsonObject ?: return null
+    // 非 JSON ⇒ null（"这不是协议帧"）；缺必需字段仍然抛 —— 两种失败要能分开
+    val obj = runCatching { PacketJson.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
     val v = (obj["v"] as? JsonPrimitive)?.content?.toIntOrNull()
     if (v != PROTOCOL_VERSION) return null
     return when ((obj["type"] as? JsonPrimitive)?.content) {
