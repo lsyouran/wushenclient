@@ -80,7 +80,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PixelMark(side = 44.dp)
+            MudMark(side = 48.dp)
             Column(modifier = Modifier.padding(start = 12.dp)) {
                 Text(
                     text = "新武林",
@@ -93,7 +93,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                 )
                 Text(
                     text = "文字江湖 · 开发预览",
-                    color = MudColors.Gold,
+                    color = MudColors.Accent,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -151,7 +151,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
         if (vm.initialRole.isNotEmpty()) {
             // 判据是"**上次**成功过"（角色名框的初值有值），不是"现在框里有字" ——
             // 后者在玩家刚敲第一个字时就会把这句话亮出来，而那时还没连上任何东西
-            MudHint("上次连成功的是这台：地址与角色名已记住，下次不用再填。", color = MudColors.Gain)
+            MudHint("上次连成功的是这台：地址与角色名已记住，下次不用再填。", color = MudColors.Strong)
         }
 
         for (line in fresh) {

@@ -81,9 +81,9 @@ fun ChatSheet(
     Surface(
         color = MudColors.Surface,
         shape = MudShapes.Sheet,
-        // ★ 上沿一道亮线：浮层和消息流同色（都是 Surface/Background 一系），
-        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉
-        border = BorderStroke(1.dp, MudColors.AccentDeep),
+        // ★ 上沿一道细线：浮层与消息流同色（都是黑/深灰一系），
+        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉（wushen 的聊天页签也是 1px #C0C0C0 边）
+        border = BorderStroke(1.dp, MudColors.Border),
         modifier = modifier.fillMaxWidth().imePadding(),
     ) {
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {

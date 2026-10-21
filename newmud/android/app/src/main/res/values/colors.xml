@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      图标底色：与 `ui/Theme.kt#MudColors.Background` 同一个值（#14161A）。
+      图标底色：与 wushen 前端 `body { background-color: black }` 一致（#000000），
+      也与 `ui/Theme.kt#MudColors.Background` 同一个值。
       ★ 这里必须写死一份：资源系统读不了 Kotlin 常量，而 `adaptive-icon` 的
         `<background>` 只认 `@color/…` 或 drawable。改主题底色时**记得同步这一处** ——
-        否则启动图标是深灰、App 内是另一种深灰，摆在一起能看出色差。
+        否则启动图标是纯黑、App 内是另一种黑，摆在一起能看出色差。
+      ★ 更要紧的是：前景位图（`ic_launcher_foreground.png`）的**底也是这个黑**，
+        三处必须是同一个值，圆形遮罩裁出来的边才不会出现一条色带。
     -->
-    <color name="ic_launcher_background">#14161A</color>
+    <color name="ic_launcher_background">#000000</color>
 </resources>

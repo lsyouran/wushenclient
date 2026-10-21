@@ -2,14 +2,20 @@
 <!--
   自适应图标（API 26+）。
 
-  ★ 只有 `mipmap-anydpi-v26` 一份，没有各密度的 PNG —— 因为 `minSdk = 26`
+  ★ 前景是**位图**（`mipmap-xxxhdpi/ic_launcher_foreground.png`，432px = 108dp@4x），
+    不是 VectorDrawable。原因见 26 册 §90.2：像素格手绘不出来武侠味，
+    于是改用图像生成 + 位图落盘。代价是**不再能按主题改色**，所以图里已经把
+    底色（纯黑）和主体色（玉绿 + 古铜金）定死了 —— 与启动器背景色一致即可无缝。
+
+  ★ 只有 `mipmap-anydpi-v26` 一份，没有各密度的 `ic_launcher.png` —— 因为 `minSdk = 26`
     （`app/build.gradle.kts`），**所有**目标设备都支持自适应图标。
     一旦有朝一日把 minSdk 降到 25 或更低，这里必须补 `mipmap-*/ic_launcher.png`
     的兜底，否则老机器上图标会变成空白方块。
   ★ 不写 `<monochrome>`：那是 API 33 的主题图标（图标随壁纸取色），
-    放在 v26 目录里对部分厂商的 ROM 是未定义行为。要做就该另起 `mipmap-anydpi-v33`。
+    放在 v26 目录里对部分厂商的 ROM 是未定义行为。而且位图前景本来就取不了色，
+    要做就该另起 `mipmap-anydpi-v33` 并配一张单色矢量 —— 那是另一件事。
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

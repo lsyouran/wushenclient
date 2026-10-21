@@ -28,7 +28,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -159,7 +162,7 @@ private fun StatusBar(me: MeState?, status: String, fighting: Boolean) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = me?.let { "${it.id} · ${it.level} 级" } ?: "未登录",
-                style = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Text),
+                style = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Ui),
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -178,8 +181,8 @@ private fun StatusBar(me: MeState?, status: String, fighting: Boolean) {
             }
         }
         if (me != null) {
-            ResourceBar("气血", me.hp, me.maxHp, MudColors.Error)
-            ResourceBar("内力", me.mp, me.maxMp, MudColors.Accent)
+            ResourceBar("气血", me.hp, me.maxHp, MudColors.Hp)
+            ResourceBar("内力", me.mp, me.maxMp, MudColors.Mp)
         }
         if (status.isNotEmpty()) {
             Text(status, color = MudColors.Dim, style = MaterialTheme.typography.bodySmall, maxLines = 1)
@@ -190,11 +193,20 @@ private fun StatusBar(me: MeState?, status: String, fighting: Boolean) {
 /**
  * 一档数值条。
  *
- * ★ 不手算宽度百分比之外的东西：**没有绝对定位**，所以不存在"条跑出屏幕"这种错。
- *   `maxHp` 缺失（服务端可以不发）时不画条，只画数字 —— 画一条满的会撒谎。
+ * ★★ 现在就是 Material3 的 [LinearProgressIndicator]，只喂颜色 ——
+ *   不再是自己算比例、用 `fillMaxWidth(fraction)` 画的那个嵌套 `Box`。
+ *   换掉的理由不是省代码（省不了几行），是组件自带 `progress` 的**语义**：
+ *   读屏会把它读成"进度 42%"，而自绘的方块对无障碍来说只是两个装饰矩形。
+ *
+ * ★ `maxHp` 缺失（服务端可以不发）时**不画条**，只画数字 —— 画一条满的会撒谎。
+ *   这时传 `progress = null`（不确定进度），LPI 会画成一条流动的条 ——
+ *   那同样是撒谎，所以这里是**整条不画**，而不是画个空的。
+ *
+ * ★ `trackColor` 用 #343434：wushen 的 `.progress` 有一道 1px 边框把条形框住，
+ *   而 `darkred`/`darkblue` 在纯黑底上几乎看不见 —— 轨道就是那道边框的替代品。
  */
 @Composable
-private fun ResourceBar(label: String, value: Double?, max: Double?, color: androidx.compose.ui.graphics.Color) {
+private fun ResourceBar(label: String, value: Double?, max: Double?, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = label,
@@ -202,28 +214,26 @@ private fun ResourceBar(label: String, value: Double?, max: Double?, color: andr
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.width(28.dp),
         )
-        val fraction = if (value != null && max != null && max > 0) {
-            (value / max).coerceIn(0.0, 1.0).toFloat()
+        val v = value
+        val m = max
+        // ★ 先落到局部 val 再判空：`value`/`max` 是参数，Kotlin 不对参数做 smart cast
+        //   （它们可能被捕获进闭包），于是 `value / max` 会在括号里报"需要 !!"
+        val known = v != null && m != null && m > 0
+        if (v != null && m != null && known) {
+            val fraction = (v / m).coerceIn(0.0, 1.0).toFloat()
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.weight(1f).height(6.dp),
+                color = color,
+                trackColor = MudColors.Border,
+                strokeCap = StrokeCap.Butt,
+            )
         } else {
-            0f
-        }
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(5.dp)
-                .background(MudColors.SurfaceAlt, MudShapes.Sharp),
-        ) {
-            if (fraction > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction)
-                        .height(5.dp)
-                        .background(color, MudShapes.Sharp),
-                )
-            }
+            // 占位：把"该有条形"的位置留出来，否则有血量和没血量两行会左右错位
+            Box(modifier = Modifier.weight(1f).height(6.dp))
         }
         Text(
-            text = if (value == null || max == null) "—" else "${value.toInt()}/${max.toInt()}",
+            text = if (v != null && m != null && known) "${v.toInt()}/${m.toInt()}" else "—",
             color = MudColors.Dim,
             style = MaterialTheme.typography.bodySmall,
             // ★ 定宽 + 右对齐：数值长短变化时条形不会跟着伸缩（见上面那段）
@@ -241,7 +251,7 @@ private fun ReconnectBar(onReconnect: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MudColors.Error.copy(alpha = 0.14f))
+            .background(MudColors.Header)
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -311,7 +321,7 @@ private fun RoomSection(state: UiState, onCommand: (String) -> Unit, onPick: (St
 
         val room = state.room
         if (room != null && room.desc.isNotEmpty()) {
-            MarkupText(room.desc, Modifier.padding(top = 4.dp), MudColors.Dim)
+            MarkupText(room.desc, Modifier.padding(top = 4.dp), MudColors.Text)
         }
 
         if (mapOpen) {
@@ -402,41 +412,41 @@ private fun ActorChip(actor: ActorBrief, onClick: () -> Unit) {
     ) {
         MarkupText(
             raw = actor.name,
-            color = if (actor.isPlayer) MudColors.Accent else MudColors.Text,
+            color = if (actor.isPlayer) MudColors.Accent else MudColors.Ui,
             // ★ 名字按钮按内容宽度收，不能吃掉整行
             fillWidth = false,
         )
         val maxHp = actor.maxHp
         if (maxHp != null && maxHp > 0) {
-            MiniBar(actor.hp ?: 0.0, maxHp, MudColors.Error)
+            MiniBar(actor.hp ?: 0.0, maxHp, MudColors.Hp)
             val maxMp = actor.maxMp
             if (maxMp != null && maxMp > 0) {
-                MiniBar(actor.mp ?: 0.0, maxMp, MudColors.Accent)
+                MiniBar(actor.mp ?: 0.0, maxMp, MudColors.Mp)
             }
         }
     }
 }
 
-/** 宽度固定的小细条（不用测量：宽度写死 48dp，只按比例填色） */
+/**
+ * 名字下面那条 3dp 的细条。
+ *
+ * ★ 与 [ResourceBar] 是同一个组件（`LinearProgressIndicator`），只是矮一档、
+ *   宽度写死 48dp。**没有做成一个函数两个模式**：这里的宽度是"跟着名字走"的固定值，
+ *   而状态条那条是 `weight(1f)` 撑满 —— 参数不同，硬合并只会多两个布尔开关。
+ */
 @Composable
-private fun MiniBar(value: Double, max: Double, color: androidx.compose.ui.graphics.Color) {
+private fun MiniBar(value: Double, max: Double, color: Color) {
     val fraction = if (max > 0) (value / max).coerceIn(0.0, 1.0).toFloat() else 0f
-    Box(
+    LinearProgressIndicator(
+        progress = { fraction },
         modifier = Modifier
             .padding(top = 2.dp)
             .width(48.dp)
-            .height(3.dp)
-            .background(MudColors.Surface, MudShapes.Sharp),
-    ) {
-        if (fraction > 0f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(fraction)
-                    .height(3.dp)
-                    .background(color, MudShapes.Sharp),
-            )
-        }
-    }
+            .height(3.dp),
+        color = color,
+        trackColor = MudColors.Border,
+        strokeCap = StrokeCap.Butt,
+    )
 }
 
 // ── 消息流 ──────────────────────────────────────────────────────────────────
@@ -490,7 +500,7 @@ private fun colorOf(kind: LogKind): androidx.compose.ui.graphics.Color = when (k
     LogKind.GAIN -> MudColors.Gain
     LogKind.FIGHT -> MudColors.Fight
     LogKind.CHAT_TELL -> MudColors.Tell
-    LogKind.CHAT -> MudColors.Accent
+    LogKind.CHAT -> MudColors.Strong
 }
 
 // ── 动作栏 / 输入 ───────────────────────────────────────────────────────────
@@ -550,48 +560,35 @@ private fun InputRow(unread: Int, onChat: () -> Unit, onSend: (String) -> Unit) 
 /**
  * 「聊天」入口 + 未读角标。
  *
- * ★ 角标是**反色**（`Error` 底 + `Background` 字）：深色主题下红底上写红字读不出来，
- *   而这一格的全部信息就是那个数字。
+ * ★★ 角标现在是 Material3 的 [Badge]（`BadgedBox` 负责定位）——
+ *   不再自己画一个圆角 `Box` 再手动 `padding(start = 4.dp)`。
+ *   换掉的理由：角标"贴在哪、多大、数字变长怎么办"是三件容易各错一次的事，
+ *   而 `Badge` 已经把它们定好了（右上角、18dp 高、内容超长自动撑宽）。
+ *
+ * ★ 按钮本体仍然是 [MudAction]（内部是 `Button`），未读时切到 `selected` 态。
  * ★ 读屏靠 [contentDescription] 一次说清"聊天，N 条未读"—— 数字只有视觉呈现，
  *   不写这一句，TalkBack 用户永远不知道有人在说话（`mergeDescendants` 免得
  *   把"聊天"和数字分两次念）。
  */
 @Composable
 private fun ChatEntry(unread: Int, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .defaultMinSize(minHeight = 44.dp)
-            .background(
-                color = if (unread > 0) MudColors.Accent.copy(alpha = 0.12f) else Color.Transparent,
-                shape = MudShapes.Sharp,
-            )
-            .border(
-                width = 1.dp,
-                color = if (unread > 0) MudColors.Accent else MudColors.Border,
-                shape = MudShapes.Sharp,
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .semantics(mergeDescendants = true) {
-                contentDescription = if (unread > 0) "聊天，$unread 条未读" else "聊天"
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("聊天", color = MudColors.Accent, style = MaterialTheme.typography.bodySmall)
-        if (unread > 0) {
-            Box(
-                modifier = Modifier
-                    .padding(start = 4.dp)
-                    .background(MudColors.Error, MudShapes.Soft)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-            ) {
-                Text(
-                    text = if (unread > 99) "99+" else unread.toString(),
-                    color = MudColors.Background,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+    BadgedBox(
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = if (unread > 0) "聊天，$unread 条未读" else "聊天"
+        },
+        badge = {
+            if (unread > 0) {
+                // wushen 的 `.tag { background-color: red; color: white }`
+                Badge(containerColor = MudColors.Error, contentColor = Color.White) {
+                    Text(
+                        text = if (unread > 99) "99+" else unread.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
-        }
+        },
+    ) {
+        MudAction(label = "聊天", onClick = onClick, selected = unread > 0)
     }
 }
 
@@ -600,33 +597,27 @@ private fun ChatEntry(unread: Int, onClick: () -> Unit) {
 /**
  * 物件面板。
  *
- * ★★ 三处改动都是"真机上会坏"的地方，不是审美：
- *   ① 标题下加一条分隔线 —— 原来标题和正文同色同字号，读起来像"标题是第一行正文"；
- *   ② 正文 `LazyColumn` 给死上限（[PANEL_BODY_MAX_H]），按钮区才有位置：
- *      原来靠 `weight(1f, fill=false)`，而外层 `Column` 的高度是**由内容决定的**，
- *      行多时按钮会被顶出对话框；
- *   ③ 按钮改 `FlowRow`：一排横着摆，按钮一多就**溢出到屏幕外**（网页端 §81 量过同一处）。
+ * ★ 形状照 wushen 的 `.dialog`：**头 / 内容 / 脚**三段，头脚是 `#222` 的条。
+ *   第一版把标题和正文排在一起（同色同字号同内边距），读起来像"标题是第一行正文"；
+ *   wushen 的做法是给标题一条自己的底色 —— 这不是装饰，是让"这块是什么"分得开。
+ *
+ * ★★ **没有换成 `AlertDialog`**，理由是它表达不了这个结构：
+ *   `AlertDialog(title, text, confirmButton)` 三个槽位，而这里要
+ *   "标题栏（带关闭键）+ 可滚动正文 + 任意多个按钮"，且按钮必须**换行**。
+ *   硬套的结果是把 `title` 槽塞一个 `Row`、把一排按钮塞进 `confirmButton` ——
+ *   那就不是用组件，是拿组件当 `Box` 使，还多背一套它的内边距与宽度策略。
+ *   ⇒ **能表达的结构才用组件；表达不了就自己搭，别掰。**
+ *
+ * ★ 三处"真机会坏"的约束仍然在：正文给死上限（[PANEL_BODY_MAX_H]）、
+ *   按钮走 `FlowRow`（一排摆会溢出到屏幕外，网页端 §81 量过同一处）、
+ *   正文可滚。
  */
 @Composable
 private fun PanelDialog(panel: PanelState, onCommand: (String) -> Unit, onClose: () -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
         MudPanel(modifier = Modifier.fillMaxWidth()) {
             Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                ) {
-                    Text(
-                        text = panel.title,
-                        color = MudColors.Accent,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    MudAction(label = "关闭", onClick = onClose)
-                }
-                HorizontalDivider(thickness = 1.dp, color = MudColors.Border)
+                MudPanelHeader(title = panel.title, onClose = onClose)
                 // ★ 正文可滚：长描述不能把底部按钮挤出屏幕（网页端 §81 量过这一条）
                 LazyColumn(
                     modifier = Modifier
@@ -638,11 +629,14 @@ private fun PanelDialog(panel: PanelState, onCommand: (String) -> Unit, onClose:
                     }
                 }
                 if (panel.cmds.isNotEmpty()) {
-                    HorizontalDivider(thickness = 1.dp, color = MudColors.Border)
+                    // 脚：wushen `.dialog-footer { background-color: #222 }`
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MudColors.Header)
+                            .padding(10.dp),
                     ) {
                         for (cmd in panel.cmds) {
                             MudAction(label = cmd.label, onClick = { onCommand(cmd.cmd) })
@@ -663,27 +657,36 @@ private val PANEL_BODY_MAX_H = 320.dp
  * ★ 与 [PanelDialog] 分开是因为**它不该被随手关掉**：面板是"看看有什么"，
  *   提示框是"你得选一个"。所以这里没有"关闭"按钮 —— 只有服务端给的选项，
  *   以及点框外（`onDismissRequest`）表示"我不选"。
+ * ★ 同样没套 `AlertDialog`：正文是**服务端给的富文本**（颜色标签要渲染），
+ *   按钮数量不定。真要用 `AlertDialog` 的 `text` 槽放 `MarkupText` 也行，
+ *   但它会把正文包进自己的可滚区域，和我们给的高度上限打架。
  */
 @Composable
 private fun PromptDialog(prompt: PromptState, onCommand: (String) -> Unit, onDismiss: () -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         MudPanel(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                // 长提示同样要能滚（`look` 一个物件常有几百字）
+            Column {
+                // 提示框的"头"不是标题，是那句话本身 —— 所以不用 MudPanelHeader，
+                // 但底色照旧：让"问题"和"选项"分开（wushen 的 footer 是 #222）
                 Column(
                     modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MudColors.Header)
                         .heightIn(max = PROMPT_BODY_MAX_H)
-                        .verticalScroll(rememberScrollState()),
+                        .padding(14.dp),
                 ) {
-                    MarkupText(prompt.text)
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    ) {
+                        MarkupText(prompt.text)
+                    }
                 }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
                 ) {
                     for (cmd in prompt.cmds) {
                         MudAction(label = cmd.label, onClick = { onCommand(cmd.cmd) })
