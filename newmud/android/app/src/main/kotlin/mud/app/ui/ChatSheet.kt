@@ -94,7 +94,7 @@ fun ChatSheet(
                     .padding(bottom = 8.dp)
                     .width(36.dp)
                     .height(3.dp)
-                    .background(MudColors.Border, MudShapes.Soft),
+                    .background(MudColors.Border, MudShapes.Tag),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 for (channel in ChatChannel.entries) {

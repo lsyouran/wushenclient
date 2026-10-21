@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +32,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -175,7 +175,7 @@ private fun StatusBar(me: MeState?, status: String, fighting: Boolean) {
                     color = MudColors.Background,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
-                        .background(MudColors.Fight, MudShapes.Sharp)
+                        .background(MudColors.Fight, MudShapes.Tag)
                         .padding(horizontal = 6.dp, vertical = 1.dp),
                 )
             }
@@ -204,6 +204,9 @@ private fun StatusBar(me: MeState?, status: String, fighting: Boolean) {
  *
  * ★ `trackColor` 用 #343434：wushen 的 `.progress` 有一道 1px 边框把条形框住，
  *   而 `darkred`/`darkblue` 在纯黑底上几乎看不见 —— 轨道就是那道边框的替代品。
+ *
+ * ★ `strokeCap = Round`：6dp 高的条在方形端头下像一根被切齐的棍子，
+ *   圆头让它读起来是"一截填充"而不是"一块被裁掉的矩形"。
  */
 @Composable
 private fun ResourceBar(label: String, value: Double?, max: Double?, color: Color) {
@@ -223,14 +226,14 @@ private fun ResourceBar(label: String, value: Double?, max: Double?, color: Colo
             val fraction = (v / m).coerceIn(0.0, 1.0).toFloat()
             LinearProgressIndicator(
                 progress = { fraction },
-                modifier = Modifier.weight(1f).height(6.dp),
+                modifier = Modifier.weight(1f).height(7.dp),
                 color = color,
                 trackColor = MudColors.Border,
-                strokeCap = StrokeCap.Butt,
+                strokeCap = StrokeCap.Round,
             )
         } else {
             // 占位：把"该有条形"的位置留出来，否则有血量和没血量两行会左右错位
-            Box(modifier = Modifier.weight(1f).height(6.dp))
+            Box(modifier = Modifier.weight(1f).height(7.dp))
         }
         Text(
             text = if (v != null && m != null && known) "${v.toInt()}/${m.toInt()}" else "—",
@@ -395,20 +398,27 @@ private val ROOM_SECTION_MAX_H = 280.dp
  *
  * ★ 气血内力细条照网页端 `renderItems`：`max_hp > 0` 才画（服务端可以不发血量，
  *   画一条满的会撒谎）。玩家换个边框色 —— 一眼能看出"这里还有别的活人"。
+ *
+ * ★★ 高度读 [MudSizes.ControlH]，**不写自己的数**。上一版这里写死 `minHeight = 44.dp`
+ *   而注释说"与 MudAction 同一套尺寸"—— 那时 MudAction 已经是 M3 `Button` 的 40dp 视觉高，
+ *   于是出口那一排 40dp、人物这一排 44dp，两排下沿差 4dp，而且是**系统性的 4dp**（每次都差）。
+ *   `minimumInteractiveComponentSize()` 再补上 Button 天生就有的 48dp 触点。
  */
 @Composable
 private fun ActorChip(actor: ActorBrief, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            // 与 MudAction 同一套尺寸，否则"点方向"和"点人"两排手感不一样
-            .defaultMinSize(minHeight = 44.dp)
+            .minimumInteractiveComponentSize()
+            .heightIn(min = MudSizes.ControlH)
+            .background(if (actor.isPlayer) MudColors.ControlSelected else MudColors.Control, MudShapes.Control)
             .border(
                 width = 1.dp,
-                color = if (actor.isPlayer) MudColors.Accent else MudColors.Border,
-                shape = MudShapes.Sharp,
+                color = if (actor.isPlayer) MudColors.ControlSelectedBorder else MudColors.ControlBorder,
+                shape = MudShapes.Control,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         MarkupText(
             raw = actor.name,
@@ -442,10 +452,10 @@ private fun MiniBar(value: Double, max: Double, color: Color) {
         modifier = Modifier
             .padding(top = 2.dp)
             .width(48.dp)
-            .height(3.dp),
+            .height(4.dp),
         color = color,
         trackColor = MudColors.Border,
-        strokeCap = StrokeCap.Butt,
+        strokeCap = StrokeCap.Round,
     )
 }
 

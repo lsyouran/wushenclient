@@ -7,7 +7,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,10 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,9 +49,16 @@ import mud.app.R
  *   `Button`，血条是 `LinearProgressIndicator`，未读角标是 `Badge`）。
  *   于是这一层的职责变成"翻译 wushen 的 CSS 到 Material3 的参数"，而不是"重画一遍控件"。
  *
+ * ★★ 但"翻译"不等于"逐像素照抄" —— 递交之后又返工了一轮（2026-10-22）：
+ *   把 `.tool-item` 的 `#808080` 灰底 `#111` 深字照搬上来，得到的是黑底上一屏发光的
+ *   灰块，而且灰与黑同属无彩色，跟"黑底绿字 + 橄榄金标题"的调性根本不搭。
+ *   现在**只照抄调性，控件配色重新设计**（[MudColors.Control] 一族，理由在 `Theme.kt` 文件头）。
+ *   ⇒ 一条可复用的判据：**CSS 里"布局/色相"可以抄，"控件质感"必须按目标设备重推。**
+ *
  * ★ 没有换成组件的地方，理由写在各函数上（[MudPanel] / [MudField]）。
  *
- * ★ 配色全部来自 [MudColors]（wushen 的原值），这里不出现第二个十六进制。
+ * ★ 配色全部来自 [MudColors]、尺寸全部来自 [MudSizes]、形状全部来自 [MudShapes]，
+ *   这里不出现第二个十六进制、也不出现第二个 `dp` 写死的控件高度。
  */
 
 /**
@@ -83,40 +94,48 @@ fun MudField(
         modifier = modifier,
         enabled = enabled,
         singleLine = true,
-        shape = MudShapes.Sharp,
+        shape = MudShapes.Control,
         label = labelSlot,
         placeholder = { Text(placeholder, color = MudColors.Dim) },
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Ui),
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         colors = OutlinedTextFieldDefaults.colors(
+            // 底比面板更暗（看上去是凹进去的），与按钮的"凸起"形成对照
             focusedContainerColor = MudColors.Background,
             unfocusedContainerColor = MudColors.Background,
-            focusedBorderColor = MudColors.Accent,
-            unfocusedBorderColor = MudColors.Border,
+            // 聚焦时边框亮一档金色：这是"光标在这个框里"唯一不靠闪动的信号
+            focusedBorderColor = MudColors.PrimaryBorder,
+            unfocusedBorderColor = MudColors.ControlBorder,
             focusedTextColor = MudColors.Ui,
             unfocusedTextColor = MudColors.Ui,
             cursorColor = MudColors.Strong,
-            focusedLabelColor = MudColors.Accent,
+            focusedLabelColor = MudColors.OnPrimary,
             unfocusedLabelColor = MudColors.Dim,
         ),
     )
 }
 
 /**
- * 统一的按钮 —— 内部就是 Material3 的 [Button]，只喂颜色。
+ * 统一的按钮 —— 内部就是 Material3 的 [Button]，只喂颜色与尺寸。
  *
  * ★★ 用组件而不是自己画 `Box`，**真正的收益不是省代码，是拿到两样东西**：
- *   ① `minimumInteractiveComponentSize` —— 视觉 40dp，**触点 48dp**。
+ *   ① `minimumInteractiveComponentSize` —— 视觉 [MudSizes.ControlH]，**触点 48dp**。
  *      自己画的 44dp 方块是"视觉与触点一起缩小"，手指照样会点错；
  *   ② 涟漪 + 禁用态的语义（`Button` 会把 `enabled=false` 传给语义树，读屏会说"不可用"）。
  *
- * ★ 配色抄 wushen 的工具条按钮（`.tool-bar > .tool-item`：`#808080` 底、`#111` 字、粗体、
- *   1px `#222` 边框），主行动抄发送键（`.sender-btn`：`#ababab` 底、`#343434` 字）。
- *   这就是为什么界面上是"灰底深字"而不是"深底浅字" —— 网页端就是这样。
+ * ★★ **文字居中靠 `fillMaxWidth()` + `textAlign`，缺一不可**（上一版两样都没有）：
+ *   `Button` 的内容是一个 `Row(horizontalArrangement = Center)`，但那个 `Row` 的宽度是
+ *   **wrap content** —— 它自己贴着 `Surface` 的左边缘（`Box` 默认 `TopStart`）。
+ *   于是「按钮被拉满整行」时，居中只是"文字在它自己那一小条里居中"，
+ *   整条还在左边。加上 `fillMaxWidth()` 让 `Row` 撑满，`Arrangement.Center` 才真的居中。
+ *   ★ 在 `LazyRow` / `FlowRow` 里（宽度无界）`fillMaxWidth` 会退化成不填充，正好无害。
  *
- * @param primary 主行动（连接 / 发送）：浅灰实心
- * @param selected 页签选中态（wushen `.select` 的 `#555` 底）
+ * ★★ **大小不一**由两个常量管住：高度 [MudSizes.ControlH]、最小宽度 [MudSizes.ControlMinW]。
+ *   不设的话 `Button` 用 M3 默认 `minWidth = 58.dp`，「聊」和「小地图」同排宽度差一倍多。
+ *
+ * @param primary 主行动（连接 / 发送）：暗金底 + 浅金字
+ * @param selected 选中态（频道页签、开着的地图）：橄榄边 + 亮字
  */
 @Composable
 fun MudAction(
@@ -127,42 +146,64 @@ fun MudAction(
     primary: Boolean = false,
     selected: Boolean = false,
 ) {
-    val container = when {
-        !enabled -> MudColors.Border
-        primary -> Color(0xFFABABAB)
-        selected -> Color(0xFF555555)
-        else -> Color(0xFF808080)
-    }
-    val content = when {
-        !enabled -> MudColors.Dim
-        primary -> Color(0xFF343434)
-        selected -> MudColors.Ui
-        else -> Color(0xFF111111)
+    // 三种"皮肤"一次算完：容器色 / 边色 / 字色。分开写会各自漂移。
+    val container: Color
+    val border: Color
+    val content: Color
+    when {
+        !enabled -> {
+            container = MudColors.Disabled
+            border = MudColors.DisabledBorder
+            content = MudColors.OnDisabled
+        }
+        primary -> {
+            container = MudColors.Primary
+            border = MudColors.PrimaryBorder
+            content = MudColors.OnPrimary
+        }
+        selected -> {
+            container = MudColors.ControlSelected
+            border = MudColors.ControlSelectedBorder
+            content = MudColors.Ui
+        }
+        else -> {
+            container = MudColors.Control
+            border = MudColors.ControlBorder
+            content = MudColors.Ui
+        }
     }
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier,
-        shape = MudShapes.Sharp,
-        // `#222` 是 wushen `.tool-item` 的边框色；深一档让灰块之间有缝
-        border = BorderStroke(1.dp, Color(0xFF222222)),
+        // ★ 高度写死 + 最小宽度：这是"两排按钮下沿能对齐"的唯一来源
+        modifier = modifier
+            .defaultMinSize(minWidth = MudSizes.ControlMinW)
+            .height(MudSizes.ControlH),
+        shape = MudShapes.Control,
+        border = BorderStroke(1.dp, border),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = content,
-            disabledContainerColor = MudColors.Border,
-            disabledContentColor = MudColors.Dim,
+            disabledContainerColor = MudColors.Disabled,
+            disabledContentColor = MudColors.OnDisabled,
         ),
-        // ★ 传 `null` 而不是 `ButtonDefaults.buttonElevation()`：wushen 的按钮是平的，
-        //   而 M3 默认那 1–2dp 的阴影在纯黑底上会晕出一圈脏边
+        // ★ 传 `null` 而不是 `ButtonDefaults.buttonElevation()`：黑底上 1–2dp 的阴影
+        //   会晕出一圈脏边，看起来像按钮"发霉"
         elevation = null,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall,
-            // wushen 的 `.tool-item { font-weight: bold }`
-            fontWeight = FontWeight.Bold,
+            // ★ 与正文同档（wushen 的按钮就是 14px，没有小一号）
+            style = MaterialTheme.typography.bodyMedium,
+            // ★ Medium 而不是 Bold：12~14sp 的中文加粗在手机上会糊成一团，
+            //   而"重要"已经由主行动的暗金底色表达了，不靠字重再加一层
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            // ★★ 撑满 Row 才能真居中（见上面那段）。无界约束下自动退化，不会崩
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
@@ -170,9 +211,16 @@ fun MudAction(
 /**
  * 一块面板底（登录卡片、对话框都套它）。
  *
- * ★ 没换成 `Card`/`Surface`：wushen 的 `.dialog` 是"1px 边框 + 纯色内容区"，
- *   而 `Card` 带 elevation（阴影）与 12dp 圆角，两个都得改回去，
- *   改完剩下的能力就只是一个 `Box`。**这种"换了还得拆"的组件不用**。
+ * ★ 没换成 `Card`/`Surface`：`Card` 自带 elevation（阴影）与 12dp 圆角，
+ *   两个都得改回去，改完剩下的能力就只是一个 `Box`。**这种"换了还得拆"的组件不用**。
+ *
+ * ★ 边框比控件边**暗**一档（`#343434` vs `#3A3A3A`）：面板是"容器"，控件是"可点的东西"，
+ *   两者的轮廓在视觉上不该一样重 —— 一样重的时候，玩家分不清"这块是背景"还是"这块能按"。
+ *
+ * ★★ `clip` 不是为了圆角本身，是**为了裁子元素**：面板里几乎每一块（[MudPanelHeader]
+ *   的 `#222` 条、`PanelDialog` 的 footer）都是 `fillMaxWidth()` 的**直角**矩形。
+ *   面板一圆角，它们就会在四个角上戳出去，露出四个小尖 —— 比不圆角更难看。
+ *   `clip` 在 `background`/`border` **之前**，才会同时裁掉子节点绘制。
  */
 @Composable
 fun MudPanel(
@@ -181,8 +229,9 @@ fun MudPanel(
 ) {
     Box(
         modifier = modifier
-            .background(MudColors.Surface, MudShapes.Sharp)
-            .border(1.dp, MudColors.Border, MudShapes.Sharp),
+            .clip(MudShapes.Panel)
+            .background(MudColors.Surface)
+            .border(1.dp, MudColors.Border, MudShapes.Panel),
     ) {
         content()
     }
@@ -221,12 +270,13 @@ fun MudPanelHeader(title: String, onClose: (() -> Unit)?) {
  *
  * ★★ 它是**一张位图**（`drawable-xxxhdpi/ic_mark.png`），和启动图标出自同一张原图
  *   （`mipmap-xxxhdpi/ic_launcher_foreground.png`），只是裁掉了四周的留白。
- *   第一版是手画的 16×16 像素格（还为此维护了两份坐标），两版都被判"太丑"。
- *   教训写在 26 册 §90.2：16×16 的格子画不出武侠味，而"像不像"没有静态判据，
- *   只能靠人看 —— 所以这一处**用生成的图**，不再手拼。
+ *   第一版是手画的 16×16 像素格（还为此维护了两份坐标），第二版是"玉绿 × 纯黑"的
+ *   生成图 —— **两版都被判"太丑"**。教训写在 26 册 §90.3 / §91.3：
+ *   ① 16×16 的格子画不出武侠味；② 玉绿配纯黑是**冷色撞冷色**，两者都不暖，
+ *   摆在一起像"显示器偏色"。现在换成暖棕袍 + 古铜金 + 朱砂红，才有金石气。
  *
- * ★ 代价：位图**改不了色**。它自带黑底与玉绿/古铜金，界面底色（[MudColors.Background]）
- *   与它一致，才不会有色差。换主题色时这张图要一起换。
+ * ★ 代价：位图**改不了色**。它自带黑底与暖棕/古铜金/朱砂，界面底色
+ *   （[MudColors.Background]）与它一致，才不会有色差。换主题色时这张图要一起换。
  */
 @Composable
 fun MudMark(side: Dp, modifier: Modifier = Modifier) {

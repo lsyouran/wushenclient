@@ -86,14 +86,16 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                     text = "新武林",
                     // 字距拉开是这一屏唯一的"装饰"：同一档字号靠字重/字距拉层次，
                     // 与全站只有一档字号（`BASE_SP`）这条约定一致
+                    // ★ 颜色从 `Accent`（#808000 橄榄）换成 `OnPrimary`（浅金）：
+                    //   橄榄是 wushen **面板标题条**（#222 底）上的色，压在纯黑上会闷掉
                     style = MaterialTheme.typography.headlineSmall.copy(
-                        color = MudColors.Accent,
+                        color = MudColors.OnPrimary,
                         letterSpacing = 6.sp,
                     ),
                 )
                 Text(
                     text = "文字江湖 · 开发预览",
-                    color = MudColors.Accent,
+                    color = MudColors.Dim,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -151,7 +153,9 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
         if (vm.initialRole.isNotEmpty()) {
             // 判据是"**上次**成功过"（角色名框的初值有值），不是"现在框里有字" ——
             // 后者在玩家刚敲第一个字时就会把这句话亮出来，而那时还没连上任何东西
-            MudHint("上次连成功的是这台：地址与角色名已记住，下次不用再填。", color = MudColors.Strong)
+            // ★ 用浅金而不是 `Strong`（#00FFFF）：那是个"确认键"级别的青，拿来说一句
+            //   常驻提示会盖过它该强调的东西（连接按钮）
+            MudHint("上次连成功的是这台：地址与角色名已记住，下次不用再填。", color = MudColors.OnPrimary)
         }
 
         for (line in fresh) {
