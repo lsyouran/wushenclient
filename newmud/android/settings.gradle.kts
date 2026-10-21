@@ -35,6 +35,13 @@ include(":protocol", ":core")
 //   与安卓毫无关系 —— 没有这个开关，一台没有安卓 SDK 的机器（CI 的 JVM 作业、
 //   开发者的笔记本）连 `gradle :core:test` 都跑不起来，会被 "SDK location not found" 挡住。
 //   ⇒ JVM 作业用 `-PskipApp`，出 APK 的作业不带它。
-if (gradle.startParameter.projectProperties["skipApp"] != "true") {
+//
+// ★★ 判据必须是 `containsKey`，**不能比较值**。`-PskipApp` 这种"只给键不给值"的写法，
+//   Gradle 得到的是**空字符串** `""`，于是 `"" != "true"` 为真 ⇒ 开了等于没开，
+//   `:app` 照样被 include，JVM 作业照样在配置阶段找 SDK。
+//   这个 bug 一直活着，因为**本机没有 JDK、这条开关从来没被执行过** ——
+//   第一次真跑是在 CI（2026-10-21，26 册 §87），`jvm-tests` 直接红在这一条上。
+//   ⇒ 判据要问"这个键在不在"，不要问"它的值是不是某个字符串"。
+if (!gradle.startParameter.projectProperties.containsKey("skipApp")) {
     include(":app")
 }

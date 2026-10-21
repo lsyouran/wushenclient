@@ -94,7 +94,48 @@ jobs:
 
       - name: 协议解码 + 文本落点判据
         working-directory: newmud/android
-        run: gradle :protocol:test :core:test -PskipApp --stacktrace
+        # `set -o pipefail`：不加的话 `| tee` 会让退出码变成 tee 的 0，**红的构建看成绿的**
+        run: |
+          set -o pipefail
+          gradle :protocol:test :core:test -PskipApp --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # ★★ 为什么要这一步：Actions 的原始日志只有仓库 owner 能下载（匿名打 `/logs` 是 403），
+      #   而 **check-runs annotations 是公开只读的**。把 Kotlin 编译错行复制成注解之后，
+      #   任何人（包括没有账号的构建助手）都能定位"红在哪个文件第几行"，不必登录下载。
+      #   `e: file:///.../X.kt:12:34 消息` 是 Kotlin 编译错的固定格式。
+      - name: 把失败原因做成注解（公开只读）
+        if: failure()
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/build.log"
+          if [ ! -f "$log" ]; then
+            echo "::error::日志文件不存在 —— 说明红在 gradle 启动之前（下载/配置阶段），不是编译错"
+            exit 0
+          fi
+          # ★ `<<< ""` 会喂进一行空串，于是 n=1、去不了 fallback 分支 —— 所以先判非空
+          errs="$(grep -E '^e: ' "$log" 2>/dev/null || true)"
+          n=0
+          if [ -n "$errs" ]; then
+            while IFS= read -r line; do
+              echo "::error::$line"
+              n=$((n + 1))
+              if [ "$n" -ge 40 ]; then break; fi
+            done <<< "$errs"
+          fi
+          if [ "$n" -eq 0 ]; then
+            echo "::error::没有 Kotlin 编译错行（不是编译错），贴日志尾部："
+            tail -n 20 "$log" | while IFS= read -r line; do
+              echo "::error::tail | $line"
+            done
+          fi
+
+      - name: 失败时把构建日志传上来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-jvm-tests
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
 
       - name: 失败时把测试报告传上来
         if: failure()
@@ -127,7 +168,43 @@ jobs:
 
       - name: 构建 debug APK
         working-directory: newmud/android
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: 把失败原因做成注解（公开只读）
+        if: failure()
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/build.log"
+          if [ ! -f "$log" ]; then
+            echo "::error::日志文件不存在 —— 说明红在 gradle 启动之前（下载/配置阶段），不是编译错"
+            exit 0
+          fi
+          # ★ `<<< ""` 会喂进一行空串，于是 n=1、去不了 fallback 分支 —— 所以先判非空
+          errs="$(grep -E '^e: ' "$log" 2>/dev/null || true)"
+          n=0
+          if [ -n "$errs" ]; then
+            while IFS= read -r line; do
+              echo "::error::$line"
+              n=$((n + 1))
+              if [ "$n" -ge 40 ]; then break; fi
+            done <<< "$errs"
+          fi
+          if [ "$n" -eq 0 ]; then
+            echo "::error::没有 Kotlin 编译错行（不是编译错），贴日志尾部："
+            tail -n 20 "$log" | while IFS= read -r line; do
+              echo "::error::tail | $line"
+            done
+          fi
+
+      - name: 失败时把构建日志传上来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-assemble
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
