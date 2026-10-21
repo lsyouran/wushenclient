@@ -30,6 +30,13 @@ import mud.core.parseMarkup
  * @param indentFirstLine 要不要首行缩进 2em（wushen `.room_desc{text-indent:2em}`，
  *   `style.css:386`；房间描述要，消息流不要）。
  * @param onTextLayout 排版回执，用来判断"有没有被截断"（房间描述用它决定要不要给「展开」）。
+ *
+ * ★★ **溢出统一走 `TextOverflow.Ellipsis`，不用 `Clip`**：`Clip` 是无声截断 ——
+ *   文字在第 6 行末尾被齐根切掉，观感与"这一段本来就写到这里"没有区别。
+ *   而"给不给展开按钮"这件事由 [onTextLayout] 的 `hasVisualOverflow` 决定，
+ *   于是**省略号与按钮互为印证**：看得见「…」就一定有按钮，有按钮就一定看得到「…」。
+ *   ⚠️ 反过来也一样：`Clip` 与 `hasVisualOverflow` 是**矛盾**的组合
+ *      （`Clip` 下 `isLineEllipsized()` 恒为 false），两套标记必须一起换。
  */
 @Composable
 fun MarkupText(
@@ -67,8 +74,8 @@ fun MarkupText(
             textIndent = if (indentFirstLine) TextIndent(firstLine = 2.em) else null,
         ),
         maxLines = if (fillWidth) maxLines else 1,
-        // 按钮上折行会变成两行高的方块，挤歪整排 —— 名字太长就截，完整名字在物件面板里
-        overflow = if (fillWidth) TextOverflow.Clip else TextOverflow.Ellipsis,
+        // 折行会变成两行高的方块，挤歪整排 ⇒ 一律省略号，不静默裁掉（见文件头 ★★）
+        overflow = TextOverflow.Ellipsis,
         onTextLayout = onTextLayout,
     )
 }

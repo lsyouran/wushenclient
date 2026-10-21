@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -462,8 +463,15 @@ private fun RoomSection(
                 maxLines = if (expanded) Int.MAX_VALUE else MudSizes.RoomDescLines,
                 // 首行缩进 2em（wushen `.room_desc{text-indent:2em}`，`style.css:386`）
                 indentFirstLine = true,
+                // ★★ **不要用 `result.lineCount >= RoomDescLines` 判溢出**：
+                //   正文**恰好 6 行且完整可见**时 `lineCount == 6`，`6 >= 6` 为真 ⇒
+                //   会白给一颗点了界面毫无变化的「展开描述」。
+                //   `hasVisualOverflow` 是"排版结果被 maxLines / 宽度裁掉了"的直接标记，
+                //   与上面 `overflow = Ellipsis` 是同一件事的两面（省略号只在它为真时出现）。
+                //   依据：`TextLayoutResult.hasVisualOverflow`（Material3 1.3 公开 API，
+                //   `androidx.compose.ui.text`），本机无 JDK 无法编译验证 —— 改动时请一并复核。
                 onTextLayout = { result ->
-                    if (!expanded) descOverflow = result.lineCount >= MudSizes.RoomDescLines
+                    if (!expanded) descOverflow = result.hasVisualOverflow
                 },
             )
             if (descOverflow || expanded) {
@@ -767,8 +775,8 @@ private fun ChatEntry(unread: Int, onClick: () -> Unit) {
         },
         badge = {
             if (unread > 0) {
-                // wushen 的 `.tag { background-color: red; color: white }`
-                Badge(containerColor = MudColors.Error, contentColor = Color.White) {
+                // wushen 的 `.tool-item>.tag { background:#d03030; color:#fff }`（`style.css:925-928`）
+                Badge(containerColor = MudColors.Error, contentColor = MudColors.OnError) {
                     Text(
                         text = if (unread > 99) "99+" else unread.toString(),
                         style = MaterialTheme.typography.bodySmall,
