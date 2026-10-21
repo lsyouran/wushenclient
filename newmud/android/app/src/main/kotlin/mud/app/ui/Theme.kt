@@ -16,77 +16,133 @@ import androidx.compose.ui.unit.sp
 import mud.core.ColorToken
 
 /**
- * 配色与字号。
+ * 配色 / 形状 / 尺寸 —— **全端唯一的三个来源**（规格见 26 册 §92.3）。
  *
- * ★★ **这一套是 wushen 前端 `src/styles/global.css` 的原值，不是"重新设计的深色主题"。**
- *   第一版自定了一套 Catppuccin 味的深灰（#14161A 底、灰白字、青绿强调），
- *   看起来"现代"，但和网页端是两个 App —— 同一个角色名在网页上是绿字，
- *   在手机上是灰白字。用户的要求是"配色按 wushen 默认的前端那样调"，于是这里改成抄：
+ * ★★ **动任何颜色之前，先读这两句**（§92.4）：
  *
- *   | wushen CSS | 值 | 在哪 |
+ *   1. **"这块看不清楚" ⇒ 加一条发丝线，不是加一层底色。**
+ *      底色说的是"这是一块独立的东西"，发丝线说的是"这两块不是一件事"。
+ *      手机上两者的区别被放大了十倍（屏幕小、离眼近），
+ *      所以宁可多一条线、不要多一层底。
+ *   2. **"这个控件不像能按" ⇒ 加一条边，不是加一块底。**
+ *      wushen 的 `.act-item` 就是 `background-color: var(--bg)`（= `#000`，与页面同底）
+ *      + `border: 1px solid var(--line)`（`#808080`）。
+ *      **它本来就是为"黑底上的一排动作"设计的**，手机端与它同源，直接抄。
+ *
+ * ★★ **全屏只有四档底色**（§92.4 的层级规范）：
+ *
+ *   | 档 | 值 | 授权范围 | wushen 出处 |
+ *   |---|---|---|---|
+ *   | 面 | `#000000` | 全屏底 / 房间区 / 消息流 / 动作栏 / 输入行 / **面板正文** | `--bg`（`body{background}`）；`.dialog{background:var(--bg)}`（`style.css:1084`） |
+ *   | 凹 | `#111111` | **状态条 / 输入框 / 提示框（仅此三处）** | `--panel`，注释原文「凹面底：状态条 / 提示框」（`style.css:45`） |
+ *   | 带 | `#222222` | **浮层的头带与脚带（仅此）** | `.dialog-header`（`:1099`）/ `.dialog-footer`（`:1156`） |
+ *   | 线 | `#343434` | 区块分隔 / 进度轨道 / 禁用边 / 面板边 | `--hair`（`style.css:44`） |
+ *
+ *   ⇒ **可点的东西一律「透明底（= `Background`）+ 一条 `Line`(#808080) 边」**，
+ *     不许给整块底色。
+ *
+ * ★★ **为什么之前是"割裂"的**（§92.2）：
+ *   旧表 26 个颜色里有 **11 个自造色**（无 wushen 出处）：`#1A1A1A` / `#2A2A28` /
+ *   `#131313` / `#3A3A3A` / `#6E6220` / `#262626` / `#5E5E5E` …，六级灰彼此只差
+ *   1~2 个亮度级 —— 肉眼**分不出层次**（所以"割裂"），却又明显不属于同一套
+ *   （所以"丑"）。它们全是"为了让这块看起来像个块"而加的，本批**全部删除**
+ *   （删 8 个、改名 3 个，见 [MudColors] 的 G 段）。
+ *
+ * ★★ **与 §91 那次返工的关系 —— 别又退回去**（§92.4.1）：
+ *   §91 退掉的是 wushen 的 **`.tool-item`**（`#808080` **实心底** + `#111` 深字 +
+ *   700 粗体 + 35×35 方块，`style.css:885`）—— 那是网页端的**常驻功能键**，
+ *   搬到纯黑上就是一屏发光的亮片。
+ *   本批搬的是另一族 **`.act-item` / `.pfm-item` / `.chip`**（`style.css:711-734`）：
+ *   `background-color: var(--bg)`（**`#000`，黑底**）+ `1px solid #808080` 细边 +
+ *   `color: var(--dim)` + `border-radius: 4px` + `min-width: 2.5em` + `min-height: 2em`。
+ *
+ *   | wushen 的两族 | 语义 | 手机端该不该用 |
  *   |---|---|---|
- *   | `body { background-color }` | `#000000` | [MudColors.Background] |
- *   | `body { color }` | `#008000` | [MudColors.Text]（游戏正文） |
- *   | `.dialog-content` / `.eq-group` | `#111111` | [MudColors.Surface] |
- *   | `.dialog-header` / `.dialog-footer` | `#222222` | [MudColors.Header] |
- *   | `.progress { border }` | `#343434` | [MudColors.Border] |
- *   | `.progress-num { color }` | `#898989` | [MudColors.Dim] |
- *   | `.dialog-title { color }` | `#808000` | [MudColors.Accent] |
- *   | `.dialog-footer > .ok { color }` | `#00FFFF` | [MudColors.Strong] |
- *   | `WHT` | `#C0C0C0` | [MudColors.Ui]（界面文字） |
+ *   | `.tool-item`（灰实心块） | **随时能按的固定功能入口**（网页端是图标方块的工具条） | ❌ **不用**。手机端**没有**那条工具条 —— 入口已经长成动作栏与输入行里的**文字按钮** |
+ *   | `.act-item`（黑底细边） | **当前能做的事**（出口 / 动作 / 面板里的命令 / 消息里挂的按钮） | ✅ **照抄**。手机端所有按钮都是这一族 |
  *
- * ★ 只有 [MudColors.SurfaceAlt] 是 wushen 里**没有对应物**的：#1A1A1A，
- *   卡在 `#111`（面板内容）与 `#222`（面板头脚）之间，给"房间区 / 状态条"这种
- *   "要跟正文分开、但又不该是面板"的区块用。wushen 是网页，房间描述直接画在黑底上；
- *   手机屏幕小，不分区就分不清哪块是房间、哪块是消息流。
+ *   ⇒ **手机端只有一族可点皮肤**（[Widgets_kt] 的 `MudAction`）。
  *
- * ★★ **但"控件"这一层不能照抄（2026-10-22 返工）。**
- *   上一版把 `.tool-bar > .tool-item`（`#808080` 底 / `#111` 字 / 无圆角）与
- *   `.sender-btn`（`#ababab` 底 / `#343434` 字）原样搬到手机上，结果是：
- *   ① **灰底深字在纯黑背景上是最刺眼的一组对比** —— 网页端四周是白底页面，
- *      灰块是"比页面稍深"的凹陷按钮；搬到黑底上它变成一块**发光的亮片**，
- *      视觉权重比正文高十倍，一屏十几个按钮就是一屏亮块；
- *      ② **浅灰 + 纯黑本身就不协调** —— 冷灰是与黑同族的"无彩色"，
- *      而 wushen 的调性是**黑底绿字 + 橄榄金标题**（暖的、有色的）。
- *      灰块既不暖也不冷，它不属于这套调性，只是"从网页上剪下来的一块"；
- *      ③ 无圆角是**桌面端的正确解**（鼠标点击区域精确，方正=整齐），
- *      在触屏上是**错误解**（手指没有精确落点，方正边缘看起来像表格单元格）。
+ * ★ **唯一按目标设备重推的一处**：wushen 的 `.act-item` 边与字**同色**（都是 `#808080`），
+ *   因为它还有 `:hover`（边字一起变绿）和 `:active`（底变灰）两个额外状态来表达"能按"。
+ *   **触屏上这两个状态都不存在**（没有悬停；按下态一闪而过）⇒ 静态态必须自己说清楚：
+ *   **字用 `Ui`(#C0C0C0)，比边 `Line`(#808080) 亮一档**，形成"字亮 / 边中等 / 底黑"三级。
+ *   层级数与 wushen 相同，但全部在静态态呈现。
  *
- *   ⇒ 这一版把两者分开：
- *      · **照抄的是"调性"**（黑底 / 正文绿 `#008000` / 面板 `#111` / 标题橄榄 `#808000`
- *        / 确认青 `#00FFFF`）—— 这是"看起来像同一个游戏"的部分；
- *      · **重新设计的是"控件"**（[MudColors.Control] 一族）—— 暗底 + 细边 + 亮字，
- *        主行动用**暗金**（与标题同属暖黄系）。手机上按钮的语义是"这里能按"，
- *        靠**边框与亮度差**表达，而不是靠"比背景亮一大块"。
+ * ★ **唯一保留的自造色族是暗金**（`Primary` / `PrimaryBorder` / `OnPrimary`）：
+ *   它给"登录「连接」+ 两条「发送」"当"默认那一下"的视觉重量（一屏最多两颗）。
+ *   橄榄 `#808000` 整块用在纯黑上太亮 ⇒ 压暗到不发光。要动它**先回来改本节**。
  *
- * ★ 字号仍然只有**一档**（[BASE_SP] = 14sp），这条没变 —— wushen 的 `font-size: 14px`
- *   就是全站唯一的字号，标题靠**字重/颜色**拉层次（`.dialog-title` 只换色不换字号）。
+ * ★ 字号仍然只有**一档**（[BASE_SP] = 14sp）—— wushen 的 `font-size: 14px`
+ *   就是全站唯一的字号，标题靠**字重/颜色**拉层次（`.room-title` 只换色不换字号）。
  */
 object MudColors {
-    // ── 底 ──
+    // ── A 族 · 面与线（四档授权，见文件头）──────────────────────────────────
+    /** 面：全屏底 / 房间区 / 消息流 / 动作栏 / 输入行 / 面板正文（wushen `--bg`） */
     val Background = Color(0xFF000000)
-    val Surface = Color(0xFF111111)
-    val SurfaceAlt = Color(0xFF1A1A1A)
-    val Header = Color(0xFF222222)
-    val Border = Color(0xFF343434)
 
-    // ── 字 ──
-    /** 游戏正文（房间描述、消息流、服务端文本的默认色） */
+    /**
+     * 凹：状态条 / 提示框 —— **仅此两处**（wushen `--panel`，注释原文「凹面底：状态条 / 提示框」）。
+     *
+     * ★ §92.3.1 的表里把"输入框"也列进了凹面，但 §92.6.5 对 `MudField` 的处置是
+     *   "容器底保持 `Background`" —— 两边冲突时按**更具体的那一条**执行，理由：
+     *   wushen 的输入框是网页端的**浅灰实心** `#bebebe`（`.sender-box`，`style.css:1019`），
+     *   那是白底页面上的"输入框"，搬到纯黑屏上不成立；手机端输入框的正确形状是
+     *   **黑底 + `#808080` 细边**（与动作同一族，因为它同属"这里可以操作"）。
+     */
+    val Recessed = Color(0xFF111111)
+
+    /** 带：浮层的头带与脚带 —— **仅此**（wushen `.dialog-header` / `.dialog-footer`） */
+    val Band = Color(0xFF222222)
+
+    /** 线：区块分隔 / 进度轨道 / 禁用边 / 面板边（wushen `--hair`） */
+    val Hairline = Color(0xFF343434)
+
+    // ── B 族 · 可点的轮廓 ──────────────────────────────────────────────────
+    /**
+     * 控件边（未选中）。
+     *
+     * ★ wushen `--line`（`style.css:52`）= `.act-item{border: solid 1px gray}`。
+     *   它同时是**"这里能按"的主要信号** —— 底与页面同色，轮廓只能靠这条边。
+     */
+    val Line = Color(0xFF808080)
+
+    // ── C 族 · 字 ──────────────────────────────────────────────────────────
+    /**
+     * 服务端内容正文（房间描述 / 消息流 / 实体名）；兼状态条左竖线与提示框顶边。
+     *
+     * ★ wushen `--fg`（`body{color}`）。两处描边走同一个绿，是为了让"这一条线
+     *   和正文是同一件事" —— 不是随便挑了个强调色。
+     */
     val Text = Color(0xFF008000)
 
-    /** 界面文字：角色名、按钮上的字、对话框正文之外的标签 */
+    /**
+     * 房名 / 名号（黄）。
+     *
+     * ★ wushen `--yellow`（`style.css:51`）→ `.room-title{color:var(--yellow)}`（`:370`）、
+     *   `.state-bar>.who`（`:806`）。
+     * ★ 待定项 #1 的裁决：**照抄 wushen 的黄 `#FFFF00`**，不用橄榄 `#808000`。
+     *   代价是亮黄在纯黑上偏跳；收益是"房名"与网页端是同一个颜色，
+     *   且不会跟 `.dialog-title` 的橄榄撞色。
+     */
+    val Name = Color(0xFFFFFF00)
+
+    /** 界面壳文字：按钮上的字 / 标签 / 数值（wushen `WHT`） */
     val Ui = Color(0xFFC0C0C0)
 
-    /** 次要信息（时间戳、数值、提示） */
+    /** 次要：数值默认色 / 次级说明（wushen `--dim` / `.progress-num`） */
     val Dim = Color(0xFF898989)
 
-    /** 强调：房名、面板标题（wushen 用橄榄色 `.dialog-title`） */
+    /** 最弱：占位符 / 禁用字 /「气血」「内力」标签（wushen `--faint`，它的 `blk`） */
+    val Faint = Color(0xFF505050)
+
+    /** 面板标题（橄榄）；兼"选中态的边"（wushen `.dialog-title` `:1104`） */
     val Accent = Color(0xFF808000)
 
-    /** 可点的东西 / "确认"（wushen `.ok` 用青色） */
+    /** 确认 / 频道消息（`.dialog-footer>.ok` 与 `<hic>` / `.ln.chat.wor`（`:644`）同值） */
     val Strong = Color(0xFF00FFFF)
 
-    // ── 语义（都取自 wushen 的颜色标签表，见 `spanStyleOf`）──
+    // ── D 族 · 语义（**不动**，与 `spanStyleOf` 同源）────────────────────────
     /** 错误（`HIR`） */
     val Error = Color(0xFFFF0000)
 
@@ -104,99 +160,239 @@ object MudColors {
      *
      * ★ `darkred` 在纯黑底上非常暗 —— 网页端也一样，它靠 `.progress { border: 1px solid
      *   #343434 }` 那道边框把条形"框"出来。所以条形**没有边框就会看起来像没画**，
-     *   这一条在 [GameScreen] 里靠 `trackColor` 承担。
+     *   这一条在 `GameScreen` 里靠 `trackColor = MudColors.Hairline` 承担。
      */
     val Hp = Color(0xFF8B0000)
 
     /** 内力条（wushen `.mp > .progress-bar { background-color: darkblue }`） */
     val Mp = Color(0xFF00008B)
 
-    // ── 控件（这一族在 wushen 里**没有原值**，理由见文件头 ★★）────────────────
-    //
-    //   三个态的亮度差只有 10~15 级：黑底上的"可点"应该靠**边框**和**字色**读出来，
-    //   不靠底色的明暗跳变。这样一屏十几个按钮散在正文里，视线仍然先落在文字上。
-
-    /** 普通按钮底：比面板 `#111` 亮一档，看得出"是块凸起"，但不会跳 */
-    val Control = Color(0xFF1A1A1A)
-
-    /** 普通按钮边：比底亮 32 级 —— 这是"这里能按"的主要信号 */
-    val ControlBorder = Color(0xFF3A3A3A)
-
-    /** 选中/按下（频道页签、开着的地图） */
-    val ControlSelected = Color(0xFF2A2A28)
-
-    /** 选中态的边：偏橄榄，和面板标题 `#808000` 是同一个色系 */
-    val ControlSelectedBorder = Color(0xFF6E6220)
-
-    /** 主行动底（连接 / 发送）：暗金 —— 与 `.dialog-title` 的橄榄同族，压暗到不发光 */
+    // ── E 族 · 控件（wushen 无对应物 ⇒ 按触屏重推，全族只有 3 个）──────────────
+    /**
+     * 主行动底：**登录「连接」+ 两条「发送」**。
+     *
+     * ★ 为什么必须自造：wushen 没有"默认那一下"这个控件概念（网页端全靠按钮位置），
+     *   而手机屏需要一个暖色焦点。橄榄 `#808000` 整块用在纯黑上太亮 ⇒ 压暗到不发光。
+     *   **一屏最多两颗**。
+     */
     val Primary = Color(0xFF43390F)
 
-    /** 主行动边：比底亮，勾出轮廓 */
+    /** 主行动边：同族的亮一档，勾轮廓（与 [Primary] 同批自造） */
     val PrimaryBorder = Color(0xFF7A6820)
 
-    /** 主行动的字：浅金（不是纯白 —— 纯白在这套暖调里显得脏） */
+    /** 主行动的字：浅金 —— 不用纯白，纯白在这套暖调里显得脏（`AuthScreen` 已有同样结论） */
     val OnPrimary = Color(0xFFE9DEA1)
 
-    /** 禁用底/边：几乎与背景同色，只留一条能看到"这里有个东西但它不响应"的边 */
-    val Disabled = Color(0xFF131313)
-    val DisabledBorder = Color(0xFF262626)
+    // ── F 族 · 地图（内容绘制，属"照抄"那一族，不受四档授权约束）───────────────
+    /**
+     * 地图格底 / 格字（wushen `CreateExitsMap` 的原文三件：`#232323` 底 · `gray` 边 ·
+     * `dimgrey` 字，见 `style.css:544` 的注释）。
+     *
+     * ★ 旧值 `#898989`（= [Dim]）是**抄错档**：`Dim` 与 `dimgrey` 是两个不同的 wushen 值。
+     */
+    val MapCell = Color(0xFF232323)
 
-    /** 禁用字：仍然要**读得清** —— 灰色的字如果糊掉，玩家会以为是自己眼睛有问题 */
-    val OnDisabled = Color(0xFF5E5E5E)
+    /** 地图格字（`dimgrey`）；**中心格**用它做底、字用 [Background] 反色（同上出处） */
+    val MapCellInk = Color(0xFF696969)
+
+    // ── G 段 · 删除清单（8 个自造色，2026-10-22，§92.3.1）────────────────────
+    //
+    //   `Surface`(#111)          → 改名 `Recessed`，用途从"面板底"收窄到"三处凹面"
+    //   `Header`(#222)           → 改名 `Band`，只归浮层的头脚带
+    //   `Border`(#343434)        → 改名 `Hairline`
+    //   `SurfaceAlt`(#1A1A1A)    → 删：房间区改为**不刷底**，地图格改用 `MapCell`
+    //   `Control`(#1A1A1A)       → 删：控件一律走 `Background`
+    //   `ControlBorder`(#3A3A3A) → 删：控件边一律走 `Line`
+    //   `ControlSelected`(#2A2A28)        → 删：选中态走 `Recessed`
+    //   `ControlSelectedBorder`(#6E6220)  → 删：选中态边走 `Accent`
+    //   `Disabled`(#131313)      → 删：禁用底走 `Background`
+    //   `DisabledBorder`(#262626)→ 删：禁用边走 `Hairline`
+    //   `OnDisabled`(#5E5E5E)    → 删：禁用字走 `Faint`
+    //
+    //   ⇒ 改造后**自造色只剩 3 个**（[Primary] / [PrimaryBorder] / [OnPrimary]），
+    //     新增的 5 个（[Line] / [Faint] / [Name] / [MapCell] / [MapCellInk]）全部有 wushen 出处。
 }
 
 /**
  * 全站形状。
  *
- * ★★ 上一版只有一个 `Sharp = 2.dp`，用在按钮、输入框、面板、角标**全部地方** ——
+ * ★★ 上一版只有一个 `Sharp = 2dp`，用在按钮、输入框、面板、角标**全部地方** ——
  *   理由是"wushen 的 `.tool-item` 没有 `border-radius`"。那个理由是**照抄而不是判断**：
  *   2dp 在 3x 屏上是 6 个物理像素，看上去就是直角。
  *   直角按钮在网页上是"整齐"，在手机上是"没做完" —— 触屏控件的圆角是**手指形状**的语言。
  *
- * ★ 三档，按"这块东西多大"分：
- *   - [Control] 6dp：手指要按的东西（按钮、输入框、可点的行）
+ * ★ 档位按"这块东西多大"分：
+ *   - [Control] 6dp：手指要按的东西（按钮、输入框、可点的行、状态条）
  *   - [Panel] 10dp：一整块容器（对话框、登录卡片）
- *   - [Tag] 3dp：文本旁边的小块（「战斗中」、浮层的拖拽条、进度条）
+ *   - [Tag] 3dp：文本旁边的小块（「战斗中」、浮层的拖拽条）
  *   - [Sheet] 14dp：贴底浮层，只圆上面两角
+ *   - [Tab] 6dp：页签，只圆**上面两角**
+ *
+ * ★ 圆角半径只有 **3 / 6 / 10 / 14** 四档：[Tab] 与 [Control] 同值（6dp），
+ *   不为页签新增第五档半径。
  */
 object MudShapes {
+    /**
+     * 控件圆角。
+     *
+     * ★ wushen 的 `--radius: 4px`（`.act-item`）；4dp 在 3x 屏上只有 12 物理像素
+     *   ⇒ 手机上取 6dp（§91 已定，本批保留）。
+     */
     val Control = RoundedCornerShape(6.dp)
+
+    /** 浮层卡片：比控件大，因为它是"一大张" —— wushen `.dialog` 也是 `--radius`，这里按触屏重推 */
     val Panel = RoundedCornerShape(10.dp)
+
+    /** 文本旁的小块（角标 / 拖拽条 / 迷你条） */
     val Tag = RoundedCornerShape(3.dp)
 
     /** 贴底浮层的形状：只圆上面两角（下沿贴着屏幕，圆了反而露出底色） */
     val Sheet = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+
+    /**
+     * 页签：**只圆上面两角**（wushen `.channel-box>span{border-top-left-radius:3px;
+     *   border-top-right-radius:3px; border-bottom:none}`，`style.css:996-998`）。
+     *
+     * ★ 出处里是"方向照抄"（只圆上两角 + 无下边），半径取 [Control] 的 6dp —— 不新增第 5 档。
+     */
+    val Tab = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
 }
 
 /**
- * 尺寸常量：**只在这里有第二份就会错位**。
+ * 尺寸常量（**含间距**）：**只在这里有第二份就会错位**。
  *
  * ★★ `MudAction` 内部是 M3 的 `Button`（视觉 40dp、触点 48dp），而 `ActorChip` 是自绘的
- *   `Box`（上一版写死 `minHeight = 44.dp`，注释还写着"与 MudAction 同一套尺寸"）——
+ *   `Box`（更早一版写死 `minHeight = 44dp`，注释还写着"与 MudAction 同一套尺寸"）——
  *   两句都实现之后，**出口那一排 40dp、人物那一排 44dp**，两排下沿差 4dp。
  *   这就是"大小不一"里最难看的一种：不是随机的，是**系统性错位**。
  *
  * ⇒ 高度只有一个来源；自绘的控件读它，组件的按钮也显式设成它。
+ *
+ * ★★ **纪律（§92.3.4，可机检）**：`ui/` 下除 `Theme.kt`（本文件的定义处）与
+ *   `MapView.kt`（`MAP_*` 是 `:core` 给的**量纲换算**，不是布局值）之外，
+ *   **不出现裸的「数字.dp」**。间距与控件尺寸**同住这一个 object** ——
+ *   曾经想再开一个 `MudSpace` 放间距，但两个 object 就是两个来源，违反铁律 2。
+ *
+ * ★ **一个数值只写一次**：两个角色恰好同值时，第二个名字直接 `= 第一个名字`
+ *   （见 [BlockPadV]），避免出现"两个 token 值相同却各写各的"。
  */
 object MudSizes {
+    // ── 控件 ────────────────────────────────────────────────────────────────
     /**
      * 控件视觉高度。
      *
      * ★ 取 44dp 而不是 M3 默认的 40dp：一排按钮与一排人物卡片要**下沿对齐**，
      *   而人物卡片里有两行字（名字 + 气血条），压到 40dp 会挤。
-     *   44dp 上仍有余量给 M3 的 `minimumInteractiveComponentSize` 撑出 48dp 触点。
+     * ★★ 显式 `height()` 会**胜出** M3 内部的 `minimumInteractiveComponentSize`(48dp)：
+     *   `height()` 把约束设成 min = max，`Constraints.copy(minHeight = 48)` 会把 min
+     *   **夹到 max**，于是既不被撑高、也不抛异常（§92.6.2）。
      */
     val ControlH = 44.dp
 
     /**
+     * 页签高度：比动作矮一档 —— "切换视图"的视觉重量 < "执行动作"。
+     *
+     * ⚠️ 代价要认：触点 36dp，低于触屏推荐的 48dp。这里是**照网页端、不照触屏推荐值**：
+     *   wushen 自己的频道页签是 `line-height:1.5em + padding 0.2em` ≈ **27px**，
+     *   36dp 已经是它的 1.3 倍。真要补触点，唯一不破坏高度的办法是给 `MudTabRow`
+     *   上下各加 6dp padding，代价是浮层高 12dp —— **本批不做**，先验证真机够不够点。
+     */
+    val TabH = 36.dp
+
+    /**
      * 按钮最小宽度。
      *
-     * ★ 存在的理由就是"大小不一的按钮"：`Button` 默认 `minWidth = 58.dp`，
+     * ★ 存在的理由就是"大小不一的按钮"：`Button` 默认 `minWidth = 58dp`，
      *   于是「聊」和「小地图」在同一排里宽度差一倍多，看起来像两种控件。
-     *   76dp ≈ 4 个 14sp 汉字 + 左右内边距 —— 2 字、3 字、4 字的按钮基本等宽，
-     *   5 字以上才拉长（那时它本来就该更长）。
+     * ★ 56dp：实际标签以 2~3 个汉字为主（旧值 76dp ≈ 4 字，2 字与 4 字差一倍），
+     *   降到 56dp 后 2 字、3 字基本等宽，4 字以上才拉长（那时它本来就该更长）。
      */
-    val ControlMinW = 76.dp
+    val ControlMinW = 56.dp
+
+    /** 按钮左右内边距（配合 [ControlMinW] 让 2/3 字按钮等宽） */
+    val ControlPadH = 10.dp
+
+    // ── 线 ──────────────────────────────────────────────────────────────────
+    /** 发丝线宽度：区块分隔 / 控件边 / 面板边（wushen 的 `1px solid var(--hair)`） */
+    val HairlineW = 1.dp
+
+    /** 状态条左竖线宽度（wushen `.state-bar{border-left:2px solid var(--fg)}`，`style.css:788`） */
+    val MarkerW = 2.dp
+
+    /** 提示框顶边厚度（wushen `.warn-dialog{border-top:4px solid var(--fg)}`，`style.css:1413`） */
+    val PromptEdgeW = 4.dp
+
+    // ── 条 ──────────────────────────────────────────────────────────────────
+    /** 状态条的血 / 内力条高度（原 7dp，收到 [BarH] 这一个来源里） */
+    val BarH = 8.dp
+
+    /** 实体卡里的迷你条：高 / 宽 */
+    val MiniBarH = 4.dp
+    val MiniBarW = 48.dp
+
+    // ── 浮层 ────────────────────────────────────────────────────────────────
+    /** 浮层顶部拖拽条：宽 / 厚 */
+    val DragBarW = 36.dp
+    val DragBarH = 3.dp
+
+    // ── 间距 ────────────────────────────────────────────────────────────────
+    /** 最紧：消息行之间 / 迷你条与其上文字 / 面板头带上下 */
+    val GapTiny = 2.dp
+
+    /** 紧：文本与文本（描述与其上房名、提示语与其上输入框） */
+    val Gap1 = 4.dp
+
+    /** 中：同排控件之间、状态条三行之间 */
+    val Gap2 = 6.dp
+
+    /** 宽：同组控件的上下间距、按钮区四周 */
+    val Gap3 = 8.dp
+
+    /** 容器内缩：面板脚带四周 / 提示框按钮区四周 / 浮层左右 */
+    val InsetPad = 10.dp
+
+    /** 屏左右内边距：所有区块统一（★ 旧代码有 8/10/12/14 四份，收成这一个） */
+    val ScreenPadH = 12.dp
+
+    /** 正文内边距：面板正文左右 / 提示框正文四周 / 登录卡片内缩 */
+    val ContentPad = 14.dp
+
+    /** 区块上下内边距（与 [Gap3] 同值 —— 同值不开第二个数字来源） */
+    val BlockPadV = Gap3
+
+    // ── 版式 ────────────────────────────────────────────────────────────────
+    /**
+     * 「出口 / 此处 / 气血 / 内力」标签定宽。
+     *
+     * ★ 旧代码里有 **28dp**（`ResourceBar`）与 **32dp**（`LabelledRow`）两份 ——
+     *   两处内容起点因此错开，这才是"定宽不一致"的真相（§92.1.1）。收成一个。
+     */
+    val LabelW = 32.dp
+
+    /** 数值定宽（右对齐）：数值长短变化时条形不会跟着伸缩（每次掉血条都在抖） */
+    val NumW = 64.dp
+
+    /**
+     * 房间描述**收起态**的行数。
+     *
+     * ★ 不是 dp 是行数：房间区改回 wushen 的"不限高、不滚"（`style.css:345-356` 把
+     *   "两个滚动器"当成教训记着），长描述靠**截断 + 展开**兜住，而不是靠限高滚动。
+     */
+    val RoomDescLines = 6
+
+    /** 面板正文的最大高度：留出标题 + 按钮区，剩下都归它滚 */
+    val PanelBodyMaxH = 320.dp
+
+    /** 提示框正文的最大高度 */
+    val PromptBodyMaxH = 260.dp
+
+    // ── 登录屏（wushen 没有登录屏 ⇒ 无对应物，保留 §89.3 定下的原值）────────────
+    /** 登录屏整屏内边距：横向 / 纵向 */
+    val AuthPadH = 20.dp
+    val AuthPadV = 24.dp
+
+    /** 登录屏徽记边长 */
+    val AuthMarkSide = 48.dp
 }
 
 /** 全站唯一一档字号（wushen 的 14px） */
@@ -219,13 +415,15 @@ fun MudTheme(content: @Composable () -> Unit) {
             onPrimary = MudColors.Ui,
             background = MudColors.Background,
             onBackground = MudColors.Ui,
-            surface = MudColors.Surface,
+            // ★ 三层"容器"级 token 全部落回四档授权：面 → `Background`、
+            //   凹 → `Recessed`、带 → `Band`，不再有第 5 种灰
+            surface = MudColors.Background,
             onSurface = MudColors.Ui,
-            surfaceVariant = MudColors.SurfaceAlt,
+            surfaceVariant = MudColors.Recessed,
             onSurfaceVariant = MudColors.Dim,
-            secondaryContainer = MudColors.Header,
+            secondaryContainer = MudColors.Band,
             onSecondaryContainer = MudColors.Ui,
-            outline = MudColors.Border,
+            outline = MudColors.Hairline,
             error = MudColors.Error,
             onError = MudColors.Background,
         ),

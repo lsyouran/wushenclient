@@ -7,8 +7,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.em
 import mud.core.parseMarkup
 
 /**
@@ -20,6 +23,13 @@ import mud.core.parseMarkup
  * ★ 区间做了越界保护：解析器给的区间与它给的文本是同一份，正常不会越界；
  *   但 `addStyle` 越界会**抛**，而它跑在渲染路径上 —— 一条畸形消息就能把列表打崩。
  *   （网页端在 `markup.ts` 里靠"根本不用字符串索引"天然免疫；这里显式守一道。）
+ *
+ * @param maxLines 最多几行。**只在 [fillWidth] 为 `true` 时生效** —— 按钮上的名字
+ *   恒为单行（折行会变成两行高的方块，挤歪整排）。
+ *   房间描述传 [MudSizes.RoomDescLines]（收起）/`Int.MAX_VALUE`（展开），见 §92.5.1。
+ * @param indentFirstLine 要不要首行缩进 2em（wushen `.room_desc{text-indent:2em}`，
+ *   `style.css:386`；房间描述要，消息流不要）。
+ * @param onTextLayout 排版回执，用来判断"有没有被截断"（房间描述用它决定要不要给「展开」）。
  */
 @Composable
 fun MarkupText(
@@ -35,6 +45,9 @@ fun MarkupText(
      *   （这一条踩过一次：网页端那边对应的是 `display: inline` 的 span。）
      */
     fillWidth: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    indentFirstLine: Boolean = false,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
 ) {
     val styled = remember(raw) { parseMarkup(raw) }
     val text = remember(styled) {
@@ -49,9 +62,13 @@ fun MarkupText(
     Text(
         text = text,
         modifier = if (fillWidth) modifier.fillMaxWidth() else modifier,
-        style = MaterialTheme.typography.bodyMedium.copy(color = color),
-        maxLines = if (fillWidth) Int.MAX_VALUE else 1,
+        style = MaterialTheme.typography.bodyMedium.copy(
+            color = color,
+            textIndent = if (indentFirstLine) TextIndent(firstLine = 2.em) else null,
+        ),
+        maxLines = if (fillWidth) maxLines else 1,
         // 按钮上折行会变成两行高的方块，挤歪整排 —— 名字太长就截，完整名字在物件面板里
         overflow = if (fillWidth) TextOverflow.Clip else TextOverflow.Ellipsis,
+        onTextLayout = onTextLayout,
     )
 }

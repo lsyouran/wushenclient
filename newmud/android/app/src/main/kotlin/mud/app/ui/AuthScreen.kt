@@ -27,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import mud.app.MudViewModel
 import mud.core.Phase
@@ -75,13 +74,13 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
             .windowInsetsPadding(WindowInsets.systemBars)
             .imePadding()
             // 小屏 + 软键盘弹出时放不下 ⇒ 必须能滚，否则"连接"按钮会顶到键盘底下
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .verticalScroll(state = rememberScrollState())
+            .padding(horizontal = MudSizes.AuthPadH, vertical = MudSizes.AuthPadV),
+        verticalArrangement = Arrangement.spacedBy(space = MudSizes.AuthGap),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MudMark(side = 48.dp)
-            Column(modifier = Modifier.padding(start = 12.dp)) {
+            MudMark(side = MudSizes.AuthMarkSide)
+            Column(modifier = Modifier.padding(start = MudSizes.ScreenPadH)) {
                 Text(
                     text = "新武林",
                     // 字距拉开是这一屏唯一的"装饰"：同一档字号靠字重/字距拉层次，
@@ -101,10 +100,15 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
             }
         }
 
-        MudPanel(modifier = Modifier.fillMaxWidth()) {
+        // ★ 登录卡片**显式**传 `container = Recessed`：它是"表单"，wushen 没有登录屏，
+        //   于是按"凹面"处理（与状态条同族，§92.5.5）。其余面板一律 `Background`。
+        MudPanel(
+            modifier = Modifier.fillMaxWidth(),
+            container = MudColors.Recessed,
+        ) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(all = MudSizes.ContentPad),
+                verticalArrangement = Arrangement.spacedBy(space = MudSizes.InsetPad),
             ) {
                 MudField(
                     value = url,
@@ -149,13 +153,16 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
         }
 
         // 参数说明放在卡片**下面**：它是解释，不该夹在"填什么"和"按哪个"之间
-        MudHint("模拟器填 10.0.2.2:8123；真机填电脑的局域网地址（端口默认 8123）。")
+        MudHint(text = "模拟器填 10.0.2.2:8123；真机填电脑的局域网地址（端口默认 8123）。")
         if (vm.initialRole.isNotEmpty()) {
             // 判据是"**上次**成功过"（角色名框的初值有值），不是"现在框里有字" ——
             // 后者在玩家刚敲第一个字时就会把这句话亮出来，而那时还没连上任何东西
             // ★ 用浅金而不是 `Strong`（#00FFFF）：那是个"确认键"级别的青，拿来说一句
             //   常驻提示会盖过它该强调的东西（连接按钮）
-            MudHint("上次连成功的是这台：地址与角色名已记住，下次不用再填。", color = MudColors.OnPrimary)
+            MudHint(
+                text = "上次连成功的是这台：地址与角色名已记住，下次不用再填。",
+                color = MudColors.OnPrimary,
+            )
         }
 
         for (line in fresh) {
@@ -173,7 +180,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(height = MudSizes.Gap3))
     }
 }
 

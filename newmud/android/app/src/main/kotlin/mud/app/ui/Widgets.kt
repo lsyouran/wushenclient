@@ -5,17 +5,21 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -37,7 +41,7 @@ import mud.app.R
 /**
  * 界面零件层：**只在这里定义"长什么样"**，各处调用。
  *
- * ★★ 这个文件的立场变过一次，值得记下来：
+ * ★★ 这个文件的立场变过两次，值得记下来：
  *
  *   第一版是"什么都自己画" —— 按钮是 `Box + background + border + clickable`，
  *   理由是"Material3 的默认形状/配色和自定义深色主题打架"。那个理由在当时成立，
@@ -45,20 +49,19 @@ import mud.app.R
  *   ② **丢掉了组件自带的东西** —— 涟漪、禁用态语义、`minimumInteractiveComponentSize`
  *   的 48dp 触点、`Badge` 的角标排版、`LinearProgressIndicator` 的进度动画，全要自己补。
  *
- *   现在改成：**能交给组件的交给组件，只把颜色/形状喂给它**（[MudAction] 内部是
+ *   第二版改成：**能交给组件的交给组件，只把颜色/形状喂给它**（[MudAction] 内部是
  *   `Button`，血条是 `LinearProgressIndicator`，未读角标是 `Badge`）。
  *   于是这一层的职责变成"翻译 wushen 的 CSS 到 Material3 的参数"，而不是"重画一遍控件"。
  *
- * ★★ 但"翻译"不等于"逐像素照抄" —— 递交之后又返工了一轮（2026-10-22）：
- *   把 `.tool-item` 的 `#808080` 灰底 `#111` 深字照搬上来，得到的是黑底上一屏发光的
- *   灰块，而且灰与黑同属无彩色，跟"黑底绿字 + 橄榄金标题"的调性根本不搭。
- *   现在**只照抄调性，控件配色重新设计**（[MudColors.Control] 一族，理由在 `Theme.kt` 文件头）。
- *   ⇒ 一条可复用的判据：**CSS 里"布局/色相"可以抄，"控件质感"必须按目标设备重推。**
+ *   第三版（2026-10-22，§92）把"翻译什么"框死：
+ *   ⇒ **CSS 里"布局/色相"可以抄，"控件质感"必须按目标设备重推。**
+ *   于是可点皮肤**只有一族**（黑底 + `#808080` 细边 + `#C0C0C0` 亮字，见 [MudAction]），
+ *   主行动是唯一保留的自造色（暗金），"选中"这件事交给 [MudTab] 而不是按钮的 `selected`。
  *
  * ★ 没有换成组件的地方，理由写在各函数上（[MudPanel] / [MudField]）。
  *
  * ★ 配色全部来自 [MudColors]、尺寸全部来自 [MudSizes]、形状全部来自 [MudShapes]，
- *   这里不出现第二个十六进制、也不出现第二个 `dp` 写死的控件高度。
+ *   这里不出现第二个十六进制、也不出现裸的 `数字.dp`。
  */
 
 /**
@@ -68,8 +71,9 @@ import mud.app.R
  *   自己拼要重做光标、选区、长按菜单、无障碍语义 —— 那是"为了好看把能用的东西弄坏"。
  *
  * ★ wushen 里没有"登录表单"这种东西（它是网页 MUD，先有页面才谈登录），
- *   所以这一个控件的配色是按 wushen 的**面板内容区**推的：
- *   `#000` 底（比面板更暗，看上去是凹进去的）+ `#343434` 边框 + 聚焦时橄榄色。
+ *   所以这一个控件的配色是按 wushen 的**凹面**推的：
+ *   `#000` 底（比页面更暗，看上去是凹进去的）+ 未聚焦 `#808080` 边（wushen `--line`）、
+ *   聚焦时暗金边。
  *
  * @param label 有值时显示浮动标签（登录屏要它），无值时只显示占位符（输入行要它）
  */
@@ -96,17 +100,17 @@ fun MudField(
         singleLine = true,
         shape = MudShapes.Control,
         label = labelSlot,
-        placeholder = { Text(placeholder, color = MudColors.Dim) },
+        placeholder = { Text(placeholder, color = MudColors.Faint) },
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Ui),
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         colors = OutlinedTextFieldDefaults.colors(
-            // 底比面板更暗（看上去是凹进去的），与按钮的"凸起"形成对照
+            // 底与整屏同色（凹进去），控件边与可点的东西同色 —— 这是"框"不是"块"
             focusedContainerColor = MudColors.Background,
             unfocusedContainerColor = MudColors.Background,
-            // 聚焦时边框亮一档金色：这是"光标在这个框里"唯一不靠闪动的信号
+            // 聚焦时边框转成暗金：这是"光标在这个框里"唯一不靠闪动的信号
             focusedBorderColor = MudColors.PrimaryBorder,
-            unfocusedBorderColor = MudColors.ControlBorder,
+            unfocusedBorderColor = MudColors.Line,
             focusedTextColor = MudColors.Ui,
             unfocusedTextColor = MudColors.Ui,
             cursorColor = MudColors.Strong,
@@ -124,7 +128,7 @@ fun MudField(
  *      自己画的 44dp 方块是"视觉与触点一起缩小"，手指照样会点错；
  *   ② 涟漪 + 禁用态的语义（`Button` 会把 `enabled=false` 传给语义树，读屏会说"不可用"）。
  *
- * ★★ **文字居中靠 `fillMaxWidth()` + `textAlign`，缺一不可**（上一版两样都没有）：
+ * ★★ **文字居中靠 `fillMaxWidth()` + `textAlign`，缺一不可**（更早一版两样都没有）：
  *   `Button` 的内容是一个 `Row(horizontalArrangement = Center)`，但那个 `Row` 的宽度是
  *   **wrap content** —— 它自己贴着 `Surface` 的左边缘（`Box` 默认 `TopStart`）。
  *   于是「按钮被拉满整行」时，居中只是"文字在它自己那一小条里居中"，
@@ -132,10 +136,23 @@ fun MudField(
  *   ★ 在 `LazyRow` / `FlowRow` 里（宽度无界）`fillMaxWidth` 会退化成不填充，正好无害。
  *
  * ★★ **大小不一**由两个常量管住：高度 [MudSizes.ControlH]、最小宽度 [MudSizes.ControlMinW]。
- *   不设的话 `Button` 用 M3 默认 `minWidth = 58.dp`，「聊」和「小地图」同排宽度差一倍多。
+ *   不设的话 `Button` 用 M3 默认 `minWidth = 58dp`，「聊」和「小地图」同排宽度差一倍多。
+ *
+ * ★★ **没有 `selected` 参数**（§92.6.1）：旧版一个 `selected` 被四个语义完全不同的
+ *   调用点共用 —— 玩家卡（"这是个玩家"）、频道页签（"选中"）、地图开关（"开着"）、
+ *   聊天入口（"有未读"）。其中只有两个真的是"选中"。
+ *   ⇒ 真正的"选中"用 [MudTab]；"这是玩家"用边色 [MudColors.Accent]；
+ *     "有未读"用 `Badge`（本来就有，`selected` 是重复表达）。
+ *
+ * ★★ **皮肤只有三态，且全部是"透明底"**（§92.4 第 2 句）：
+ *
+ *   | 态 | 底 | 边 | 字 |
+ *   |---|---|---|---|
+ *   | 普通 | `Background` `#000` | `Line` `#808080` | `Ui` `#C0C0C0` |
+ *   | `primary` | `Primary` `#43390F` | `PrimaryBorder` `#7A6820` | `OnPrimary` `#E9DEA1` |
+ *   | `!enabled` | `Background` `#000` | `Hairline` `#343434` | `Faint` `#505050` |
  *
  * @param primary 主行动（连接 / 发送）：暗金底 + 浅金字
- * @param selected 选中态（频道页签、开着的地图）：橄榄边 + 亮字
  */
 @Composable
 fun MudAction(
@@ -144,7 +161,6 @@ fun MudAction(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = false,
-    selected: Boolean = false,
 ) {
     // 三种"皮肤"一次算完：容器色 / 边色 / 字色。分开写会各自漂移。
     val container: Color
@@ -152,23 +168,18 @@ fun MudAction(
     val content: Color
     when {
         !enabled -> {
-            container = MudColors.Disabled
-            border = MudColors.DisabledBorder
-            content = MudColors.OnDisabled
+            container = MudColors.Background
+            border = MudColors.Hairline
+            content = MudColors.Faint
         }
         primary -> {
             container = MudColors.Primary
             border = MudColors.PrimaryBorder
             content = MudColors.OnPrimary
         }
-        selected -> {
-            container = MudColors.ControlSelected
-            border = MudColors.ControlSelectedBorder
-            content = MudColors.Ui
-        }
         else -> {
-            container = MudColors.Control
-            border = MudColors.ControlBorder
+            container = MudColors.Background
+            border = MudColors.Line
             content = MudColors.Ui
         }
     }
@@ -180,17 +191,17 @@ fun MudAction(
             .defaultMinSize(minWidth = MudSizes.ControlMinW)
             .height(MudSizes.ControlH),
         shape = MudShapes.Control,
-        border = BorderStroke(1.dp, border),
+        border = BorderStroke(MudSizes.HairlineW, border),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = content,
-            disabledContainerColor = MudColors.Disabled,
-            disabledContentColor = MudColors.OnDisabled,
+            disabledContainerColor = MudColors.Background,
+            disabledContentColor = MudColors.Faint,
         ),
         // ★ 传 `null` 而不是 `ButtonDefaults.buttonElevation()`：黑底上 1–2dp 的阴影
         //   会晕出一圈脏边，看起来像按钮"发霉"
         elevation = null,
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+        contentPadding = PaddingValues(horizontal = MudSizes.ControlPadH),
     ) {
         Text(
             text = label,
@@ -209,29 +220,182 @@ fun MudAction(
 }
 
 /**
+ * 页签：**唯一带"选中"语义的零件**（§92.6.2）。
+ *
+ * ★ 为什么单独开一个组件而不是给 [MudAction] 加 `selected`：
+ *   页签与动作是两件事 —— 动作是"点一下发一条命令"，页签是"我现在在看哪一页"。
+ *   共用一个参数会让"有未读的聊天入口"看起来跟"当前频道"一样（旧版正是这样）。
+ *
+ * ★ 高度 [MudSizes.TabH](36dp)，比动作矮一档；形状 [MudShapes.Tab]（只圆上两角，
+ *   照 wushen `.channel-box>span{border-bottom:none}`）。
+ *
+ * ★★ **36dp 会真的生效，不会被 M3 的 48dp 触点顶掉**：M3 `Button` 内部套了
+ *   `minimumInteractiveComponentSize()`（`minHeight = 48dp`），但显式 `height(36dp)`
+ *   是 `SizeModifier`，它把约束设成 **min = max = 36**；内层的
+ *   `Constraints.copy(minHeight = 48)` 会把 `minHeight` **夹到 `maxHeight`**
+ *   ⇒ min 仍为 36，不抛异常、也不被撑高。**显式 `height()` 胜出。**
+ *   ⚠️ 代价：触点 36dp。这是**照网页端、不照触屏推荐值**的有意取舍
+ *      （wushen 自己的频道页签约 27px），**不要自作主张改回去**。
+ *
+ * ★ 配色一句话记住：**未选中是槽，选中是面。**
+ *   未选中 = `Background`(#000) 底 + `Line` 边 + `Dim` 字（在 `#111` 的浮层上像凹进去的槽）；
+ *   选中   = `Recessed`(#111) 底 + `Accent`(橄榄) 边 + `Ui` 字（与浮层同色 = 这一页被打开了）。
+ *
+ * @param modifier 由 [MudTabRow] 传 `weight(1f)` 均分，外部一般不用传
+ */
+@Composable
+fun MudTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val container = if (selected) MudColors.Recessed else MudColors.Background
+    val border = if (selected) MudColors.Accent else MudColors.Line
+    val content = if (selected) MudColors.Ui else MudColors.Dim
+    Button(
+        onClick = onClick,
+        // ★ 均分 ⇒ **不设最小宽**：页签的宽度由 `weight(1f)` 定，不靠内容撑
+        modifier = modifier.height(MudSizes.TabH),
+        shape = MudShapes.Tab,
+        border = BorderStroke(MudSizes.HairlineW, border),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = content,
+        ),
+        elevation = null,
+        contentPadding = PaddingValues(horizontal = MudSizes.Gap2),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * 一排页签 + 右端一颗定宽按钮（§92.6.3）。
+ *
+ * ★★ 抽它的直接理由就是**窄屏溢出**：旧版 ChatSheet 用 `Row` 直接摆 3 颗全尺寸
+ *   `MudAction` + 「收起」，3×76 + 3×6 + 76 = 322dp，只有 320dp 窄屏 / 放大系统字号
+ *   时才会溢出，而 `Row` **没有 `horizontalScroll`，溢出即静默裁掉右端** ——
+ *   玩家只会觉得"少了个选项"。
+ *   ⇒ 这里改成 `weight(1f)` 均分 + `trailing` 定宽 [MudSizes.ControlMinW]，
+ *     窄屏只会变窄，不会丢东西。
+ *
+ * ★ 将来地图 / 背包 / 技能的切换也用它，于是"均分"这件事只有一个实现。
+ *
+ * @param trailing 右端那颗（如「收起」），定宽 [MudSizes.ControlMinW]
+ */
+@Composable
+fun MudTabRow(
+    labels: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // ★ `for` 而不是 `forEachIndexed`：后者收的 lambda 不是 `@Composable`，
+        //   在里面调 `@Composable` 函数**编译不过**（这是 Compose 的硬约束，不是风格）。
+        for (index in labels.indices) {
+            if (index > 0) {
+                Spacer(modifier = Modifier.width(MudSizes.Gap2))
+            }
+            MudTab(
+                label = labels[index],
+                selected = index == selectedIndex,
+                onClick = { onSelect(index) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (trailing != null) {
+            Spacer(modifier = Modifier.width(MudSizes.Gap2))
+            Box(modifier = Modifier.width(MudSizes.ControlMinW)) {
+                trailing()
+            }
+        }
+    }
+}
+
+/**
+ * 一个区块容器（§92.6.4）：**统一的左右 / 上下内边距**，可选一条下沿发丝线。
+ *
+ * ★ 为什么需要它：旧代码里 5 个区块各自的 padding 是 `(12,6)` / `(12,8)` /
+ *   `(8,6)` / `(14,8)` … 四份不同的值，于是"屏左右内边距"这件事没有唯一答案，
+ *   任何一处改动都会让某一块比别的宽/窄一点。
+ *   ⇒ 现在所有区块的横向内边距都来自 [MudSizes.ScreenPadH]。
+ *
+ * ★ **只有下沿一条线**：规范是"区块之间只用一条发丝线"，画在**上一个**区块的下沿，
+ *   不画两条（两个区块之间出现两条线，比没有线更难看）。
+ *
+ * ★ 不新增 `MudDivider` —— M3 的 [HorizontalDivider] 够用（BOM `2024.12.01`
+ *   ⇒ Material3 1.3，有这个 API）。
+ */
+@Composable
+fun MudSection(
+    modifier: Modifier = Modifier,
+    hairline: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = modifier) {
+        // 内容带内边距，发丝线**不带**（它要横跨整屏，才知道"这一整条是两个区块的界"）
+        Column(
+            modifier = Modifier.padding(
+                horizontal = MudSizes.ScreenPadH,
+                vertical = MudSizes.BlockPadV,
+            ),
+        ) {
+            content()
+        }
+        if (hairline) {
+            HorizontalDivider(
+                color = MudColors.Hairline,
+                thickness = MudSizes.HairlineW,
+            )
+        }
+    }
+}
+
+/**
  * 一块面板底（登录卡片、对话框都套它）。
  *
  * ★ 没换成 `Card`/`Surface`：`Card` 自带 elevation（阴影）与 12dp 圆角，
  *   两个都得改回去，改完剩下的能力就只是一个 `Box`。**这种"换了还得拆"的组件不用**。
  *
- * ★ 边框比控件边**暗**一档（`#343434` vs `#3A3A3A`）：面板是"容器"，控件是"可点的东西"，
- *   两者的轮廓在视觉上不该一样重 —— 一样重的时候，玩家分不清"这块是背景"还是"这块能按"。
+ * ★★ 底默认是 `Background`(#000)，**照 wushen `.dialog{background:var(--bg)}`**
+ *   （`style.css:1084`）：面板正文与页面**同底**，靠 `#343434` 边和 `#222` 头脚带区分。
+ *   旧版给面板刷 `#111` ⇒ 面板变成"浮起来的一块灰"，是"多一层底"的典型。
+ *
+ * ★ 边框比控件边**暗**一档（`Hairline` #343434 vs `Line` #808080）：面板是"容器"，
+ *   控件是"可点的东西"，两者轮廓不该一样重 —— 一样重时玩家分不清
+ *   "这块是背景"还是"这块能按"。
  *
  * ★★ `clip` 不是为了圆角本身，是**为了裁子元素**：面板里几乎每一块（[MudPanelHeader]
- *   的 `#222` 条、`PanelDialog` 的 footer）都是 `fillMaxWidth()` 的**直角**矩形。
+ *   的 `#222` 条、面板脚）都是 `fillMaxWidth()` 的**直角**矩形。
  *   面板一圆角，它们就会在四个角上戳出去，露出四个小尖 —— 比不圆角更难看。
  *   `clip` 在 `background`/`border` **之前**，才会同时裁掉子节点绘制。
+ *
+ * @param container 面板底：**提示框与登录卡片传 `Recessed`**（前者照 wushen
+ *   `.warn-dialog{background:var(--panel)}`，后者是"表单"、wushen 无对应物），
+ *   其余一律 `Background`。
  */
 @Composable
 fun MudPanel(
     modifier: Modifier = Modifier,
+    container: Color = MudColors.Background,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = modifier
             .clip(MudShapes.Panel)
-            .background(MudColors.Surface)
-            .border(1.dp, MudColors.Border, MudShapes.Panel),
+            .background(container)
+            .border(MudSizes.HairlineW, MudColors.Hairline, MudShapes.Panel),
     ) {
         content()
     }
@@ -240,9 +404,13 @@ fun MudPanel(
 /**
  * 面板的标题栏（wushen `.dialog-header`：`#222` 底 + 橄榄色标题 + 灰色关闭）。
  *
- * ★ 抽出来是因为 [PanelDialog] 与将来的 `skills`/`score` 面板都是这个头。
+ * ★ 抽出来是因为物件面板与将来的 `skills` / `score` 面板都是这个头。
  *   wushen 里 `.dialog-header` 是**独立的一段**（有底色的条），不是"正文的第一行" ——
  *   第一版把标题和正文排在一起、同色同字号，读起来像"标题是第一行正文"（26 册 §89.4）。
+ *
+ * ★ 关闭键仍是 [MudAction]（44dp），**与带同高** ⇒ 带里不放第二种控件高度
+ *   （§91.3：高度只有一个来源）。曾经考虑给面板头一颗 32dp 的小关闭键，
+ *   那会在 `MudSizes` 里加第二个控件高度 —— 不做。
  */
 @Composable
 fun MudPanelHeader(title: String, onClose: (() -> Unit)?) {
@@ -250,8 +418,13 @@ fun MudPanelHeader(title: String, onClose: (() -> Unit)?) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MudColors.Header)
-            .padding(start = 12.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
+            .background(MudColors.Band)
+            .padding(
+                start = MudSizes.ScreenPadH,
+                end = MudSizes.Gap2,
+                top = MudSizes.GapTiny,
+                bottom = MudSizes.GapTiny,
+            ),
     ) {
         Text(
             text = title,

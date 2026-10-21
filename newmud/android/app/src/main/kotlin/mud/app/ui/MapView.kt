@@ -60,11 +60,15 @@ fun MapPanel(plan: MapPlan, onCommand: (String) -> Unit) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         if (maxWidth >= MAP_CANVAS_W.dp) {
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                MapCanvas(plan, onCommand)
+                MapCanvas(plan = plan, onCommand = onCommand)
             }
         } else {
-            Box(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                MapCanvas(plan, onCommand)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(state = rememberScrollState()),
+            ) {
+                MapCanvas(plan = plan, onCommand = onCommand)
             }
         }
     }
@@ -78,7 +82,7 @@ private fun MapCanvas(plan: MapPlan, onCommand: (String) -> Unit) {
             .width(MAP_CANVAS_W.dp)
             .height(plan.frame.height.dp),
     ) {
-        Canvas(modifier = Modifier.matchParentSize()) { drawConnectors(plan) }
+        Canvas(modifier = Modifier.matchParentSize()) { drawConnectors(plan = plan) }
 
         // 先画邻居格，中心格最后画 —— 顺序即层级，中心永远压在上面（网页端同一条）。
         for (cell in plan.cells) {
@@ -114,7 +118,9 @@ private fun DrawScope.drawConnectors(plan: MapPlan) {
     for (cell in plan.cells) {
         val line = cell.line
         drawLine(
-            color = MudColors.Border,
+            // ★ 格边线照 wushen `CreateExitsMap` 的 `gray`（= `--line` #808080），
+            //   不再是"发丝线" #343434 —— 后者是**分隔区块**用的，混用会让地图看着像没画完。
+            color = MudColors.Line,
             start = Offset(
                 line.x1.toFloat().dp.toPx(),
                 (line.y1 - plan.frame.y0).toFloat().dp.toPx(),
@@ -134,11 +140,14 @@ private fun DrawScope.drawConnectors(plan: MapPlan) {
 }
 
 /**
- * 一个格子：`#232323` 底 / gray 边 / **直角**（wushen `CreateExitsMap` 的原文三件），
- * 中心格反色（亮底深字）表示"你在这儿"。
+ * 一个格子：**逐值照抄** wushen `CreateExitsMap` 的原文三件
+ * （`style.css:544` 的注释）：`#232323` 底 · `gray` 边 · `dimgrey` 字；
+ * 中心格 `dimgrey` 底 + 深字（反色），表示"你在这儿"。
  *
- * ★ 底色按**语义**映射到本端配色（格子底 = 面板底、中心格 = 次要色反色），
- *   不搬网页端那套给桌面浏览器定的十六进制 —— 见 [MudColors] 的说明。
+ * ★★ 这一族是**内容绘制**，不受 §92.4 的"四档授权"约束 —— 它是照抄的色，
+ *   所以要住在 `MudColors` 的 F 族，而不是就地写十六进制。
+ *   ⚠️ 旧值用 `Dim`(#898989) 当中心格底是**抄错档**：`Dim` 与 `dimgrey`(#696969)
+ *     是两个不同的 wushen 值（§92.1.1）。
  *
  * ★ `clipToBounds` 不是为了裁装饰：格子宽度是按"4 个字 × 1 em"定的，
  *   而安卓允许用户把系统字号放大到 1.3–2 倍。放大后 4 个字装不进 78dp，
@@ -164,8 +173,8 @@ private fun MapCellBox(
             .width(MAP_CELL_W.dp)
             .height(MAP_CELL_H.dp)
             .clipToBounds()
-            .background(if (center) MudColors.Dim else MudColors.SurfaceAlt)
-            .border(1.dp, MudColors.Border)
+            .background(color = if (center) MudColors.MapCellInk else MudColors.MapCell)
+            .border(width = MudSizes.HairlineW, color = MudColors.Line)
             .clickable(onClick = onClick)
             // 触屏没有悬停：网页端靠 `title` 给的"方向 · 完整房名"，这里交给读屏
             .semantics { contentDescription = talkback },
@@ -173,7 +182,7 @@ private fun MapCellBox(
     ) {
         Text(
             text = label,
-            color = if (center) MudColors.Background else MudColors.Dim,
+            color = if (center) MudColors.Background else MudColors.MapCellInk,
             fontSize = MAP_BASE_FONT.sp,
             maxLines = 1,
             softWrap = false,

@@ -29,7 +29,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import mud.core.ChatChannel
 import mud.core.UiState
 
@@ -43,6 +42,13 @@ import mud.core.UiState
  * ★ 为什么不用 `Dialog`：Dialog 里放输入框要和输入法抢 inset，`imePadding` 常常不生效，
  *   键盘一弹就把输入框盖住。这里用 `Box` + `align(BottomCenter)`（挂在 `GameScreen` 的根 Box 上），
  *   与底部那个输入框走**同一条** inset 路径，行为一致。
+ *
+ * ★★ 频道行换成 [MudTabRow]（§92.5.2）：旧版用全尺寸 [MudAction] + `selected`，
+ *   语义错（页签不是"按下去发命令"）且**窄屏会静默裁掉右端**（`Row` 没有 `horizontalScroll`）。
+ *   现在三个页签 `weight(1f)` 均分、右端「收起」定宽 [MudSizes.ControlMinW] ⇒ 窄屏只变窄不丢东西。
+ *
+ * ★ 浮层底是 `Recessed`(#111)：它是**凹面**，与状态条同族 —— 页签"选中"时也是 `#111`，
+ *   于是"选中的那一页"与"浮层本体"连成一片（"选中是面，未选中是槽"）。
  *
  * ★★ 这个文件里**没有判断**：能不能发、发什么、缺对象时说什么，全在 `:core`
  *   （`composeChat` / `chatHintOf`，有 JVM 单测）。这里只决定形状。
@@ -79,35 +85,36 @@ fun ChatSheet(
     }
 
     Surface(
-        color = MudColors.Surface,
+        color = MudColors.Recessed,
         shape = MudShapes.Sheet,
-        // ★ 上沿一道细线：浮层与消息流同色（都是黑/深灰一系），
-        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉（wushen 的聊天页签也是 1px #C0C0C0 边）
-        border = BorderStroke(1.dp, MudColors.Border),
+        // ★ 上沿一道细线：浮层与它盖住的内容只差一档灰，
+        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉
+        //   （wushen 的聊天页签也是 `1px solid #c0c0c0` 边，`style.css:993`）
+        border = BorderStroke(width = MudSizes.HairlineW, color = MudColors.Hairline),
         modifier = modifier.fillMaxWidth().imePadding(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = MudSizes.InsetPad,
+                vertical = MudSizes.Gap3,
+            ),
+        ) {
             // 顶部那道小横杠：告诉玩家"这块可以收起"，也是底部浮层的通用语言
             Box(
                 modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(bottom = 8.dp)
-                    .width(36.dp)
-                    .height(3.dp)
-                    .background(MudColors.Border, MudShapes.Tag),
+                    .align(alignment = Alignment.CenterHorizontally)
+                    .padding(bottom = MudSizes.Gap3)
+                    .width(width = MudSizes.DragBarW)
+                    .height(height = MudSizes.DragBarH)
+                    .background(color = MudColors.Hairline, shape = MudShapes.Tag),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                for (channel in ChatChannel.entries) {
-                    MudAction(
-                        label = channel.label,
-                        onClick = { onChannel(channel) },
-                        selected = channel == state.chatChannel,
-                    )
-                    Box(modifier = Modifier.width(6.dp))
-                }
-                Box(modifier = Modifier.weight(1f))
-                MudAction(label = "收起", onClick = onClose)
-            }
+
+            MudTabRow(
+                labels = ChatChannel.entries.map { channel -> channel.label },
+                selectedIndex = ChatChannel.entries.indexOf(element = state.chatChannel),
+                onSelect = { index -> onChannel(ChatChannel.entries[index]) },
+                trailing = { MudAction(label = "收起", onClick = onClose) },
+            )
 
             // 私语对象只在这一档有意义；未指定时用错误色提醒，否则点发送只会得到一句提示
             if (state.chatChannel == ChatChannel.TELL) {
@@ -119,36 +126,36 @@ fun ChatSheet(
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = MudSizes.Gap1),
                 )
             }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(top = MudSizes.Gap3),
+                horizontalArrangement = Arrangement.spacedBy(space = MudSizes.Gap2),
             ) {
                 MudField(
                     value = text,
                     onValueChange = { text = it; hint = null },
-                    modifier = Modifier.weight(1f).focusRequester(focus),
+                    modifier = Modifier.weight(weight = 1f).focusRequester(focusRequester = focus),
                     // 占位符随频道变（「对本房说话…… / 对世界喊话…… / 对某人耳语……」），
                     // 文案住在 `ChatChannel.hint`，这里不另写一份
                     placeholder = state.chatChannel.hint,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                 )
-                MudAction(label = "发送", onClick = send)
+                MudAction(label = "发送", onClick = send, primary = true)
             }
 
-            hint?.let {
+            hint?.let { problem ->
                 Text(
-                    text = it,
+                    text = problem,
                     color = MudColors.Error,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = MudSizes.Gap1),
                 )
             }
         }
