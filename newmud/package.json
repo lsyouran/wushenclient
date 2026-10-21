@@ -12,6 +12,7 @@
     "prestart": "npm run build:web",
     "dev": "node tools/run.mjs --watch",
     "start:lan": "npm run build:web && node tools/start.mjs --lan",
+    "start:phone": "node tools/serve-phone.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
