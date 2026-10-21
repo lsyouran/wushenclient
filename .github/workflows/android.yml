@@ -23,12 +23,15 @@ on:
       - 'newmud/shared/protocol.ts'
       - 'newmud/tools/gen-kotlin-protocol.mjs'
       - '.github/workflows/android.yml'
+      # 诊断脚本改了也要重跑：它决定"失败时你能不能看到原因"
+      - '.github/ci-diagnose.py'
   pull_request:
     paths:
       - 'newmud/android/**'
       - 'newmud/shared/protocol.ts'
       - 'newmud/tools/gen-kotlin-protocol.mjs'
       - '.github/workflows/android.yml'
+      - '.github/ci-diagnose.py'
   workflow_dispatch:
 
 # 同一分支连续推两次：取消前一次。省时间，也避免"两个作业同时写同一个 artifact"
@@ -92,58 +95,55 @@ jobs:
           #   由这个 action 提供 Gradle 本体。于是本地也不需要先装 wrapper 才能出包。
           gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: 协议解码 + 文本落点判据
+      # ★★ 为什么要拆成两个 step：`:protocol:test` 一红，`:core:test` 就根本不会被调度，
+      #   于是一次 CI 只能拿到一半信息（老版本就是这样：改了 protocol 的 bug，core 的
+      #   bug 要等下一轮才看到）。`continue-on-error` 让两个都跑完，再在下一步汇总定去留。
+      - name: ':protocol 解码测试'
+        id: protocol_test
+        continue-on-error: true
         working-directory: newmud/android
         # `set -o pipefail`：不加的话 `| tee` 会让退出码变成 tee 的 0，**红的构建看成绿的**
         run: |
           set -o pipefail
-          gradle :protocol:test :core:test -PskipApp --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+          gradle :protocol:test -PskipApp --stacktrace 2>&1 | tee "$RUNNER_TEMP/protocol.log"
 
-      # ★★ 为什么要这一步：Actions 的**原始日志**只有仓库 owner 能下载（匿名打 `/logs` 是 403），
-      #   `::error::` 注解又有条数上限、在页面上还会被折叠。而 **step summary 是公开只读、
-      #   写在 job 页面正文里、没有条数限制** ⇒ 把"编译错 + 日志尾 + JUnit 失败用例"
-      #   都灌进 summary，任何人都能定位"红在哪一行"。
-      - name: 失败诊断（写进 step summary，公开可读）
+      - name: ':core 判断测试'
+        id: core_test
+        continue-on-error: true
+        working-directory: newmud/android
+        run: |
+          set -o pipefail
+          gradle :core:test -PskipApp --stacktrace 2>&1 | tee "$RUNNER_TEMP/core.log"
+
+      - name: 汇总两个测试的结论（任何一个红就红）
+        run: |
+          echo "protocol=${{ steps.protocol_test.outcome }} core=${{ steps.core_test.outcome }}"
+          if [ "${{ steps.protocol_test.outcome }}" != "success" ] || [ "${{ steps.core_test.outcome }}" != "success" ]; then
+            exit 1
+          fi
+
+      # ★★ 取证通道为什么是**注解**，不是日志、也不是 summary：
+      #   ① 原始日志：匿名 `GET /actions/runs/{id}/logs` 是 **403**，只有仓库 owner 能拿；
+      #   ② step summary：无条数限制，但 run 页面是 JS 渲染的 ⇒ `curl` 抓 HTML **拿不到正文**
+      #      （实测只抓到作业卡片，没有 summary 文字）；
+      #   ③ 注解：`commits/{sha}/check-runs` → `annotations_url`，**匿名 HTTP 就能读到正文**。
+      #   代价是每步最多 10 条 ⇒ 挑最值钱的（失败用例 > 编译错 > What went wrong > 尾部）。
+      #   ⚠️ 跑诊断的 shell 是 `bash -eo pipefail`：脚本里任何 `grep` 没匹配就会把整步打断。
+      #      所以这里交给 `ci-diagnose.py`（它自己吞掉所有异常、永远 exit 0），**不要再在 YAML 里
+      #      拼 grep** —— 上一版就在这一步翻车：诊断步骤 0 秒退出，失败时什么都看不到。
+      - name: 失败诊断（注解 + summary，匿名可读）
         if: failure()
         run: |
-          set -uo pipefail
-          S="$GITHUB_STEP_SUMMARY"
-          log="$RUNNER_TEMP/build.log"
-          {
-            echo '### 失败诊断'
-            echo ''
-            if [ -f "$log" ]; then
-              echo '**Kotlin 编译错（`e: ` 开头）**'
-              echo '```'
-              grep -E '^e: ' "$log" | sed -n '1,30p' || true
-              echo '```'
-              echo ''
-              echo '**日志最后 40 行**'
-              echo '```'
-              tail -n 40 "$log"
-              echo '```'
-            else
-              echo '日志文件不存在 —— 红在 gradle 启动之前（下载 / 配置阶段）'
-            fi
-            echo ''
-            echo '**JUnit 失败用例（期望 vs 实际）**'
-            echo '```'
-            for f in "$GITHUB_WORKSPACE"/newmud/android/*/build/test-results/test/*.xml; do
-              [ -f "$f" ] || continue
-              echo "== ${f##*/}"
-              grep -B1 -E '<failure ' "$f" | cut -c1-400 | sed -n '1,20p'
-            done
-            echo '```'
-          } >> "$S"
-          # 注解只留一两条当"指路牌"，真正的细节在 summary 里
-          echo "::error::失败详情见本页 summary（编译错 / 日志尾 / JUnit 失败用例）"
+          python3 .github/ci-diagnose.py "$RUNNER_TEMP/protocol.log" "$RUNNER_TEMP/core.log"
 
       - name: 失败时把构建日志传上来
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-jvm-tests
-          path: ${{ runner.temp }}/build.log
+          path: |
+            ${{ runner.temp }}/protocol.log
+            ${{ runner.temp }}/core.log
           if-no-files-found: ignore
 
       - name: 失败时把测试报告传上来
@@ -181,34 +181,11 @@ jobs:
           set -o pipefail
           gradle :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      - name: 把失败原因做成注解（公开只读）
+      # 同一套取证逻辑（见上面 jvm-tests 的注释：注解是唯一匿名可读的通道）
+      - name: 失败诊断（注解 + summary，匿名可读）
         if: failure()
         run: |
-          set -euo pipefail
-          log="$RUNNER_TEMP/build.log"
-          if [ ! -f "$log" ]; then
-            echo "::error::日志文件不存在 —— 说明红在 gradle 启动之前（下载/配置阶段），不是编译错"
-            exit 0
-          fi
-          # ★ `<<< ""` 会喂进一行空串，于是 n=1、去不了 fallback 分支 —— 所以先判非空
-          errs="$(grep -E '^e: ' "$log" 2>/dev/null || true)"
-          n=0
-          if [ -n "$errs" ]; then
-            while IFS= read -r line; do
-              echo "::error::$line"
-              n=$((n + 1))
-              if [ "$n" -ge 40 ]; then break; fi
-            done <<< "$errs"
-          fi
-          if [ "$n" -eq 0 ]; then
-            echo "::error::没有 Kotlin 编译错行（不是编译错），下面是**滤掉框架栈**之后的尾部："
-            # ★ 只贴栈尾没用：Gradle 的 stacktrace 最后 20 行全是框架内部
-            #   （DefaultBuildWorkGraph / DefaultWorkerLeaseService…），而根因在
-            #   "What went wrong" 那一段 —— 实测第一版 fallback 只贴出一堆 at org.gradle.*
-            filtered="$(grep -vE '^[[:space:]]+at (org\.gradle|java\.|jdk\.|sun\.|kotlin\.|com\.sun|worker\.org)' "$log" | tail -n 45 || true)"
-            [ -n "$filtered" ] || filtered="(日志已空，说明失败发生在很少的输出之后)"
-            while IFS= read -r line; do echo "::error::$line"; done <<< "$filtered"
-          fi
+          python3 .github/ci-diagnose.py "$RUNNER_TEMP/build.log"
 
       - name: 失败时把构建日志传上来
         if: failure()
