@@ -123,10 +123,13 @@ jobs:
             done <<< "$errs"
           fi
           if [ "$n" -eq 0 ]; then
-            echo "::error::没有 Kotlin 编译错行（不是编译错），贴日志尾部："
-            tail -n 20 "$log" | while IFS= read -r line; do
-              echo "::error::tail | $line"
-            done
+            echo "::error::没有 Kotlin 编译错行（不是编译错），下面是**滤掉框架栈**之后的尾部："
+            # ★ 只贴栈尾没用：Gradle 的 stacktrace 最后 20 行全是框架内部
+            #   （DefaultBuildWorkGraph / DefaultWorkerLeaseService…），而根因在
+            #   "What went wrong" 那一段 —— 实测第一版 fallback 只贴出一堆 at org.gradle.*
+            filtered="$(grep -vE '^[[:space:]]+at (org\.gradle|java\.|jdk\.|sun\.|kotlin\.|com\.sun|worker\.org)' "$log" | tail -n 45 || true)"
+            [ -n "$filtered" ] || filtered="(日志已空，说明失败发生在很少的输出之后)"
+            while IFS= read -r line; do echo "::error::$line"; done <<< "$filtered"
           fi
 
       - name: 失败时把构建日志传上来
@@ -192,10 +195,13 @@ jobs:
             done <<< "$errs"
           fi
           if [ "$n" -eq 0 ]; then
-            echo "::error::没有 Kotlin 编译错行（不是编译错），贴日志尾部："
-            tail -n 20 "$log" | while IFS= read -r line; do
-              echo "::error::tail | $line"
-            done
+            echo "::error::没有 Kotlin 编译错行（不是编译错），下面是**滤掉框架栈**之后的尾部："
+            # ★ 只贴栈尾没用：Gradle 的 stacktrace 最后 20 行全是框架内部
+            #   （DefaultBuildWorkGraph / DefaultWorkerLeaseService…），而根因在
+            #   "What went wrong" 那一段 —— 实测第一版 fallback 只贴出一堆 at org.gradle.*
+            filtered="$(grep -vE '^[[:space:]]+at (org\.gradle|java\.|jdk\.|sun\.|kotlin\.|com\.sun|worker\.org)' "$log" | tail -n 45 || true)"
+            [ -n "$filtered" ] || filtered="(日志已空，说明失败发生在很少的输出之后)"
+            while IFS= read -r line; do echo "::error::$line"; done <<< "$filtered"
           fi
 
       - name: 失败时把构建日志传上来
