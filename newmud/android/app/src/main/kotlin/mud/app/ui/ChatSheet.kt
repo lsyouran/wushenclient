@@ -113,7 +113,17 @@ fun ChatSheet(
                 labels = ChatChannel.entries.map { channel -> channel.label },
                 selectedIndex = ChatChannel.entries.indexOf(element = state.chatChannel),
                 onSelect = { index -> onChannel(ChatChannel.entries[index]) },
-                trailing = { MudAction(label = "收起", onClick = onClose) },
+                trailing = {
+                    // ★ 36dp 与三个页签同高（[MudSizes.TabH]）：旧版这里是 44dp 的
+                    //   [MudAction]，于是一行里页签 36、按钮 44 —— 两种高度并排，
+                    //   下沿错开 8dp，正是"大小不一"里最显眼的那种。
+                    //   ⚠️ 调用方的 `height` 在链上更靠外，会胜出 [MudAction] 内部的 `ControlH`。
+                    MudAction(
+                        label = "收起",
+                        onClick = onClose,
+                        modifier = Modifier.height(height = MudSizes.TabH),
+                    )
+                },
             )
 
             // 私语对象只在这一档有意义；未指定时用错误色提醒，否则点发送只会得到一句提示
@@ -142,6 +152,10 @@ fun ChatSheet(
                     // 占位符随频道变（「对本房说话…… / 对世界喊话…… / 对某人耳语……」），
                     // 文案住在 `ChatChannel.hint`，这里不另写一份
                     placeholder = state.chatChannel.hint,
+                    // ★ 槽底显式传 `Background`(#000)：**槽永远比它所在的面暗一档** ——
+                    //   这张卡片自己是 `Recessed`(#111)，槽就得是 `#000`。
+                    //   用默认的 `Recessed` 会让输入框与卡片同色，整块只剩一条边（凹槽规则见 [MudField]）。
+                    fill = MudColors.Background,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                 )

@@ -115,6 +115,10 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                     onValueChange = { url = it },
                     label = "服务端地址",
                     placeholder = MudViewModel.DEFAULT_URL,
+                    // ★ 三个输入框都显式传 `Background`(#000)：**槽永远比它所在的面暗一档** ——
+                    //   登录卡片自己是 `Recessed`(#111)（见下面 `MudPanel`），槽就得是 `#000`。
+                    //   用默认的 `Recessed` 会与卡片同色，整块只剩一条边（凹槽规则见 [MudField]）。
+                    fill = MudColors.Background,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Next,
@@ -126,6 +130,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                     onValueChange = { token = it },
                     label = "令牌（≥16 字符）",
                     placeholder = "开发包不验签，默认值可用",
+                    fill = MudColors.Background,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -134,6 +139,7 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                     onValueChange = { role = it },
                     label = "角色名",
                     placeholder = "进江湖用的名字",
+                    fill = MudColors.Background,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )

@@ -67,7 +67,6 @@ import mud.core.PromptState
 import mud.core.UiState
 import mud.core.actionBarCommands
 import mud.core.exitRows
-import mud.core.planMap
 
 /**
  * 主屏：状态条 →（断线条）→ 房间 → 消息流 → 动作栏 → 输入。
@@ -100,7 +99,27 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
     //   而权重只能由父亲（`Column`）分配 —— 子组件自己拿不到"我要不要分一半"这件事。
     var roomExpanded by rememberSaveable { mutableStateOf(false) }
 
-    // ★ 根是 `Box`：聊天浮层要**盖在**底部输入框之上，而 `Column` 里做不到"叠一层"。
+    // ★★ 地图浮层的开合也住在**主屏**（与 `roomExpanded` 同一条理由，但更硬）：
+    //   它要参与**两张底部卡片的互斥**（§93.3），而互斥的另一半 `chatOpen`
+    //   在 ViewModel 里 —— 这件事只有主屏两侧都够得着，`RoomSection` 够不着。
+    var mapOpen by rememberSaveable { mutableStateOf(false) }
+
+    // ★★ 两张底部卡片（[ChatSheet] / [MapSheet]）**互斥**：它们都贴在根 Box 的底部，
+    //   同时开着会互相盖住，而玩家只看到最上面那一张 —— 另一张就成了"点了没反应"。
+    //   ⇒ 开一张必须关另一张。`chatOpen` 只能由 ViewModel 关（`vm.closeChat()`），
+    //     `mapOpen` 归这一屏，两边各自只能关自己的那一张。
+    val toggleMap = {
+        val next = !mapOpen
+        mapOpen = next
+        // 开地图时顺手关聊天：反方向（开聊天时关地图）在 `openChat` 里做
+        if (next) vm.closeChat()
+    }
+    val openChat = {
+        mapOpen = false
+        vm.openChat()
+    }
+
+    // ★ 根是 `Box`：两张底部浮层都要**盖在**底部输入框之上，而 `Column` 里做不到"叠一层"。
     //   浮层不占常驻高度（照网页端的 `.pop`），所以不挤消息流。
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -117,7 +136,9 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
             RoomSection(
                 state = state,
                 expanded = roomExpanded,
+                mapOpen = mapOpen,
                 onToggleExpand = { roomExpanded = !roomExpanded },
+                onToggleMap = toggleMap,
                 onCommand = vm::send,
                 onPick = vm::select,
                 modifier = if (roomExpanded) Modifier.weight(1f) else Modifier,
@@ -133,7 +154,7 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
             if (cmds.isNotEmpty()) {
                 CommandBar(cmds = cmds, onCommand = vm::send)
             }
-            InputRow(unread = state.unreadChat, onChat = vm::openChat, onSend = vm::send)
+            InputRow(unread = state.unreadChat, onChat = openChat, onSend = vm::send)
         }
 
         if (state.chatOpen) {
@@ -146,6 +167,18 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
                 modifier = Modifier
                     .align(alignment = Alignment.BottomCenter)
                     .navigationBarsPadding(),
+            )
+        }
+
+        // ★ 小地图浮层（§93）：与聊天浮层互斥（见上面的 `toggleMap` / `openChat`）。
+        //   导航条内边距由 [MapSheet] 自己加（它没有 `imePadding`，见那边的 KDoc），
+        //   所以这里只负责"贴底" —— 两层都加就会让开两次导航条，凭空多 24dp。
+        if (mapOpen) {
+            MapSheet(
+                state = state,
+                onCommand = vm::send,
+                onClose = { mapOpen = false },
+                modifier = Modifier.align(alignment = Alignment.BottomCenter),
             )
         }
     }
@@ -391,11 +424,11 @@ private fun ReconnectBar(onReconnect: () -> Unit) {
 // ── 房间 ────────────────────────────────────────────────────────────────────
 
 /**
- * 房间区：房名 → 描述 →（小地图）→ 明显出口 → 此处有。
+ * 房间区：房名 → 描述 → 明显出口 → 此处有。
  *
  * ★★ 与网页端 `src/ui/room.ts` 的三块**一一对应**，只是形状从 DOM 换成 Compose：
- *   `renderExits` → 出口行、`renderItems` → 人与物、`renderMap` → [MapPanel]。
- *   三块的**内容**（哪些方向、哪些实体、点了发什么）全部来自 `:core`
+ *   `renderExits` → 出口行、`renderItems` → 人与物、`renderMap` → [MapSheet]（§93 起搬出去了）。
+ *   这几块的**内容**（哪些方向、哪些实体、点了发什么）全部来自 `:core`
  *   （`exitRows` / `selectCommandFor` / `planMap`），这里只决定怎么摆。
  *
  * ★★ **不刷底色**（§92.5.1）：wushen 的 `.content-room` **一条 CSS 规则都没有**
@@ -406,29 +439,29 @@ private fun ReconnectBar(onReconnect: () -> Unit) {
  *   ① 网页端的出口是行内可点的 `span`（鼠标点 12px 高的字很好点），
  *      这里必须给每个方向一块独立的、够大的点击区（[MudAction] 的 44dp 最小高度）；
  *      于是放弃「、」「和」这组分隔符 —— 分离的方块本身就是分隔。
- *   ② 小地图默认**收起**（网页端同样默认 `hidden`，点房名旁的图标才出）：
- *      手机上它要占掉一整段高度，而多数时候玩家只需要出口行。
- *      位置也从"房间区之上"挪到描述之后：展开时房名仍在视野里，
- *      而"不知道自己在哪儿"正是最容易迷路的时刻。
+ *   ② 小地图**不在这个区块里**（§93.1 第 1 条）：点房名行那颗「地图」弹出底部卡片
+ *      [MapSheet]。旧版把它内联在描述之后，一展开就把消息流顶薄 ——
+ *      "看地图"与"读房间"两个动作互相挤压，正是用户这次点名要改的那一处。
+ *      默认收起不变（网页端同样默认 `hidden`），只是去处从"房间里的一块"
+ *      变成"底部的一张卡"：开着时盖住的是输入区，关掉就回来。
  *
  * @param expanded 描述是不是展开态；展开时调用方会给一个 `weight(1f)`（见 [GameScreen]）
+ * @param mapOpen 小地图浮层是否开着。**开合不住在这里** —— 它住在 [GameScreen]，
+ *   因为它要参与两张底部卡片的互斥（§93.3），而互斥的另一半在 ViewModel 里
  * @param onToggleExpand 点「展开 / 收起描述」
+ * @param onToggleMap 点房名行那颗「地图 / 关地图」
  */
 @Composable
 private fun RoomSection(
     state: UiState,
     expanded: Boolean,
+    mapOpen: Boolean,
     onToggleExpand: () -> Unit,
+    onToggleMap: () -> Unit,
     onCommand: (String) -> Unit,
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var mapOpen by rememberSaveable { mutableStateOf(false) }
-    // ★ `remember(键)` 而不是每次重组都算：地图要遍历出口表、算 12 个格位，
-    //   而消息流每来一行都会重组整屏。键是"出口表 + 房名"——它们变，图才该变。
-    val plan = remember(state.exits, state.room?.name) {
-        planMap(state.exits, state.room?.name.orEmpty())
-    }
     val exits = remember(state.exits) { exitRows(state.exits) }
     val room = state.room
     val desc = room?.desc.orEmpty()
@@ -446,10 +479,15 @@ private fun RoomSection(
             )
             // ★ 地图开关不再走 `selected`：那是"这个面板开着"，
             //   与"当前频道"是两件事，共用 `selected` 会让两者长得一样（§92.6.1）。
-            //   这里靠**文案**（小地图 / 关地图）表达状态，与出口按钮同族。
+            //   这里靠**文案**（地图 / 关地图）表达状态。
+            // ★ 高度与「展开描述」同档（[MudSizes.TabH]，36dp）：房名这一行里
+            //   两颗键都是"改视图"，不是"下一道命令"，不该与出口按钮同高。
+            //   ⚠️ 调用方传的 `height` 在链上更靠外，会胜出 [MudAction] 内部的
+            //     `ControlH`(44dp) —— 这正是想要的效果（见 [MudTab] 的同一条说明）。
             MudAction(
-                label = if (mapOpen) "关地图" else "小地图",
-                onClick = { mapOpen = !mapOpen },
+                label = if (mapOpen) "关地图" else "地图",
+                onClick = onToggleMap,
+                modifier = Modifier.height(height = MudSizes.TabH),
             )
         }
 
@@ -484,9 +522,9 @@ private fun RoomSection(
             }
         }
 
-        if (mapOpen) {
-            MapPanel(plan = plan, onCommand = onCommand)
-        }
+        // ★★ 小地图**不在这里**（§93.1 第 1 条）：它搬到了底部卡片 [MapSheet]，
+        //   由 [GameScreen] 挂在根 Box 上。旧版这里是一段内联的 [MapPanel]，
+        //   一展开就把消息流顶薄。删掉之后房间区只剩"房名 / 描述 / 出口 / 此处"四样。
 
         // ★★ 分组标题「出口」**放在 LazyRow 外面**。
         //   原来是 `LazyRow` 的第一个 item，于是往右一滑它就跟着滑走了 ——
@@ -743,6 +781,9 @@ private fun InputRow(unread: Int, onChat: () -> Unit, onSend: (String) -> Unit) 
                 onValueChange = { text = it },
                 placeholder = "输入指令…",
                 modifier = Modifier.weight(weight = 1f),
+                // ★ 不传 `fill`：输入行坐在 `Background`(#000) 上 ⇒ 用默认的
+                //   `Recessed`(#111) 当槽底，看上去是嵌进黑底里的一条槽（凹槽规则见 [MudField]）。
+                //   聊天浮层与登录卡片自己是 `#111`，那边才显式传 `Background`。
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
             )

@@ -58,6 +58,14 @@ import mud.app.R
  *   于是可点皮肤**只有一族**（黑底 + `#808080` 细边 + `#C0C0C0` 亮字，见 [MudAction]），
  *   主行动是唯一保留的自造色（暗金），"选中"这件事交给 [MudTab] 而不是按钮的 `selected`。
  *
+ * ★★ **第四版（2026-10-22，§93）只动了一件事：输入框变成"凹槽"。**
+ *   规则一句话：**槽与它所在的那一档永远差一档** ——
+ *   主屏输入行坐在 `#000` 上 ⇒ 槽取 [MudColors.Recessed](#111)；
+ *   聊天浮层与登录卡片本身就是 `#111` ⇒ 槽取 [MudColors.Background](#000)。
+ *   两个方向都只差一档，读起来才是"凹进去的"而不是"又一块面板"
+ *   （"多一层底"正是 §92.1 批过的那个病）。边**只留发丝线**：
+ *   "能按"由 [MudAction] 的 `Line` 边承担（§92.4 第 2 句），输入框不是动作。
+ *
  * ★ 没有换成组件的地方，理由写在各函数上（[MudPanel] / [MudField]）。
  *
  * ★ 配色全部来自 [MudColors]、尺寸全部来自 [MudSizes]、形状全部来自 [MudShapes]，
@@ -65,16 +73,50 @@ import mud.app.R
  */
 
 /**
- * 统一的输入框。
+ * 统一的输入框 —— **全端唯一的"凹槽"**（§93.1 第 2 / 4 条）。
  *
  * ★ 用 `OutlinedTextField` + 换配色，**不自己拼 `BasicTextField`**：
  *   自己拼要重做光标、选区、长按菜单、无障碍语义 —— 那是"为了好看把能用的东西弄坏"。
  *
- * ★ wushen 里没有"登录表单"这种东西（它是网页 MUD，先有页面才谈登录），
- *   所以这一个控件的配色是按 wushen 的**凹面**推的：
- *   `#000` 底（比页面更暗，看上去是凹进去的）+ 未聚焦 `#808080` 边（wushen `--line`）、
- *   聚焦时暗金边。
+ * ★★ **凹槽规则（为什么有 `fill` 参数）**：槽底与**它所在的那一档**永远差一档 ——
+ *   · 主屏输入行坐在 `Background`(#000) 上 ⇒ 默认 [MudColors.Recessed](#111)，
+ *     看上去是"嵌进黑底里的一条槽"（旧版底与整屏同色，整块只剩一条边，
+ *     既不像槽、也不像能按，是主屏最模糊的一块）；
+ *   · 聊天浮层（[ChatSheet]）与登录卡片自己就是 `#111` ⇒ 调用方显式传
+ *     [MudColors.Background](#000)，槽比面**暗**一档。
+ *   差两档会变成"又一块面板"，同档则整块看不见 —— 所以这个值不能有第二个默认，
+ *   必须由"坐在什么底上"决定。
  *
+ * ★★ **未聚焦边只留发丝线**（[MudColors.Hairline] #343434）：
+ *   ① wushen 的 `.chat-input>.sender-box` 本来就是 `border: none; outline: none`
+ *      （`style.css:1025-1026`）—— 网页端靠 `#bebebe` 亮底勾出槽，我们的槽
+ *      只比面差一档，**不需要**一条 `#808080` 的边；
+ *   ② 语义上更重要：`#808080` 的边是"这里能按"的信号（§92.4 第 2 句），
+ *      输入框**不是动作**。给它一条和按钮一样重的边，等于在按钮旁边又摆了一排按钮。
+ *   聚焦时转暗金边 —— 与未聚焦态差出两档，"光标在这儿"足够认。
+ *
+ * ★ 占位符用 [MudColors.Dim](#898989) 而不是 `Faint`(#505050)：指令行**没有浮动标签**
+ *   （`label == null`），占位符是那一行唯一的"这里输什么"。`#505050` 压在 `#111` 上
+ *   在户外基本看不见，而这行字是玩家唯一能看到的说明。
+ *
+ * ★ wushen 没有"登录表单"这种东西（它是网页 MUD，先有页面才谈登录），这一族的取值
+ *   全部按触屏重推。wushen 原文（`.chat-input>.sender-box`，`style.css:1019-1034`）是
+ *   `#bebebe` 底 + `#000` 字，与本项目「字亮 / 边中等 / 底黑」正好相反 ⇒
+ *   **有意偏离 wushen**，完整理由见 [MudColors.Recessed] 的 KDoc
+ *   （★ 那条理由是"字的方向相反"，**不是**"白底页面上的输入框" —— wushen 页面底色
+ *   本来就是 `--bg:#000000`，`style.css:29`）。
+ *
+ * ★★ **为什么不把高度钉到 [MudSizes.ControlH]**(44dp)（§93.4）：M3 的
+ *   `OutlinedTextFieldDefaults.MinHeight` 是 **56dp**（material3 1.3.1，BOM 2024.12.01），
+ *   而经典 `(value, onValueChange)` 重载**不暴露 `contentPadding`** ⇒ 硬钉 44dp
+ *   会把文字与浮动标签压进 12dp 的盒子里，字形被裁。两条将来的路，**都要先对着
+ *   material3 1.3.1 核 API 是否存在**（本机无 JDK，编不了）：
+ *   ① 换成暴露 `contentPadding` 的新重载（`TextFieldState` 那一族）；
+ *   ② `OutlinedTextFieldDefaults.decorator(...)` + `BasicTextField` 自绘。
+ *   ⇒ **本批不钉高度**，字段保持 56dp 自然高度；输入行因此比动作栏高一档，
+ *     这是已知代价（§93.4）。
+ *
+ * @param fill 槽底：**取它所在那一档的相邻档**（见上面的凹槽规则）
  * @param label 有值时显示浮动标签（登录屏要它），无值时只显示占位符（输入行要它）
  */
 @Composable
@@ -84,6 +126,7 @@ fun MudField(
     placeholder: String,
     modifier: Modifier = Modifier,
     label: String? = null,
+    fill: Color = MudColors.Recessed,
     enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
@@ -100,17 +143,19 @@ fun MudField(
         singleLine = true,
         shape = MudShapes.Control,
         label = labelSlot,
-        placeholder = { Text(placeholder, color = MudColors.Faint) },
+        placeholder = { Text(placeholder, color = MudColors.Dim) },
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = MudColors.Ui),
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         colors = OutlinedTextFieldDefaults.colors(
-            // 底与整屏同色（凹进去），控件边与可点的东西同色 —— 这是"框"不是"块"
-            focusedContainerColor = MudColors.Background,
-            unfocusedContainerColor = MudColors.Background,
-            // 聚焦时边框转成暗金：这是"光标在这个框里"唯一不靠闪动的信号
+            // 槽底：与它所在的那一档差一档（凹槽规则，见 KDoc）—— 聚焦不换底，
+            // 换底会让"光标进来了"看起来像"换了另一个框"
+            focusedContainerColor = fill,
+            unfocusedContainerColor = fill,
+            // 聚焦时边框转成暗金：这是"光标在这个框里"唯一不靠闪动的信号；
+            // 未聚焦只留发丝线（输入框不是动作，不与按钮抢"能按"的语义）
             focusedBorderColor = MudColors.PrimaryBorder,
-            unfocusedBorderColor = MudColors.Line,
+            unfocusedBorderColor = MudColors.Hairline,
             focusedTextColor = MudColors.Ui,
             unfocusedTextColor = MudColors.Ui,
             cursorColor = MudColors.Strong,

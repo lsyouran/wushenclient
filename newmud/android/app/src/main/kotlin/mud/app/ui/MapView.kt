@@ -1,19 +1,28 @@
 package mud.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -22,6 +31,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import mud.core.MAP_BASE_FONT
@@ -32,6 +42,8 @@ import mud.core.MAP_CX
 import mud.core.MAP_CY
 import mud.core.MapPlan
 import mud.core.MapFrame
+import mud.core.UiState
+import mud.core.planMap
 
 /**
  * 小地图（wushen 的 `.map-panel`）：九宫格，格子写**目的地房名**，点一下就走。
@@ -49,7 +61,65 @@ import mud.core.MapFrame
  *
  * ★ 尺寸 1:1（viewBox 单位 = dp）：绘图坐标与模板尺寸同量纲，
  *   "格子里 4 个字正好装下"这个结论才在手机上仍然成立。
+ *
+ * ★★ 本文件对外的入口有**两个**（§93）：
+ *   [MapSheet] 是**底部弹出的一张卡片**（`GameScreen` 挂在根 Box 上），
+ *   [MapPanel] 是卡片里的那张九宫格本体。拆开的理由：卡片管"贴底 / 让开导航栏 /
+ *   关掉它"，九宫格管"格子摆哪儿"—— 前者每个浮层各写一遍就会各自漂移
+ *   （[ChatSheet] 已经有一套了），后者一个字都不该为容器改变。
  */
+@Composable
+fun MapSheet(
+    state: UiState,
+    onCommand: (String) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // ★ `remember(键)` 而不是每次重组都算：地图要遍历出口表、算 12 个格位，
+    //   而消息流每来一行都会重组整屏。键是"出口表 + 房名"——它们变，图才该变。
+    //   （与旧版 `RoomSection` 里那一处是同一条理由，只是跟着浮层一起搬了过来。）
+    val plan = remember(state.exits, state.room?.name) {
+        planMap(state.exits, state.room?.name.orEmpty())
+    }
+    Surface(
+        color = MudColors.Recessed,
+        shape = MudShapes.Sheet,
+        // ★ 上沿一道细线：与 [ChatSheet] 同一条理由 —— 卡片与它盖住的内容只差一档灰，
+        //   不描边的话"这块是新弹出来的"只能靠内容变化察觉
+        border = BorderStroke(width = MudSizes.HairlineW, color = MudColors.Hairline),
+        modifier = modifier.fillMaxWidth().navigationBarsPadding(),
+    ) {
+        Column(
+            modifier = Modifier.padding(
+                horizontal = MudSizes.InsetPad,
+                vertical = MudSizes.Gap3,
+            ),
+            verticalArrangement = Arrangement.spacedBy(space = MudSizes.Gap2),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "小地图",
+                    color = MudColors.Dim,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(weight = 1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                MudAction(
+                    label = "关地图",
+                    onClick = onClose,
+                    // ★ 36dp 与页签同高（[MudSizes.TabH]）：这颗键在卡片里的角色
+                    //   就是 [ChatSheet] 页签行右端那一颗，两种高度并排才难看。
+                    //   ⚠️ 显式 `height()` 会胜出 `MudAction` 内部的 `ControlH`：
+                    //   调用方的高度在链上**更靠外**，先把约束钉死，内层那个被夹到同一个值。
+                    modifier = Modifier.height(height = MudSizes.TabH),
+                )
+            }
+            MapPanel(plan = plan, onCommand = onCommand)
+        }
+    }
+}
+
 @Composable
 fun MapPanel(plan: MapPlan, onCommand: (String) -> Unit) {
     // ★★ 宽度是**算好的固定值**（276dp，几何靠它 1:1），而屏幕可能比它窄 ——
