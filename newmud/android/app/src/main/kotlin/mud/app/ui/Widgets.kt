@@ -107,12 +107,22 @@ import mud.app.R
  *   本来就是 `--bg:#000000`，`style.css:29`）。
  *
  * ★★ **为什么不把高度钉到 [MudSizes.ControlH]**(44dp)（§93.4）：M3 的
- *   `OutlinedTextFieldDefaults.MinHeight` 是 **56dp**（material3 1.3.1，BOM 2024.12.01），
+ *   `OutlinedTextFieldDefaults.MinHeight` 是 **56dp**（material3 1.3.1，BOM 2024.12.01；
+ *   `OutlinedTextField.kt:224/399` 用它配 `.defaultMinSize(minHeight = …)` 强制），
  *   而经典 `(value, onValueChange)` 重载**不暴露 `contentPadding`** ⇒ 硬钉 44dp
- *   会把文字与浮动标签压进 12dp 的盒子里，字形被裁。两条将来的路，**都要先对着
- *   material3 1.3.1 核 API 是否存在**（本机无 JDK，编不了）：
- *   ① 换成暴露 `contentPadding` 的新重载（`TextFieldState` 那一族）；
- *   ② `OutlinedTextFieldDefaults.decorator(...)` + `BasicTextField` 自绘。
+ *   会把文字与浮动标签压进 12dp 的盒子里，字形被裁。
+ *
+ *   **1.3.1 里真实存在的逃生口只有一条**：`OutlinedTextFieldDefaults.DecorationBox(...)`
+ *   （`@ExperimentalMaterial3Api`，签名里**有** `contentPadding: PaddingValues` 参数）
+ *   + `BasicTextField(decorationBox = …)` 自绘。代价是自己拼装饰盒 ——
+ *   光标 / 选区 / 长按菜单 / 无障碍语义要重新担一遍（见本函数开头那一条）。
+ *
+ *   ⚠️ `TextFieldState` 重载与 `OutlinedTextFieldDefaults.decorator(...)` **都是 1.4.0+
+ *   的 API，1.3.1 里没有**（1.3.1 的 `OutlinedTextField.kt` 只有 String / TextFieldValue
+ *   两个重载，全树 0 处 `TextFieldState`、0 处 `decorator`）—— 想走那条，
+ *   **先把 BOM 升到 ≥1.4.0**。本机无 JDK 编不了 ⇒ **动手前先对着 sources jar 核
+ *   API 是否存在**，别照着网上的新文档直接写。
+ *
  *   ⇒ **本批不钉高度**，字段保持 56dp 自然高度；输入行因此比动作栏高一档，
  *     这是已知代价（§93.4）。
  *
