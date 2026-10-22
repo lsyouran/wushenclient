@@ -35,7 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import mud.app.R
 
 /**
@@ -183,12 +182,15 @@ fun MudField(
  *      自己画的 44dp 方块是"视觉与触点一起缩小"，手指照样会点错；
  *   ② 涟漪 + 禁用态的语义（`Button` 会把 `enabled=false` 传给语义树，读屏会说"不可用"）。
  *
- * ★★ **文字居中靠 `fillMaxWidth()` + `textAlign`，缺一不可**（更早一版两样都没有）：
- *   `Button` 的内容是一个 `Row(horizontalArrangement = Center)`，但那个 `Row` 的宽度是
- *   **wrap content** —— 它自己贴着 `Surface` 的左边缘（`Box` 默认 `TopStart`）。
- *   于是「按钮被拉满整行」时，居中只是"文字在它自己那一小条里居中"，
- *   整条还在左边。加上 `fillMaxWidth()` 让 `Row` 撑满，`Arrangement.Center` 才真的居中。
- *   ★ 在 `LazyRow` / `FlowRow` 里（宽度无界）`fillMaxWidth` 会退化成不填充，正好无害。
+ * ★★ **通栏只走 `fillWidth = true`，调用处不许再自己传 `Modifier.fillMaxWidth()`**。
+ *   这条是被真机打回来的（2026-10-22）：`Row` 测量非 weight 子项时 `maxWidth` 仍是
+ *   **整行可用宽**，而 `Text.fillMaxWidth()` 会把这个宽度"接住"并**反向撑大 `Button`**，
+ *   于是同一行里 `weight(1f)` 的兄弟被压成 0 宽 —— 表现为"按钮通栏、旁边的字不见了"
+ *   （房名行地图键、聊天输入行都这样坏过：输入框宽度 0，只剩一条聚焦边）。
+ *   ⇒ 文字居中只在**按钮宽度已经确定**时才需要 `fillMaxWidth`；宽度由内容决定时
+ *     `Button` 内部的 `Row(Arrangement.Center)` 已经居中了，多这一句只会造成反向依赖。
+ *   ★ `LazyRow` / `FlowRow` 里 `fillMaxWidth` 会退化成不填充（宽度无界），
+ *     所以那里曾经"碰巧"没坏 —— 但那是**巧合**，不是保证，别把它当成可以随便写的理由。
  *
  * ★★ **大小不一**由两个常量管住：高度 [MudSizes.ControlH]、最小宽度 [MudSizes.ControlMinW]。
  *   不设的话 `Button` 用 M3 默认 `minWidth = 58dp`，「聊」和「小地图」同排宽度差一倍多。
@@ -208,6 +210,12 @@ fun MudField(
  *   | `!enabled` | `Background` `#000` | `Hairline` `#343434` | `Faint` `#505050` |
  *
  * @param primary 主行动（连接 / 发送）：暗金底 + 浅金字
+ * @param fillWidth 通栏：把按钮**自身**撑满父宽，并把文字居中。通栏只能走这个参数 ——
+ *   调用处自己传 `Modifier.fillMaxWidth()` 只会让按钮撑满而文字靠左
+ *   （`Button` 内部的内容 `Row` 是 wrap content，贴着左边缘）。
+ * @param dense 密集档：高 [MudSizes.ChipH](32dp)、最小宽 [MudSizes.ChipMinW](40dp)。
+ *   给"一排里并列很多个"的选项用（出口方向、动作栏）。**不是**给主行动用的 ——
+ *   「发送」「连接」这类一次点一下就改变状态的按钮仍用 [MudSizes.ControlH]。
  */
 @Composable
 fun MudAction(
@@ -216,6 +224,8 @@ fun MudAction(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = false,
+    fillWidth: Boolean = false,
+    dense: Boolean = false,
 ) {
     // 三种"皮肤"一次算完：容器色 / 边色 / 字色。分开写会各自漂移。
     val container: Color
@@ -238,13 +248,21 @@ fun MudAction(
             content = MudColors.Ui
         }
     }
+    // ★ 高度 / 最小宽 / 左右内边距三件一起按档取：只换其中一件会让"密排"变成
+    //   "又矮又宽"或"又窄又高"，两种都比不改更丑。
+    //   三者仍只有 [MudSizes] 一个来源 —— 这里只是在两档之间选，不产生新数值。
+    val visualH = if (dense) MudSizes.ChipH else MudSizes.ControlH
+    val minW = if (dense) MudSizes.ChipMinW else MudSizes.ControlMinW
+    val padH = if (dense) MudSizes.Gap2 else MudSizes.ControlPadH
+
     Button(
         onClick = onClick,
         enabled = enabled,
         // ★ 高度写死 + 最小宽度：这是"两排按钮下沿能对齐"的唯一来源
         modifier = modifier
-            .defaultMinSize(minWidth = MudSizes.ControlMinW)
-            .height(MudSizes.ControlH),
+            .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
+            .defaultMinSize(minWidth = minW)
+            .height(visualH),
         shape = MudShapes.Control,
         border = BorderStroke(MudSizes.HairlineW, border),
         colors = ButtonDefaults.buttonColors(
@@ -256,7 +274,7 @@ fun MudAction(
         // ★ 传 `null` 而不是 `ButtonDefaults.buttonElevation()`：黑底上 1–2dp 的阴影
         //   会晕出一圈脏边，看起来像按钮"发霉"
         elevation = null,
-        contentPadding = PaddingValues(horizontal = MudSizes.ControlPadH),
+        contentPadding = PaddingValues(horizontal = padH),
     ) {
         Text(
             text = label,
@@ -268,8 +286,9 @@ fun MudAction(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            // ★★ 撑满 Row 才能真居中（见上面那段）。无界约束下自动退化，不会崩
-            modifier = Modifier.fillMaxWidth(),
+            // ★★ 只在**按钮宽度已经确定**（`fillWidth`）时才撑满文字 ——
+            //   见 KDoc 里 2026-10-22 那条：无脑撑满会反向决定按钮宽度
+            modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
         )
     }
 }
@@ -295,6 +314,11 @@ fun MudAction(
  * ★ 配色一句话记住：**未选中是槽，选中是面。**
  *   未选中 = `Background`(#000) 底 + `Line` 边 + `Dim` 字（在 `#111` 的浮层上像凹进去的槽）；
  *   选中   = `Recessed`(#111) 底 + `Accent`(橄榄) 边 + `Ui` 字（与浮层同色 = 这一页被打开了）。
+ *
+ * ★ `Text` 里的 `fillMaxWidth()` 在这里**不构成** [MudAction] 那个反向撑大问题：
+ *   `MudTab` 的宽度**永远**由调用方给定（[MudTabRow] 的 `weight(1f)`，或定宽 `Box`），
+ *   不存在"由文字决定按钮多宽"这条路径。若将来有地方直接摆一颗不约束宽度的 `MudTab`，
+ *   它会通栏 —— 那时该改的是调用处，不是这里。
  *
  * @param modifier 由 [MudTabRow] 传 `weight(1f)` 均分，外部一般不用传
  */

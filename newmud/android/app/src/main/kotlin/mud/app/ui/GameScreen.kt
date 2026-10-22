@@ -67,6 +67,7 @@ import mud.core.PromptState
 import mud.core.UiState
 import mud.core.actionBarCommands
 import mud.core.exitRows
+import mud.core.planMap
 
 /**
  * 主屏：状态条 →（断线条）→ 房间 → 消息流 → 动作栏 → 输入。
@@ -92,6 +93,50 @@ import mud.core.exitRows
  *   Compose 的 `Dialog` 由系统负责居中与避让，**没有可以算错的位置**。
  *   代价是它一定会遮住正文 —— 所以只有"要玩家拿主意"和"单个物件的对话"才用它，
  *   纯播报一律进消息流（这条也正是 §80 的结论）。
+ *
+ * ★★ **§94（2026-10-22）只重排了房间区里的地图，理由来自"点"和"看"的距离：**
+ *
+ *   ① 房名行的开关与地图**必须挨着**。上一版把地图做成"底部弹出卡片"（`MapSheet`），
+ *      开关在房名行、卡片在屏幕最下面，中间隔着整屏消息流 —— 点完还得跨屏看结果，
+ *      而且卡片会盖住输入行与动作栏（正是它们要用的东西）。wushen 里 `.map-panel`
+ *      就在 `.room-title` 旁边（`wushen/src/game/main.js:30-33`），开关 `.room-title>.map-icon`
+ *      也在房名行里 —— **点开的东西必须紧贴点它的东西**。这是用户改判，不是我们改主意。
+ *   ② 全屏**仍然只有一个竖向滚动器**（消息流）：地图是**固定高度**的，
+ *      **不给地图加滚动** —— 给它开滚动就是第二个滚动器
+ *      （`style.css:345-356` 把这条当过教训），而且"看地图"这个动作本来就不该需要滚。
+ *   ③ 高度预算（360dp 宽的竖屏，逐块列来源；改版式前先照这张表算一遍）：
+ *
+ *      | 块 | 高 | 来源 |
+ *      |---|---|---|
+ *      | 状态条 | ≈ 80 | 行1 `bodyMedium` 20 + 行2 `bodySmall` 16 + 行3 `bodySmall` 16 + `Gap1`×4 + `Gap2`×2 + `HairlineW`（me 有但 status 空 ≈ 61；未登录只有一行 ≈ 41） |
+ *      | 房名行 | 32 | `ChipH` |
+ *      | 地图 | ≈ 118 | `frameOf()` 满格 112 + `Gap2` |
+ *      | 描述 | 120 | `RoomDescLines` 6 × 20sp 行高 |
+ *      | 出口行 | ≈ 38 | `ChipH` + `Gap2` |
+ *      | 此处行 | ≈ 50 | `ControlH` + `Gap2` |
+ *      | 区块上下内边距 | 16 | `BlockPadV` × 2 |
+ *      | 动作栏 | ≈ 48 | `ChipH` + `BlockPadV` × 2 |
+ *      | 输入行 | ≈ 72 | `MudField` 自然高 56 + `BlockPadV` × 2 |
+ *      | 发丝线 | 2 | `HairlineW` × 2 |
+ *
+ *      **地图那 112 怎么来的**（`core/MapLayout.kt` 的 `frameOf()`，别用估的）：
+ *      格高 `MAP_CELL_H` 26、三行格位的中心 `MAP_CY` 与 `±39`，上下各 `MAP_FRAME_PAD_Y` 4：
+ *      上沿 `25−13=12`、下沿 `103+13=116` ⇒ `104 + 8 = 112`（**满 8 格的最坏情形**）；
+ *      只有中心格（空房间）时 `26 + 8 = 34`。
+ *      ★ 常见的错算有两种：按"3 × 26 + 2 × 4 = 86"算**漏了行与行之间 13dp 的空隙**
+ *        （行距 39 − 格高 26 = 13，共两段）；按"156"算是把格高估成了 52。
+ *
+ *      ⇒ 固定块：**地图关着 ≈ 458dp**、**地图全开 ≈ 576dp**。
+ *        360×640 扣掉系统栏后可用高约 568dp ⇒ 地图关着时消息流 ≈ 110dp（5 行），
+ *        全开时 ≈ 0dp。
+ *
+ *      ⇒ 结论：地图是**固定 112dp（空房 34dp）的九宫格，最多 3 行格位**，不会自己长大；
+ *        **不要**给它加滚动，也**不要**再动描述的限行数（[MudSizes.RoomDescLines] 是
+ *        长描述唯一的出口）。
+ *      ⚠️ 但"小屏 + 满格地图 + 6 行描述"这一档确实贴着 0（这正是 §94 讨论过的）：
+ *        真要再省，正路只有两条 —— ① 窄屏（< 300dp）把侧向格位收成 2 行（改 `:core`）；
+ *        ② 明确立一个"描述再矮一档"的需求。**不是**给地图加滚动，也**不是**在这里
+ *        悄悄改 `RoomDescLines`。
  */
 @Composable
 fun GameScreen(vm: MudViewModel, state: UiState) {
@@ -99,27 +144,24 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
     //   而权重只能由父亲（`Column`）分配 —— 子组件自己拿不到"我要不要分一半"这件事。
     var roomExpanded by rememberSaveable { mutableStateOf(false) }
 
-    // ★★ 地图浮层的开合也住在**主屏**（与 `roomExpanded` 同一条理由，但更硬）：
-    //   它要参与**两张底部卡片的互斥**（§93.3），而互斥的另一半 `chatOpen`
-    //   在 ViewModel 里 —— 这件事只有主屏两侧都够得着，`RoomSection` 够不着。
+    // ★★ 地图的开合也住在**主屏**而不是 `RoomSection` 里：它要顺手把 `roomExpanded` 关掉
+    //   （描述展开态与地图都吃高度，两个一起开就把消息流压没了），
+    //   而 `roomExpanded` 也归这一屏 —— 只有主屏同时够得着这两个开关。
     var mapOpen by rememberSaveable { mutableStateOf(false) }
 
-    // ★★ 两张底部卡片（[ChatSheet] / [MapSheet]）**互斥**：它们都贴在根 Box 的底部，
-    //   同时开着会互相盖住，而玩家只看到最上面那一张 —— 另一张就成了"点了没反应"。
-    //   ⇒ 开一张必须关另一张。`chatOpen` 只能由 ViewModel 关（`vm.closeChat()`），
-    //     `mapOpen` 归这一屏，两边各自只能关自己的那一张。
+    // ★★ **不再与聊天浮层互斥**（§94）。上一版互斥的理由是"两张卡片都贴在根 Box 的底部，
+    //   同时开着会互相盖住，而玩家只看到最上面那一张 —— 另一张就成了'点了没反应'"。
+    //   地图搬进房间区（房名行下方就地展开）之后，根 Box 的底部只剩 [ChatSheet] 一张，
+    //   **没有第二张可盖** ⇒ 那条理由已经不存在。留着互斥反而有害：
+    //   "看一眼地图就必须丢掉聊天里的半行字"是凭空多出来的限制。
+    //   ⇒ 这里只做一件仍然必要的事：开地图时收起描述的展开态（见上面的高度预算）。
     val toggleMap = {
         val next = !mapOpen
         mapOpen = next
-        // 开地图时顺手关聊天：反方向（开聊天时关地图）在 `openChat` 里做
-        if (next) vm.closeChat()
-    }
-    val openChat = {
-        mapOpen = false
-        vm.openChat()
+        if (next) roomExpanded = false
     }
 
-    // ★ 根是 `Box`：两张底部浮层都要**盖在**底部输入框之上，而 `Column` 里做不到"叠一层"。
+    // ★ 根是 `Box`：聊天浮层要**盖在**底部输入框之上，而 `Column` 里做不到"叠一层"。
     //   浮层不占常驻高度（照网页端的 `.pop`），所以不挤消息流。
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -154,7 +196,7 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
             if (cmds.isNotEmpty()) {
                 CommandBar(cmds = cmds, onCommand = vm::send)
             }
-            InputRow(unread = state.unreadChat, onChat = openChat, onSend = vm::send)
+            InputRow(unread = state.unreadChat, onChat = vm::openChat, onSend = vm::send)
         }
 
         if (state.chatOpen) {
@@ -170,17 +212,8 @@ fun GameScreen(vm: MudViewModel, state: UiState) {
             )
         }
 
-        // ★ 小地图浮层（§93）：与聊天浮层互斥（见上面的 `toggleMap` / `openChat`）。
-        //   导航条内边距由 [MapSheet] 自己加（它没有 `imePadding`，见那边的 KDoc），
-        //   所以这里只负责"贴底" —— 两层都加就会让开两次导航条，凭空多 24dp。
-        if (mapOpen) {
-            MapSheet(
-                state = state,
-                onCommand = vm::send,
-                onClose = { mapOpen = false },
-                modifier = Modifier.align(alignment = Alignment.BottomCenter),
-            )
-        }
+        // ★ 地图**不在这个 Box 里**（§94）：它搬进了 [RoomSection]，紧跟房名行就地展开。
+        //   ⇒ 这里不再有第二张贴底卡片，也就不需要"谁关谁"的互斥（见上面 `toggleMap`）。
     }
 
     state.panel?.let { panel ->
@@ -424,10 +457,10 @@ private fun ReconnectBar(onReconnect: () -> Unit) {
 // ── 房间 ────────────────────────────────────────────────────────────────────
 
 /**
- * 房间区：房名 → 描述 → 明显出口 → 此处有。
+ * 房间区：房名 →（地图，仅在 `mapOpen` 时）→ 描述 → 展开按钮 → 明显出口 → 此处有。
  *
  * ★★ 与网页端 `src/ui/room.ts` 的三块**一一对应**，只是形状从 DOM 换成 Compose：
- *   `renderExits` → 出口行、`renderItems` → 人与物、`renderMap` → [MapSheet]（§93 起搬出去了）。
+ *   `renderExits` → 出口行、`renderItems` → 人与物、`renderMap` → [MapPanel]。
  *   这几块的**内容**（哪些方向、哪些实体、点了发什么）全部来自 `:core`
  *   （`exitRows` / `selectCommandFor` / `planMap`），这里只决定怎么摆。
  *
@@ -437,17 +470,17 @@ private fun ReconnectBar(onReconnect: () -> Unit) {
  *
  * ★ 两处**刻意的形状差异**，都是为了触屏：
  *   ① 网页端的出口是行内可点的 `span`（鼠标点 12px 高的字很好点），
- *      这里必须给每个方向一块独立的、够大的点击区（[MudAction] 的 44dp 最小高度）；
+ *      这里必须给每个方向一块独立的、够大的点击区（`dense` 档 32dp，见 [MudSizes.ChipH]）；
  *      于是放弃「、」「和」这组分隔符 —— 分离的方块本身就是分隔。
- *   ② 小地图**不在这个区块里**（§93.1 第 1 条）：点房名行那颗「地图」弹出底部卡片
- *      [MapSheet]。旧版把它内联在描述之后，一展开就把消息流顶薄 ——
- *      "看地图"与"读房间"两个动作互相挤压，正是用户这次点名要改的那一处。
- *      默认收起不变（网页端同样默认 `hidden`），只是去处从"房间里的一块"
- *      变成"底部的一张卡"：开着时盖住的是输入区，关掉就回来。
+ *   ② 小地图**就在这个区块里**，紧跟在房名行下面（§94，位置照 wushen
+ *      `.map-panel` 紧挨 `.room-title`）。**但它只在地图开着时占高度**，
+ *      并且是固定高度、内部不滚（见 [GameScreen] 的 §94 高度预算）。
+ *      上一版曾把它做成底部弹出卡片：开关在这一行、卡片在屏幕最下面，
+ *      中间隔着整屏消息流 —— "点"和"看"分居两头，用户判掉了那一版。
  *
  * @param expanded 描述是不是展开态；展开时调用方会给一个 `weight(1f)`（见 [GameScreen]）
- * @param mapOpen 小地图浮层是否开着。**开合不住在这里** —— 它住在 [GameScreen]，
- *   因为它要参与两张底部卡片的互斥（§93.3），而互斥的另一半在 ViewModel 里
+ * @param mapOpen 地图是否展开。**开合不住在这里** —— 它住在 [GameScreen]，
+ *   因为"开地图要顺手收起描述展开态"这件事牵涉到 `roomExpanded`，只有主屏同时够得着两个开关
  * @param onToggleExpand 点「展开 / 收起描述」
  * @param onToggleMap 点房名行那颗「地图 / 关地图」
  */
@@ -463,9 +496,16 @@ private fun RoomSection(
     modifier: Modifier = Modifier,
 ) {
     val exits = remember(state.exits) { exitRows(state.exits) }
+    // ★ `remember(键)` 而不是每次重组都算：地图要遍历出口表、算 12 个格位，
+    //   而消息流每来一行都会重组整屏。键是"出口表 + 房名"——它们变，图才该变。
+    //   ★ 放在 `mapOpen` 判断**外面**：这样关着的时候也算过一次，"点开"那一刻不会卡一下。
+    //     代价是收起态每次房名/出口变化要多算一次（12 个格位，可忽略）。
+    val plan = remember(state.exits, state.room?.name) {
+        planMap(state.exits, state.room?.name.orEmpty())
+    }
     val room = state.room
     val desc = room?.desc.orEmpty()
-    // ★ 只有**收起态**才知道"到底超没超 6 行"；展开态沿用上一次的结论，
+    // ★ 只有**收起态**才知道"到底超没超 [MudSizes.RoomDescLines] 行"；展开态沿用上一次的结论，
     //   否则一展开按钮就自己消失，玩家没法收回去。
     var descOverflow by remember(desc) { mutableStateOf(false) }
 
@@ -480,15 +520,31 @@ private fun RoomSection(
             // ★ 地图开关不再走 `selected`：那是"这个面板开着"，
             //   与"当前频道"是两件事，共用 `selected` 会让两者长得一样（§92.6.1）。
             //   这里靠**文案**（地图 / 关地图）表达状态。
-            // ★ 高度与「展开描述」同档（[MudSizes.TabH]，36dp）：房名这一行里
-            //   两颗键都是"改视图"，不是"下一道命令"，不该与出口按钮同高。
-            //   ⚠️ 调用方传的 `height` 在链上更靠外，会胜出 [MudAction] 内部的
-            //     `ControlH`(44dp) —— 这正是想要的效果（见 [MudTab] 的同一条说明）。
+            // ★ `dense = true`（32dp）而不是 `Modifier.height(TabH)`：房名这一行里
+            //   两颗键都是"改视图"，不该与出口/动作同高（44dp），也不该自己带一个高度 ——
+            //   高度只有一个来源，`dense` 就是那个来源的另一档。
             MudAction(
                 label = if (mapOpen) "关地图" else "地图",
                 onClick = onToggleMap,
-                modifier = Modifier.height(height = MudSizes.TabH),
+                dense = true,
             )
+        }
+
+        // ★★ 地图**就地展开、紧贴开关**（§94）：不开底色、不加边框 ——
+        //   九宫格的格子自己已经把边界画清楚了，外面再套一层框就是"多一层底"
+        //   （wushen `.map-panel` 也没有背景与边框）。
+        //   ★ 但**高度这件事我们与 wushen 不一样，别记成"照抄"**：
+        //     wushen 是 `.map-panel{width:100%;max-height:6em;overflow:auto}`
+        //     （`main.css:454-458`）—— 网页端**是可滚的**，6em ≈ 84px 装不下就滚。
+        //     我们**有意不照抄**：触屏优先级是"全屏只有一个竖向滚动器"（`style.css:345-356`
+        //     把"两个滚动器"当过教训）。代价是最坏 112dp 全占，所以地图开着时
+        //     描述降到 3 行（`MudSizes.RoomDescMapLines`）。要改成可滚，先推翻那条优先级。
+        //   ★ `MapPanel` 自带 `fillMaxWidth()` + 居中/窄屏横滚，这里**不再套宽度** ——
+        //     套了会得到一个内外两层都想要宽度的约束，窄屏那一支反而先失效。
+        if (mapOpen) {
+            Box(modifier = Modifier.padding(top = MudSizes.Gap2)) {
+                MapPanel(plan = plan, onCommand = onCommand)
+            }
         }
 
         if (desc.isNotEmpty()) {
@@ -498,7 +554,17 @@ private fun RoomSection(
                 color = MudColors.Text,
                 // ★★ 房间区**限行不限高**：照 wushen 的"不限高、不滚"，
                 //   长描述靠截断兜住，超出才给「展开」。这样全屏仍然只有一个竖向滚动器。
-                maxLines = if (expanded) Int.MAX_VALUE else MudSizes.RoomDescLines,
+                // ★★ 三档（§94）：展开态无限、**地图开着 3 行**、平时 6 行。
+                //   中间那一档不是审美：6 行 + 地图满格的固定块约 576dp，而 360×640
+                //   可用高约 568dp ⇒ `Column` 会裁掉最后两块（消息流 + 输入行），
+                //   表现就是"指令框没见"。算式写在 [MudSizes.RoomDescLines] 的 KDoc 里。
+                maxLines = if (expanded) {
+                    Int.MAX_VALUE
+                } else if (mapOpen) {
+                    MudSizes.RoomDescMapLines
+                } else {
+                    MudSizes.RoomDescLines
+                },
                 // 首行缩进 2em（wushen `.room_desc{text-indent:2em}`，`style.css:386`）
                 indentFirstLine = true,
                 // ★★ **不要用 `result.lineCount >= RoomDescLines` 判溢出**：
@@ -512,19 +578,32 @@ private fun RoomSection(
                     if (!expanded) descOverflow = result.hasVisualOverflow
                 },
             )
-            if (descOverflow || expanded) {
+            // ★★ **地图开着时不给「展开描述」**（§94）。不是省地方，是堵一条坏路径：
+            //   地图开着 → 点「展开描述」→ `expanded = true` → 房间区拿 `weight(1f)`，
+            //   而地图还在区块里 ⇒ 区块内容（房名 32 + 地图 112 + 无限行描述 + 出口 + 此处）
+            //   超过分到的那一半，`Column` 会把**出口和此处直接裁掉**
+            //   （房间区不滚，玩家只会觉得"东西没了"，而且没有任何提示）。
+            //   ⇒ 想看全文就先关地图；关掉后按钮自己回来。
+            //   ★ 另一半在 `toggleMap` 里：开地图会把 `expanded` 收起来（反方向同一条理由）。
+            if (!mapOpen && (descOverflow || expanded)) {
                 MudAction(
                     label = if (expanded) "收起描述" else "展开描述",
                     onClick = onToggleExpand,
-                    // ★ 比动作矮一档：它是"改视图"，不是"下一道命令"
-                    modifier = Modifier.height(height = MudSizes.TabH),
+                    // ★ 用 `dense`（32dp）而不是 `Modifier.height(TabH)`：
+                    //   它是"改视图"不是"下命令"，得比出口那一排矮；但高度只从
+                    //   [MudSizes] 取 —— 调用方再传一个高度就等于是第二个来源。
+                    dense = true,
                 )
             }
         }
 
-        // ★★ 小地图**不在这里**（§93.1 第 1 条）：它搬到了底部卡片 [MapSheet]，
-        //   由 [GameScreen] 挂在根 Box 上。旧版这里是一段内联的 [MapPanel]，
-        //   一展开就把消息流顶薄。删掉之后房间区只剩"房名 / 描述 / 出口 / 此处"四样。
+        // ★ 地图现在在**上面**（房名行正下方）。这块位置留下的是一段判断史，别删：
+        //   · 更早：地图内联在**描述之后** —— 一展开就把消息流顶薄；
+        //   · §93：搬成屏幕底部的弹出卡片 —— 于是"点"（房名行）与"看"（屏幕底部）
+        //     隔着整屏消息流，且卡片盖住输入行；
+        //   · §94（现在）：回到这个区块、并且挪到**描述之前**，紧贴开关。
+        //   ⇒ 两次改判的判据都是"距离"，不是"面积"：地图满格只有 112dp，
+        //     它顶薄消息流的程度比"开关与它隔着整屏"这件事轻得多。
 
         // ★★ 分组标题「出口」**放在 LazyRow 外面**。
         //   原来是 `LazyRow` 的第一个 item，于是往右一滑它就跟着滑走了 ——
@@ -541,7 +620,9 @@ private fun RoomSection(
             LabelledRow(label = "出口") {
                 items(exits) { row ->
                     // ★ 发的是**方向键本身**（`row.dir`），不是中文 —— 中文只是显示
-                    MudAction(label = row.label, onClick = { onCommand(row.dir) })
+                    // ★ `dense`：出口一行最多 8 个方向，44dp 方块在 360dp 屏上只放得下 4 个，
+                    //   剩下的要横滑 —— 而"从哪儿出去"应该是**一眼看全**的（[MudSizes.ChipH]）。
+                    MudAction(label = row.label, onClick = { onCommand(row.dir) }, dense = true)
                 }
             }
         }
@@ -744,7 +825,10 @@ private fun CommandBar(cmds: List<Cmd>, onCommand: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(space = MudSizes.Gap2),
         ) {
-            items(cmds) { cmd -> MudAction(label = cmd.label, onClick = { onCommand(cmd.cmd) }) }
+            // ★ `dense`：动作栏经常 5~6 个，同一条"一眼看全"的理由（[MudSizes.ChipH]）。
+            items(cmds) { cmd ->
+                MudAction(label = cmd.label, onClick = { onCommand(cmd.cmd) }, dense = true)
+            }
         }
     }
 }

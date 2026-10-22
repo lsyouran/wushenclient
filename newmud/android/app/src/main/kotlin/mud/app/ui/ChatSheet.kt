@@ -1,16 +1,13 @@
 package mud.app.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +53,15 @@ import mud.core.UiState
  * ★★ 发不出去时那句提示**画在这张卡片里**，不进消息流：浮层贴底，正好盖住消息流的
  *   最新几行 —— 写进去玩家一个字也看不到，观感就是"点了没反应"。
  *   顺带的好处是发不出去时**不清输入框**，玩家改一下就能再发。
+ *
+ * ★★ **顶部那道小横杠（拖拽条）删掉了**（§94）。它**不可拖动** —— 这个浮层没有
+ *   拖拽手势（`draggable` / `anchoredDraggable` 都没接），画出来只会让人去拖；
+ *   拖不动的东西就是**假控件**：它比"少一个提示"更坏，因为它承诺了一件事然后做不到。
+ *   收起的方式一直是页签行右端那颗「收起」，那颗是真的能按的。
+ *   ★ 同样的理由，地图那张卡片当初就没画拖拽条（§93.1）。
+ *   ★ 它是 `MudSizes.DragBarW` / `DragBarH` 的**最后一个调用点** ⇒ 那两个常量同批删除。
+ *     不"留着将来用"：死常量的成本不是几个字节，是每个读 `Theme.kt` 的人都要自己判断
+ *     一次"它还被用吗"；真要可拖了，再加两个 `val` 是两行的事。
  */
 @Composable
 fun ChatSheet(
@@ -99,16 +105,7 @@ fun ChatSheet(
                 vertical = MudSizes.Gap3,
             ),
         ) {
-            // 顶部那道小横杠：告诉玩家"这块可以收起"，也是底部浮层的通用语言
-            Box(
-                modifier = Modifier
-                    .align(alignment = Alignment.CenterHorizontally)
-                    .padding(bottom = MudSizes.Gap3)
-                    .width(width = MudSizes.DragBarW)
-                    .height(height = MudSizes.DragBarH)
-                    .background(color = MudColors.Hairline, shape = MudShapes.Tag),
-            )
-
+            // ★ 这里原来有一道 36×3 的「拖拽条」，已删（理由见文件头 §94）。
             MudTabRow(
                 labels = ChatChannel.entries.map { channel -> channel.label },
                 selectedIndex = ChatChannel.entries.indexOf(element = state.chatChannel),

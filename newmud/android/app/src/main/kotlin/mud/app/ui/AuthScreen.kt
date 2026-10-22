@@ -153,7 +153,11 @@ fun AuthScreen(vm: MudViewModel, state: UiState) {
                     },
                     enabled = state.phase != Phase.Connecting,
                     primary = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    // ★ `fillWidth = true` 而不是 `modifier = Modifier.fillMaxWidth()`：
+                    //   后者只会把按钮撑满，而 `Button` 内部的内容 `Row` 是 wrap content、
+                    //   贴着左边缘 —— 结果是"通栏的按钮 + 靠左的字"。
+                    //   通栏 + 居中是一件事，只能由一个参数一次表达（见 [MudAction] 的 KDoc）。
+                    fillWidth = true,
                 )
             }
         }
